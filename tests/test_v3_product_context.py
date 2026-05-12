@@ -319,3 +319,30 @@ def test_16_attr_known_field_fills_empty_top_level():
 
     assert result.product["goods_name"] == "From Attr"
     assert result.product["price"] == "88.00"
+
+
+def test_17_real_deodorant_product_context_preserves_manual_fields():
+    """Test real deodorant product context preserves SKU and manual annotations."""
+    record = {
+        "goods_id": 946901558797,
+        "goods_name": "净爽止汗喷雾保湿除臭净味爽身清新舒爽温和腋下止汗香体20ml",
+        "price_range": "4.80-12.00",
+        "specifications": "20ml",
+        "attribute_json": {
+            "brand": "伊思棠",
+            "sku_options": ["一瓶", "2瓶", "3瓶"],
+            "effect": ["保湿", "止汗", "清香"],
+            "usage_method": "出门喷可以持续两至三个小时",
+            "usage_duration": "一瓶可用一至两个月",
+            "suitable_age": "12岁以上能使用",
+            "skin_type": "所有肤质均可",
+        },
+    }
+    result = ProductContextAdapter.from_record(record)
+
+    assert result.product["goods_id"] == "946901558797"
+    assert result.product["price"] == "4.80-12.00"
+    assert result.product["sku_summary"] == "20ml"
+    assert result.product["sku_options"] == ["一瓶", "2瓶", "3瓶"]
+    assert result.product["suitable_age"] == "12岁以上能使用"
+    assert "image" not in result.product
