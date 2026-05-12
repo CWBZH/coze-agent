@@ -4,10 +4,8 @@ TDD: Tests written first, then implementation.
 """
 
 import pytest
-import sys
 import importlib.util
 from pathlib import Path
-from dataclasses import dataclass
 
 # Load v3_tenant_keys module directly without triggering __init__.py
 # This avoids dependency on services that aren't initialized in test context
@@ -170,6 +168,14 @@ class TestValidation:
             builder.build(ctx, "")
         assert "suffix" in str(exc_info.value)
 
+    def test_empty_platform_raises_valueerror(self):
+        """Empty platform raises ValueError mentioning platform."""
+        builder = V3RedisKeyBuilder()
+        ctx = TenantContext(shop_id="shopA", buyer_id="buyer001", platform="")
+        with pytest.raises(ValueError) as exc_info:
+            builder.build(ctx, "session")
+        assert "platform" in str(exc_info.value)
+
     def test_whitespace_only_shop_id_raises_valueerror(self):
         """Whitespace-only shop_id raises ValueError."""
         builder = V3RedisKeyBuilder()
@@ -185,6 +191,14 @@ class TestValidation:
         with pytest.raises(ValueError) as exc_info:
             builder.build(ctx, "session")
         assert "buyer_id" in str(exc_info.value)
+
+    def test_whitespace_only_platform_raises_valueerror(self):
+        """Whitespace-only platform raises ValueError."""
+        builder = V3RedisKeyBuilder()
+        ctx = TenantContext(shop_id="shopA", buyer_id="buyer001", platform="   ")
+        with pytest.raises(ValueError) as exc_info:
+            builder.build(ctx, "session")
+        assert "platform" in str(exc_info.value)
 
 
 class TestConvenienceMethods:

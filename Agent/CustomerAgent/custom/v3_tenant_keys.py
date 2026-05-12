@@ -7,7 +7,6 @@ Key format: {namespace}:{shop_id}:{platform}:{buyer_id}:{suffix}
 
 import re
 from dataclasses import dataclass
-from typing import Optional
 
 
 # Suffix constants
@@ -82,7 +81,7 @@ class V3RedisKeyBuilder:
             Redis key in format: {namespace}:{shop_id}:{platform}:{buyer_id}:{suffix}
 
         Raises:
-            ValueError: If shop_id, buyer_id, or suffix is empty after stripping
+            ValueError: If shop_id, buyer_id, platform, or suffix is empty after stripping
         """
         # Validate and sanitize inputs
         shop_id = ctx.shop_id.strip()
@@ -93,6 +92,10 @@ class V3RedisKeyBuilder:
         if not buyer_id:
             raise ValueError("buyer_id is required and cannot be empty")
 
+        platform = ctx.platform.strip()
+        if not platform:
+            raise ValueError("platform is required and cannot be empty")
+
         suffix = suffix.strip()
         if not suffix:
             raise ValueError("suffix is required and cannot be empty")
@@ -100,7 +103,7 @@ class V3RedisKeyBuilder:
         # Sanitize all parts
         shop_id = self._sanitize(shop_id)
         buyer_id = self._sanitize(buyer_id)
-        platform = self._sanitize(ctx.platform.lower())
+        platform = self._sanitize(platform.lower())
         suffix = self._sanitize(suffix)
 
         # Build key
