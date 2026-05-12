@@ -495,5 +495,5 @@ graph TD
 - 关键词匹配：名称包含评分 (0.85/0.75)、搜索词匹配评分 (0.60-0.84)
 - 模糊匹配平局返回 `ambiguous_keyword_match`
 - 测试覆盖：平台/锁定优先级、链接格式、关键词匹配、歧义处理、中文名称、标点空格
-- 全部 V3 测试通过：115 tests passed
+- 全部 V3 测试通过：121 tests passed
 - 提交：`feat(v3): add product locator primitive`
