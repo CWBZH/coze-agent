@@ -134,6 +134,13 @@
 **回滚方式**：
 - 恢复 `redis_manager.py` 中的 key 生成逻辑
 
+**✅ 完成说明（2026-05-12）**：
+- 已实现纯 Key 构建原语 `V3RedisKeyBuilder` + `TenantContext`
+- 文件：`Agent/CustomerAgent/custom/v3_tenant_keys.py`
+- 测试：`tests/test_v3_tenant_keys.py`（30 个测试全部通过）
+- 此任务仅实现 Key 构建原语，未修改现有生产代码，未接入运行时
+- 符合"不删旧逻辑、不接入运行时"的硬边界要求
+
 ---
 
 ### 切片 4：商品定位逻辑
