@@ -497,3 +497,18 @@ graph TD
 - 测试覆盖：平台/锁定优先级、链接格式、关键词匹配、歧义处理、中文名称、标点空格
 - 全部 V3 测试通过：121 tests passed
 - 提交：`feat(v3): add product locator primitive`
+
+**Task 007: V3 Product Context Adapter**
+- 创建 `Agent/CustomerAgent/custom/v3_product_context.py`
+- 替换 `tests/test_v3_product_context.py`
+- 实现 `ProductContextAdapter.from_record(record)` 类方法
+- 输出标准化 18 字段产品字典（无 image 字段）
+- 支持 dict 记录和对象属性记录
+- attribute_json 处理：dict、JSON 字符串、无效 JSON（不抛异常，返回警告）
+- 列表字段规范化：字符串转单元素列表、列表保持顺序并字符串化
+- specifications 回退：sku_summary 为空时使用 specifications
+- 警告返回：invalid_attribute_json、unknown_attribute_fields
+- 字段合并规则：顶层字段优先，已知属性可填充空值
+- 测试覆盖：dict/对象记录、JSON 解析、列表规范化、回退逻辑、警告生成
+- 全部 V3 测试通过：137 tests passed
+- 提交：`fix(v3): align product context adapter contract`
