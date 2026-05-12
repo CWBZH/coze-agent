@@ -41,7 +41,6 @@ class TestProductLocatorPriority:
             query="",
             platform_goods_id="111111",
             locked_goods_id="222222",
-            candidates=[],
         )
         assert result.goods_id == "111111"
         assert result.confidence == 1.0
@@ -52,8 +51,6 @@ class TestProductLocatorPriority:
         result = ProductLocator.locate(
             query="goods_id=333333",
             platform_goods_id="111111",
-            locked_goods_id=None,
-            candidates=[],
         )
         assert result.goods_id == "111111"
         assert result.confidence == 1.0
@@ -63,9 +60,7 @@ class TestProductLocatorPriority:
         """Locked goods_id takes priority over parsed link."""
         result = ProductLocator.locate(
             query="goods_id=333333",
-            platform_goods_id=None,
             locked_goods_id="222222",
-            candidates=[],
         )
         assert result.goods_id == "222222"
         assert result.confidence == 0.95
@@ -75,7 +70,6 @@ class TestProductLocatorPriority:
         """Locked goods_id takes priority over keyword match."""
         result = ProductLocator.locate(
             query="iPhone 15",
-            platform_goods_id=None,
             locked_goods_id="222222",
             candidates=[
                 ProductCandidate(goods_id="333333", goods_name="iPhone 15", search_terms=["iPhone"])
@@ -93,9 +87,6 @@ class TestProductLocatorLinkParsing:
         """Parse goods_id=123456 format."""
         result = ProductLocator.locate(
             query="https://example.com/product?goods_id=123456",
-            platform_goods_id=None,
-            locked_goods_id=None,
-            candidates=[],
         )
         assert result.goods_id == "123456"
         assert result.confidence == 0.9
@@ -105,9 +96,6 @@ class TestProductLocatorLinkParsing:
         """Parse goodsId=123456 format."""
         result = ProductLocator.locate(
             query="goodsId=654321",
-            platform_goods_id=None,
-            locked_goods_id=None,
-            candidates=[],
         )
         assert result.goods_id == "654321"
         assert result.confidence == 0.9
@@ -116,9 +104,6 @@ class TestProductLocatorLinkParsing:
         """Parse URL-encoded goods_id%3D123456."""
         result = ProductLocator.locate(
             query="goods_id%3D789012",
-            platform_goods_id=None,
-            locked_goods_id=None,
-            candidates=[],
         )
         assert result.goods_id == "789012"
         assert result.confidence == 0.9
@@ -127,9 +112,6 @@ class TestProductLocatorLinkParsing:
         """Parse 商品ID:123456 format."""
         result = ProductLocator.locate(
             query="商品ID:123456",
-            platform_goods_id=None,
-            locked_goods_id=None,
-            candidates=[],
         )
         assert result.goods_id == "123456"
         assert result.confidence == 0.9
@@ -138,9 +120,6 @@ class TestProductLocatorLinkParsing:
         """Parse 商品id123456 format."""
         result = ProductLocator.locate(
             query="商品id123456",
-            platform_goods_id=None,
-            locked_goods_id=None,
-            candidates=[],
         )
         assert result.goods_id == "123456"
 
@@ -148,22 +127,16 @@ class TestProductLocatorLinkParsing:
         """Reject goods_id with fewer than 6 digits."""
         result = ProductLocator.locate(
             query="goods_id=12345",
-            platform_goods_id=None,
-            locked_goods_id=None,
-            candidates=[],
         )
-        assert result.goods_id == ""
+        assert result.goods_id is None
         assert result.source == ProductLocator.SOURCE_NONE
 
     def test_invalid_too_long(self):
         """Reject goods_id with more than 20 digits."""
         result = ProductLocator.locate(
             query="goods_id=123456789012345678901",
-            platform_goods_id=None,
-            locked_goods_id=None,
-            candidates=[],
         )
-        assert result.goods_id == ""
+        assert result.goods_id is None
         assert result.source == ProductLocator.SOURCE_NONE
 
 
@@ -174,8 +147,6 @@ class TestProductLocatorKeywordMatching:
         """Full goods_name in query scores 0.85."""
         result = ProductLocator.locate(
             query="我想买苹果手机iPhone 15 Pro",
-            platform_goods_id=None,
-            locked_goods_id=None,
             candidates=[
                 ProductCandidate(
                     goods_id="123456",
@@ -192,8 +163,6 @@ class TestProductLocatorKeywordMatching:
         """Query contained in goods_name scores 0.75 (short product mention)."""
         result = ProductLocator.locate(
             query="苹果",
-            platform_goods_id=None,
-            locked_goods_id=None,
             candidates=[
                 ProductCandidate(
                     goods_id="123456",
@@ -210,8 +179,6 @@ class TestProductLocatorKeywordMatching:
         """Each matched search_term adds 0.12 starting from 0.60."""
         result = ProductLocator.locate(
             query="iPhone 手机",
-            platform_goods_id=None,
-            locked_goods_id=None,
             candidates=[
                 ProductCandidate(
                     goods_id="123456",
@@ -229,8 +196,6 @@ class TestProductLocatorKeywordMatching:
         """Term score capped at 0.84."""
         result = ProductLocator.locate(
             query="iPhone 手机 苹果",
-            platform_goods_id=None,
-            locked_goods_id=None,
             candidates=[
                 ProductCandidate(
                     goods_id="123456",
@@ -247,8 +212,6 @@ class TestProductLocatorKeywordMatching:
         """Final score is max(name score, term score)."""
         result = ProductLocator.locate(
             query="苹果手机iPhone",
-            platform_goods_id=None,
-            locked_goods_id=None,
             candidates=[
                 ProductCandidate(
                     goods_id="123456",
@@ -271,8 +234,6 @@ class TestProductLocatorAmbiguity:
         """Tied top scores return none with ambiguous_keyword_match."""
         result = ProductLocator.locate(
             query="iPhone",
-            platform_goods_id=None,
-            locked_goods_id=None,
             candidates=[
                 ProductCandidate(
                     goods_id="111111",
@@ -286,7 +247,7 @@ class TestProductLocatorAmbiguity:
                 ),
             ],
         )
-        assert result.goods_id == ""
+        assert result.goods_id is None
         assert result.source == ProductLocator.SOURCE_NONE
         assert result.reason == "ambiguous_keyword_match"
 
@@ -294,8 +255,6 @@ class TestProductLocatorAmbiguity:
         """Different top scores return highest."""
         result = ProductLocator.locate(
             query="iPhone 15 Pro",
-            platform_goods_id=None,
-            locked_goods_id=None,
             candidates=[
                 ProductCandidate(
                     goods_id="111111",
@@ -323,8 +282,6 @@ class TestProductLocatorNormalization:
         """Chinese characters preserved in normalization."""
         result = ProductLocator.locate(
             query="苹果手机",
-            platform_goods_id=None,
-            locked_goods_id=None,
             candidates=[
                 ProductCandidate(
                     goods_id="123456",
@@ -340,8 +297,6 @@ class TestProductLocatorNormalization:
         """Normalization lowercases ASCII."""
         result = ProductLocator.locate(
             query="IPHONE 15",
-            platform_goods_id=None,
-            locked_goods_id=None,
             candidates=[
                 ProductCandidate(
                     goods_id="123456",
@@ -357,8 +312,6 @@ class TestProductLocatorNormalization:
         """Punctuation and separators removed."""
         result = ProductLocator.locate(
             query="苹果-手机！",
-            platform_goods_id=None,
-            locked_goods_id=None,
             candidates=[
                 ProductCandidate(
                     goods_id="123456",
@@ -374,8 +327,6 @@ class TestProductLocatorNormalization:
         """Whitespace removed in normalization."""
         result = ProductLocator.locate(
             query="苹 果 手 机",
-            platform_goods_id=None,
-            locked_goods_id=None,
             candidates=[
                 ProductCandidate(
                     goods_id="123456",
@@ -395,8 +346,6 @@ class TestProductLocatorEdgeCases:
         """Empty query returns none."""
         result = ProductLocator.locate(
             query="",
-            platform_goods_id=None,
-            locked_goods_id=None,
             candidates=[
                 ProductCandidate(
                     goods_id="123456",
@@ -405,29 +354,24 @@ class TestProductLocatorEdgeCases:
                 )
             ],
         )
-        assert result.goods_id == ""
+        assert result.goods_id is None
         assert result.source == ProductLocator.SOURCE_NONE
 
     def test_empty_candidates(self):
         """Empty candidates returns none."""
         result = ProductLocator.locate(
             query="iPhone",
-            platform_goods_id=None,
-            locked_goods_id=None,
             candidates=[],
         )
-        assert result.goods_id == ""
+        assert result.goods_id is None
         assert result.source == ProductLocator.SOURCE_NONE
 
     def test_all_none(self):
         """All parameters None returns none."""
         result = ProductLocator.locate(
             query="",
-            platform_goods_id=None,
-            locked_goods_id=None,
-            candidates=[],
         )
-        assert result.goods_id == ""
+        assert result.goods_id is None
         assert result.confidence == 0.0
         assert result.source == ProductLocator.SOURCE_NONE
         assert "No product match" in result.reason
@@ -436,8 +380,6 @@ class TestProductLocatorEdgeCases:
         """Chinese products with similar names distinguished."""
         result = ProductLocator.locate(
             query="苹果手机Pro版",
-            platform_goods_id=None,
-            locked_goods_id=None,
             candidates=[
                 ProductCandidate(
                     goods_id="111111",
@@ -453,6 +395,85 @@ class TestProductLocatorEdgeCases:
         )
         assert result.goods_id == "222222"
         assert result.confidence == 0.85
+
+
+class TestProductLocatorContractCompliance:
+    """Test SDD contract compliance."""
+
+    def test_locate_with_no_kwargs(self):
+        """locate("hello") can be called with no keyword args and returns None."""
+        result = ProductLocator.locate("hello")
+        assert result.goods_id is None
+        assert result.source == ProductLocator.SOURCE_NONE
+
+    def test_whitespace_platform_goods_id_ignored(self):
+        """Whitespace platform_goods_id is ignored and does not return platform_current."""
+        result = ProductLocator.locate(
+            query="test",
+            platform_goods_id="   ",
+        )
+        assert result.goods_id is None
+        assert result.source == ProductLocator.SOURCE_NONE
+
+    def test_whitespace_locked_goods_id_ignored(self):
+        """Whitespace locked_goods_id is ignored and does not return session_locked."""
+        result = ProductLocator.locate(
+            query="test",
+            locked_goods_id="   ",
+        )
+        assert result.goods_id is None
+        assert result.source == ProductLocator.SOURCE_NONE
+
+    def test_platform_goods_id_with_spaces_returns_stripped(self):
+        """platform_goods_id with spaces returns stripped goods_id."""
+        result = ProductLocator.locate(
+            query="test",
+            platform_goods_id="  123456  ",
+        )
+        assert result.goods_id == "123456"
+        assert result.source == ProductLocator.SOURCE_PLATFORM
+
+    def test_multiple_no_match_candidates_returns_none(self):
+        """Multiple candidates with no matching terms returns none with reason not ambiguous_keyword_match."""
+        result = ProductLocator.locate(
+            query="hello world",
+            candidates=[
+                ProductCandidate(
+                    goods_id="111111",
+                    goods_name="iPhone 15",
+                    search_terms=["iPhone"],
+                ),
+                ProductCandidate(
+                    goods_id="222222",
+                    goods_name="Samsung Galaxy",
+                    search_terms=["Samsung"],
+                ),
+            ],
+        )
+        assert result.goods_id is None
+        assert result.source == ProductLocator.SOURCE_NONE
+        assert result.reason == "No product match found"
+
+    def test_ambiguous_keyword_tie_returns_none(self):
+        """Ambiguous keyword tie still returns None and reason ambiguous_keyword_match."""
+        result = ProductLocator.locate(
+            query="iPhone",
+            candidates=[
+                ProductCandidate(
+                    goods_id="111111",
+                    goods_name="iPhone 15",
+                    search_terms=["iPhone"],
+                ),
+                ProductCandidate(
+                    goods_id="222222",
+                    goods_name="iPhone 14",
+                    search_terms=["iPhone"],
+                ),
+            ],
+        )
+        assert result.goods_id is None
+        assert result.source == ProductLocator.SOURCE_NONE
+        assert result.reason == "ambiguous_keyword_match"
 
 
 class TestProductCandidateDataclass:

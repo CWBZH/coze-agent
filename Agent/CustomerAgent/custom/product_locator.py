@@ -24,13 +24,13 @@ class ProductLocatorResult:
     """Result of product location attempt.
 
     Attributes:
-        goods_id: Resolved goods_id or empty string if none.
+        goods_id: Resolved goods_id or None if none.
         confidence: Source confidence (1.0=platform, 0.95=locked, 0.9=parsed, 0.60-0.85=keyword, 0.0=none).
         source: Where goods_id came from (platform_current, session_locked, link, keyword, none).
         reason: Human-readable explanation.
     """
 
-    goods_id: str
+    goods_id: str | None
     confidence: float
     source: str
     reason: str
@@ -123,12 +123,13 @@ class ProductLocator:
         - Query in goods_name: 0.75
         - Each matched search_term adds 0.12 starting from 0.60, capped at 0.84
         - Final score = max(name score, term score)
+        - No match: 0.0
         """
         norm_query = ProductLocator._normalize(query)
         norm_name = ProductLocator._normalize(candidate.goods_name)
 
         # Name containment scores
-        name_score = ProductLocator.CONFIDENCE_KEYWORD_MIN
+        name_score = 0.0
 
         if norm_name and norm_name in norm_query:
             name_score = 0.85
@@ -136,7 +137,7 @@ class ProductLocator:
             name_score = 0.75
 
         # Term matching score
-        term_score = ProductLocator.CONFIDENCE_KEYWORD_MIN
+        term_score = 0.0
         matched_terms = 0
 
         for term in candidate.search_terms:
@@ -154,9 +155,10 @@ class ProductLocator:
     def locate(
         cls,
         query: str,
-        platform_goods_id: Optional[str],
-        locked_goods_id: Optional[str],
-        candidates: List[ProductCandidate],
+        *,
+        platform_goods_id: str | None = None,
+        locked_goods_id: str | None = None,
+        candidates: list[ProductCandidate] | None = None,
     ) -> ProductLocatorResult:
         """Locate product with strict priority ordering.
 
@@ -169,23 +171,31 @@ class ProductLocator:
         Returns:
             ProductLocatorResult with goods_id, confidence, source, and reason.
         """
-        # Priority 1: platform_goods_id
-        if platform_goods_id:
-            return ProductLocatorResult(
-                goods_id=platform_goods_id,
-                confidence=cls.CONFIDENCE_PLATFORM,
-                source=cls.SOURCE_PLATFORM,
-                reason=f"Platform context goods_id={platform_goods_id}",
-            )
+        # Initialize candidates to empty list if None
+        if candidates is None:
+            candidates = []
 
-        # Priority 2: locked_goods_id
+        # Priority 1: platform_goods_id (non-empty after strip)
+        if platform_goods_id:
+            stripped_platform = platform_goods_id.strip()
+            if stripped_platform:
+                return ProductLocatorResult(
+                    goods_id=stripped_platform,
+                    confidence=cls.CONFIDENCE_PLATFORM,
+                    source=cls.SOURCE_PLATFORM,
+                    reason=f"Platform context goods_id={stripped_platform}",
+                )
+
+        # Priority 2: locked_goods_id (non-empty after strip)
         if locked_goods_id:
-            return ProductLocatorResult(
-                goods_id=locked_goods_id,
-                confidence=cls.CONFIDENCE_LOCKED,
-                source=cls.SOURCE_LOCKED,
-                reason=f"Session locked goods_id={locked_goods_id}",
-            )
+            stripped_locked = locked_goods_id.strip()
+            if stripped_locked:
+                return ProductLocatorResult(
+                    goods_id=stripped_locked,
+                    confidence=cls.CONFIDENCE_LOCKED,
+                    source=cls.SOURCE_LOCKED,
+                    reason=f"Session locked goods_id={stripped_locked}",
+                )
 
         # Priority 3: parsed link/text goods_id
         parsed_id = cls._extract_goods_id_from_text(query)
@@ -209,16 +219,16 @@ class ProductLocator:
                 scores.sort(key=lambda x: x[0], reverse=True)
                 top_score, top_candidate = scores[0]
 
-                # Check for ambiguity
-                if len(scores) > 1 and scores[1][0] == top_score:
+                # Check for ambiguity (only if top score > 0.0)
+                if top_score > 0.0 and len(scores) > 1 and scores[1][0] == top_score:
                     return ProductLocatorResult(
-                        goods_id="",
+                        goods_id=None,
                         confidence=cls.CONFIDENCE_NONE,
                         source=cls.SOURCE_NONE,
                         reason="ambiguous_keyword_match",
                     )
 
-                if top_score > cls.CONFIDENCE_KEYWORD_MIN:
+                if top_score > 0.0:
                     return ProductLocatorResult(
                         goods_id=top_candidate.goods_id,
                         confidence=top_score,
@@ -228,7 +238,7 @@ class ProductLocator:
 
         # Priority 5: none
         return ProductLocatorResult(
-            goods_id="",
+            goods_id=None,
             confidence=cls.CONFIDENCE_NONE,
             source=cls.SOURCE_NONE,
             reason="No product match found",
