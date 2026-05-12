@@ -73,6 +73,8 @@ FALLBACK_TEMPLATES = {
     "template_risk_commitment": "商品效果因人而异,无法做绝对承诺。",
     "template_price": "请以商品页面实际价格为准。",
     "template_human": "正在为您转接人工客服,请稍候...",
+    "llm_failure": "抱歉,系统暂时无法响应,请稍后重试或咨询人工客服。",
+    "pipeline_error": "抱歉,系统处理出现异常,请稍后重试或咨询人工客服。",
 }
 
 

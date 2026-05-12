@@ -5,6 +5,7 @@ Standalone experiment for testing V3.0 prompt-only pipeline without database dep
 Uses hardcoded product data and calls local Ollama customer-service:latest model.
 
 Slice 2: Integrates Response Validator for post-LLM validation.
+Slice 4: Refactored to use V3LightweightAgent.
 """
 import time
 import requests
@@ -14,23 +15,15 @@ import importlib.util
 from pathlib import Path
 from typing import Any
 
-# Load prompt_builder module directly without triggering __init__.py
+# Load V3LightweightAgent module directly without triggering __init__.py
 project_root = Path(__file__).parent.parent
-module_path = project_root / "Agent" / "CustomerAgent" / "custom" / "prompt_builder.py"
-spec = importlib.util.spec_from_file_location("prompt_builder", module_path)
-prompt_builder_module = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(prompt_builder_module)
+agent_path = project_root / "Agent" / "CustomerAgent" / "custom" / "v3_lightweight_agent.py"
+spec_agent = importlib.util.spec_from_file_location("v3_lightweight_agent", agent_path)
+agent_module = importlib.util.module_from_spec(spec_agent)
+spec_agent.loader.exec_module(agent_module)
 
-PromptBuilder = prompt_builder_module.PromptBuilder
-
-# Load response_validator module
-validator_path = project_root / "Agent" / "CustomerAgent" / "custom" / "response_validator.py"
-spec_validator = importlib.util.spec_from_file_location("response_validator", validator_path)
-validator_module = importlib.util.module_from_spec(spec_validator)
-spec_validator.loader.exec_module(validator_module)
-
-validate_response = validator_module.validate_response
-handle_fallback = validator_module.handle_fallback
+V3LightweightAgent = agent_module.V3LightweightAgent
+V3ReplyResult = agent_module.V3ReplyResult
 
 
 # Test product data (goods_id: 946901558797)
@@ -86,12 +79,12 @@ class OllamaClient:
         self.max_tokens = max_tokens
         self.timeout = timeout
 
-    def chat(self, messages: list[dict]) -> tuple[str, float]:
+    def chat_sync(self, messages: list[dict], max_tokens: int, temperature: float) -> dict:
         """
-        Send chat request to Ollama.
+        Send chat request to Ollama (V3LightweightAgent compatible interface).
 
         Returns:
-            Tuple of (response_text, latency_ms)
+            Dict with 'success', 'reply', 'latency_ms', 'error' fields
         """
         url = f"{self.base_url}/api/chat"
         payload = {
@@ -99,8 +92,8 @@ class OllamaClient:
             "messages": messages,
             "stream": False,
             "options": {
-                "temperature": self.temperature,
-                "num_predict": self.max_tokens,
+                "temperature": temperature,
+                "num_predict": max_tokens,
             }
         }
 
@@ -114,35 +107,55 @@ class OllamaClient:
             latency_ms = (time.time() - start_time) * 1000
 
             if response.status_code != 200:
-                raise Exception(f"Ollama API error: {response.status_code} - {response.text}")
+                return {
+                    "success": False,
+                    "reply": "",
+                    "latency_ms": latency_ms,
+                    "error": f"Ollama API error: {response.status_code} - {response.text}"
+                }
 
             result = response.json()
             content = result.get("message", {}).get("content", "")
-            return content.strip(), latency_ms
+            return {
+                "success": True,
+                "reply": content.strip(),
+                "latency_ms": latency_ms,
+                "error": None
+            }
 
         except requests.exceptions.Timeout:
             latency_ms = (time.time() - start_time) * 1000
-            raise Exception(f"Ollama request timeout after {self.timeout}s")
-        except requests.exceptions.ConnectionError:
-            raise Exception(f"Cannot connect to Ollama at {self.base_url}. Is Ollama running?")
+            return {
+                "success": False,
+                "reply": "",
+                "latency_ms": latency_ms,
+                "error": f"Ollama request timeout after {self.timeout}s"
+            }
+        except requests.exceptions.ConnectionError as e:
+            return {
+                "success": False,
+                "reply": "",
+                "latency_ms": 0,
+                "error": f"Cannot connect to Ollama at {self.base_url}. Is Ollama running?"
+            }
 
 
 def run_experiment():
     """Run V3.0 prompt-only experiment with response validation."""
     print("=" * 80)
-    print("V3.0 Prompt-only Experiment - Slice 2 (With Response Validator)")
+    print("V3.0 Prompt-only Experiment - Slice 4 (Using V3LightweightAgent)")
     print("=" * 80)
     print()
 
     # Initialize components
-    builder = PromptBuilder()
     ollama = OllamaClient()
+    agent = V3LightweightAgent(llm_client=ollama)
 
-    # Build product JSON
+    # Build product JSON for display
     print("Product JSON:")
     print("-" * 80)
-    product_json = builder.build_product_json(TEST_PRODUCT)
-    for field, value in product_json.items():
+    product_json_display = agent.prompt_builder.build_product_json(TEST_PRODUCT)
+    for field, value in product_json_display.items():
         print(f"  {field}: {value}")
     print()
 
@@ -155,43 +168,31 @@ def run_experiment():
         print(f"\n[{i}/{len(TEST_QUERIES)}] Query: {query}")
 
         try:
-            # Build messages
-            messages = builder.build_messages(product_json, query)
-
-            # Call Ollama
-            raw_reply, latency_ms = ollama.chat(messages)
-
-            # Validate response
-            validation_result = validate_response(
-                response_text=raw_reply,
-                product_json=product_json,
-                user_query=query
-            )
-
-            # Determine final reply
-            if validation_result.valid:
-                final_reply = raw_reply
-            else:
-                final_reply = handle_fallback(validation_result.fallback_type)
+            # Use V3LightweightAgent to generate reply
+            result = agent.generate_reply(TEST_PRODUCT, query)
 
             # Record result
             results.append({
                 "query": query,
-                "raw_reply": raw_reply,
-                "valid": validation_result.valid,
-                "reason": validation_result.reason,
-                "final_reply": final_reply,
-                "latency_ms": latency_ms,
-                "success": True
+                "raw_reply": result.raw_reply,
+                "valid": result.valid,
+                "reason": result.reason,
+                "final_reply": result.final_reply,
+                "fallback_type": result.fallback_type,
+                "latency_ms": result.latency_ms,
+                "error": result.error,
+                "success": result.error is None
             })
 
-            print(f"  Raw Reply: {raw_reply}")
-            print(f"  Valid: {validation_result.valid}")
-            if not validation_result.valid:
-                print(f"  Reason: {validation_result.reason}")
-                print(f"  Fallback Type: {validation_result.fallback_type}")
-            print(f"  Final Reply: {final_reply}")
-            print(f"  Latency: {latency_ms:.1f}ms")
+            print(f"  Raw Reply: {result.raw_reply}")
+            print(f"  Valid: {result.valid}")
+            if not result.valid:
+                print(f"  Reason: {result.reason}")
+                print(f"  Fallback Type: {result.fallback_type}")
+            print(f"  Final Reply: {result.final_reply}")
+            print(f"  Latency: {result.latency_ms:.1f}ms")
+            if result.error:
+                print(f"  Error: {result.error}")
 
         except Exception as e:
             results.append({
@@ -200,7 +201,9 @@ def run_experiment():
                 "valid": False,
                 "reason": "Exception",
                 "final_reply": f"ERROR: {str(e)}",
+                "fallback_type": "",
                 "latency_ms": 0,
+                "error": str(e),
                 "success": False
             })
             print(f"  ERROR: {str(e)}")
