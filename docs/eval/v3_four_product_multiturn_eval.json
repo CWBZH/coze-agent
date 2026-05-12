@@ -1,0 +1,554 @@
+{
+  "generated_at": "2026-05-12T22:18:01",
+  "data_source": "E:\\develop\\customer-agent-refactor\\temp\\channel_shop.db",
+  "v3_root": "E:\\develop\\customer-agent-refactor-v3",
+  "model": "customer-service:latest",
+  "temperature": 0.0,
+  "products": [
+    {
+      "goods_id": "946901558797",
+      "goods_name": "净爽止汗喷雾保湿除臭净味爽身清新舒爽温和腋下止汗香体20ml",
+      "price": "4.80-12.00",
+      "attribute_warnings": [],
+      "product_json": {
+        "goods_id": "946901558797",
+        "goods_name": "净爽止汗喷雾保湿除臭净味爽身清新舒爽温和腋下止汗香体20ml",
+        "category": "香水",
+        "brand": "伊思棠",
+        "price": "4.80-12.00",
+        "sku_summary": "20ml",
+        "sku_options": [
+          "一瓶",
+          "2瓶",
+          "3瓶"
+        ],
+        "fragrance": "清香",
+        "effect": [
+          "保湿",
+          "止汗",
+          "清香"
+        ],
+        "ingredients": "酒精、香精",
+        "usage_method": "出门喷可以持续两至三个小时",
+        "usage_duration": "一瓶可用一至两个月",
+        "suitable_age": "12岁以上能使用",
+        "skin_type": "所有肤质均可",
+        "foaming": "",
+        "shelf_life": "",
+        "warnings": [],
+        "accessories": []
+      },
+      "turns": [
+        {
+          "query": "这款规格有哪些？",
+          "raw_reply": "一瓶、2瓶、3瓶",
+          "final_reply": "一瓶、2瓶、3瓶",
+          "valid": true,
+          "reason": "",
+          "fallback_type": "",
+          "latency_ms": 2726.5,
+          "error": null,
+          "quality_pass": true,
+          "quality_note": "SKU完整"
+        },
+        {
+          "query": "那价格呢",
+          "raw_reply": "4.80-12.00",
+          "final_reply": "4.80-12.00",
+          "valid": true,
+          "reason": "",
+          "fallback_type": "",
+          "latency_ms": 2754.0,
+          "error": null,
+          "quality_pass": true,
+          "quality_note": "价格命中"
+        },
+        {
+          "query": "喷一次能管多久？",
+          "raw_reply": "出门喷可以持续两至三个小时",
+          "final_reply": "出门喷可以持续两至三个小时",
+          "valid": true,
+          "reason": "",
+          "fallback_type": "",
+          "latency_ms": 2670.8,
+          "error": null,
+          "quality_pass": true,
+          "quality_note": "时长命中"
+        },
+        {
+          "query": "一瓶大概能用多久",
+          "raw_reply": "一瓶可用一至两个月",
+          "final_reply": "一瓶可用一至两个月",
+          "valid": true,
+          "reason": "",
+          "fallback_type": "",
+          "latency_ms": 2404.9,
+          "error": null,
+          "quality_pass": true,
+          "quality_note": "时长命中"
+        },
+        {
+          "query": "12岁能用吗",
+          "raw_reply": "12岁以上能使用",
+          "final_reply": "12岁以上能使用",
+          "valid": true,
+          "reason": "",
+          "fallback_type": "",
+          "latency_ms": 2530.6,
+          "error": null,
+          "quality_pass": true,
+          "quality_note": "年龄命中"
+        },
+        {
+          "query": "孕妇能用吗",
+          "raw_reply": "这个信息我不确定，建议您咨询人工客服",
+          "final_reply": "这个信息我不确定，建议您咨询人工客服",
+          "valid": true,
+          "reason": "",
+          "fallback_type": "",
+          "latency_ms": 2765.6,
+          "error": null,
+          "quality_pass": true,
+          "quality_note": "孕妇非明确字段兜底"
+        },
+        {
+          "query": "可以喷脸吗",
+          "raw_reply": "不可以",
+          "final_reply": "这个信息我不确定,建议您咨询人工客服。",
+          "valid": false,
+          "reason": "脸部使用未标注:回复确定回答脸部使用但商品信息未标注",
+          "fallback_type": "template_uncertain",
+          "latency_ms": 2321.9,
+          "error": null,
+          "quality_pass": true,
+          "quality_note": "未设自动断言"
+        },
+        {
+          "query": "能治狐臭吗",
+          "raw_reply": "这是普通日化产品，不具备治疗功能。建议咨询医生。",
+          "final_reply": "这是普通日化产品，不具备治疗功能。建议咨询医生。",
+          "valid": true,
+          "reason": "",
+          "fallback_type": "",
+          "latency_ms": 3054.0,
+          "error": null,
+          "quality_pass": true,
+          "quality_note": "医疗风险未承诺"
+        }
+      ],
+      "pass_count": 8,
+      "turn_count": 8
+    },
+    {
+      "goods_id": "943269377110",
+      "goods_name": "脖子身体懒人素颜霜提亮全身持久防水润肤不脱防蹭上衣假白学生",
+      "price": "3.64-11.50",
+      "attribute_warnings": [],
+      "product_json": {
+        "goods_id": "943269377110",
+        "goods_name": "脖子身体懒人素颜霜提亮全身持久防水润肤不脱防蹭上衣假白学生",
+        "category": "素颜霜",
+        "brand": "颜里",
+        "price": "3.64-11.50",
+        "sku_summary": "2支",
+        "sku_options": [
+          "一支、2支、3支、5支"
+        ],
+        "fragrance": "淡香",
+        "effect": [
+          "亮肤防水防汗美白遮瑕。"
+        ],
+        "ingredients": "素颜霜",
+        "usage_method": "出门均匀涂抹脸、脖颈即可",
+        "usage_duration": "一支可以用一个月",
+        "suitable_age": "12岁以上使用",
+        "skin_type": "所有肤质均可使用",
+        "foaming": "",
+        "shelf_life": "",
+        "warnings": [],
+        "accessories": []
+      },
+      "turns": [
+        {
+          "query": "这款规格有哪些？",
+          "raw_reply": "一支、2支、3支、5支",
+          "final_reply": "一支、2支、3支、5支",
+          "valid": true,
+          "reason": "",
+          "fallback_type": "",
+          "latency_ms": 2926.3,
+          "error": null,
+          "quality_pass": true,
+          "quality_note": "SKU完整"
+        },
+        {
+          "query": "多少钱呀",
+          "raw_reply": "3.64-11.50",
+          "final_reply": "3.64-11.50",
+          "valid": true,
+          "reason": "",
+          "fallback_type": "",
+          "latency_ms": 2748.6,
+          "error": null,
+          "quality_pass": true,
+          "quality_note": "价格命中"
+        },
+        {
+          "query": "一支能用多久",
+          "raw_reply": "一支可以用一个月",
+          "final_reply": "一支可以用一个月",
+          "valid": true,
+          "reason": "",
+          "fallback_type": "",
+          "latency_ms": 2402.2,
+          "error": null,
+          "quality_pass": true,
+          "quality_note": "时长命中"
+        },
+        {
+          "query": "怎么用比较好",
+          "raw_reply": "出门均匀涂抹脸、脖颈即可",
+          "final_reply": "出门均匀涂抹脸、脖颈即可",
+          "valid": true,
+          "reason": "",
+          "fallback_type": "",
+          "latency_ms": 2665.9,
+          "error": null,
+          "quality_pass": true,
+          "quality_note": "用法命中"
+        },
+        {
+          "query": "12岁能用吗",
+          "raw_reply": "12岁以上使用",
+          "final_reply": "12岁以上使用",
+          "valid": true,
+          "reason": "",
+          "fallback_type": "",
+          "latency_ms": 2393.0,
+          "error": null,
+          "quality_pass": true,
+          "quality_note": "年龄命中"
+        },
+        {
+          "query": "有味道吗",
+          "raw_reply": "淡香",
+          "final_reply": "淡香",
+          "valid": true,
+          "reason": "",
+          "fallback_type": "",
+          "latency_ms": 2356.1,
+          "error": null,
+          "quality_pass": true,
+          "quality_note": "香味命中"
+        },
+        {
+          "query": "适合什么肤质",
+          "raw_reply": "所有肤质均可使用",
+          "final_reply": "所有肤质均可使用",
+          "valid": true,
+          "reason": "",
+          "fallback_type": "",
+          "latency_ms": 2433.6,
+          "error": null,
+          "quality_pass": true,
+          "quality_note": "肤质命中"
+        },
+        {
+          "query": "能美白遮瑕吗",
+          "raw_reply": "亮肤防水防汗美白遮瑕。",
+          "final_reply": "亮肤防水防汗美白遮瑕。",
+          "valid": true,
+          "reason": "",
+          "fallback_type": "",
+          "latency_ms": 2645.1,
+          "error": null,
+          "quality_pass": true,
+          "quality_note": "功效命中"
+        }
+      ],
+      "pass_count": 8,
+      "turn_count": 8
+    },
+    {
+      "goods_id": "942041658034",
+      "goods_name": "【好物爆款】颜里烟酰胺身体素颜霜免卸防水防汗美白遮瑕持久男女",
+      "price": "3.84-10.80",
+      "attribute_warnings": [
+        "unknown_attribute_fields:extra_notes"
+      ],
+      "product_json": {
+        "goods_id": "942041658034",
+        "goods_name": "【好物爆款】颜里烟酰胺身体素颜霜免卸防水防汗美白遮瑕持久男女",
+        "category": "素颜霜",
+        "brand": "颜里",
+        "price": "3.84-10.80",
+        "sku_summary": "2支",
+        "sku_options": [
+          "体验装一支",
+          "2支",
+          "3支",
+          "5支"
+        ],
+        "fragrance": "体香",
+        "effect": [
+          "美白",
+          "遮瑕",
+          "防水防汗",
+          "免卸"
+        ],
+        "ingredients": "主要功效成分为烟酰胺",
+        "usage_method": "出门前在脸、脖颈上涂抹均匀即可",
+        "usage_duration": "一支使用两个星期左右",
+        "suitable_age": "12岁以上能使用~",
+        "skin_type": "所有肤质均可使用",
+        "foaming": "不起泡",
+        "shelf_life": "",
+        "warnings": [],
+        "accessories": []
+      },
+      "turns": [
+        {
+          "query": "这款都有什么规格？",
+          "raw_reply": "体验装一支、2支、3支、5支",
+          "final_reply": "体验装一支、2支、3支、5支",
+          "valid": true,
+          "reason": "",
+          "fallback_type": "",
+          "latency_ms": 3078.2,
+          "error": null,
+          "quality_pass": true,
+          "quality_note": "SKU完整"
+        },
+        {
+          "query": "价格多少",
+          "raw_reply": "3.84-10.80",
+          "final_reply": "3.84-10.80",
+          "valid": true,
+          "reason": "",
+          "fallback_type": "",
+          "latency_ms": 2617.6,
+          "error": null,
+          "quality_pass": true,
+          "quality_note": "价格命中"
+        },
+        {
+          "query": "一支能用多久",
+          "raw_reply": "一支使用两个星期左右",
+          "final_reply": "一支使用两个星期左右",
+          "valid": true,
+          "reason": "",
+          "fallback_type": "",
+          "latency_ms": 2406.9,
+          "error": null,
+          "quality_pass": true,
+          "quality_note": "时长命中"
+        },
+        {
+          "query": "怎么使用",
+          "raw_reply": "出门前在脸、脖颈上涂抹均匀即可",
+          "final_reply": "出门前在脸、脖颈上涂抹均匀即可",
+          "valid": true,
+          "reason": "",
+          "fallback_type": "",
+          "latency_ms": 2805.1,
+          "error": null,
+          "quality_pass": true,
+          "quality_note": "用法命中"
+        },
+        {
+          "query": "12岁能用吗",
+          "raw_reply": "12岁以上能使用~",
+          "final_reply": "12岁以上能使用~",
+          "valid": true,
+          "reason": "",
+          "fallback_type": "",
+          "latency_ms": 2581.1,
+          "error": null,
+          "quality_pass": true,
+          "quality_note": "年龄命中"
+        },
+        {
+          "query": "有香味吗",
+          "raw_reply": "体香",
+          "final_reply": "体香",
+          "valid": true,
+          "reason": "",
+          "fallback_type": "",
+          "latency_ms": 2305.8,
+          "error": null,
+          "quality_pass": true,
+          "quality_note": "香味命中"
+        },
+        {
+          "query": "防水防汗吗",
+          "raw_reply": "防水防汗",
+          "final_reply": "防水防汗",
+          "valid": true,
+          "reason": "",
+          "fallback_type": "",
+          "latency_ms": 2462.9,
+          "error": null,
+          "quality_pass": true,
+          "quality_note": "功效命中"
+        },
+        {
+          "query": "孕妇能用吗",
+          "raw_reply": "这个信息我不确定，建议您咨询人工客服",
+          "final_reply": "这个信息我不确定，建议您咨询人工客服",
+          "valid": true,
+          "reason": "",
+          "fallback_type": "",
+          "latency_ms": 2733.0,
+          "error": null,
+          "quality_pass": true,
+          "quality_note": "孕妇非明确字段兜底"
+        }
+      ],
+      "pass_count": 8,
+      "turn_count": 8
+    },
+    {
+      "goods_id": "941078657140",
+      "goods_name": "60张眼唇卸妆巾温和面部刺激深层清洁便携一次性湿巾孕妇懒人抽取",
+      "price": "9.50-28.70",
+      "attribute_warnings": [
+        "unknown_attribute_fields:extra_notes"
+      ],
+      "product_json": {
+        "goods_id": "941078657140",
+        "goods_name": "60张眼唇卸妆巾温和面部刺激深层清洁便携一次性湿巾孕妇懒人抽取",
+        "category": "美容护肤/美体/精油 > 卸妆 > 卸妆巾/湿巾",
+        "brand": "迪欧莉",
+        "price": "9.50-28.70",
+        "sku_summary": "2包",
+        "sku_options": [
+          "60张一包",
+          "2包120张",
+          "3包180张"
+        ],
+        "fragrance": "无味",
+        "effect": [
+          "清洁",
+          "卸妆"
+        ],
+        "ingredients": "棉花",
+        "usage_method": "",
+        "usage_duration": "具体看个人使用情况噢",
+        "suitable_age": "孕妇",
+        "skin_type": "所有肤质",
+        "foaming": "",
+        "shelf_life": "",
+        "warnings": [],
+        "accessories": []
+      },
+      "turns": [
+        {
+          "query": "这款规格有哪些？",
+          "raw_reply": "60张一包、2包120张、3包180张",
+          "final_reply": "60张一包、2包120张、3包180张",
+          "valid": true,
+          "reason": "",
+          "fallback_type": "",
+          "latency_ms": 3219.9,
+          "error": null,
+          "quality_pass": true,
+          "quality_note": "SKU完整"
+        },
+        {
+          "query": "价格是多少",
+          "raw_reply": "9.50-28.70",
+          "final_reply": "9.50-28.70",
+          "valid": true,
+          "reason": "",
+          "fallback_type": "",
+          "latency_ms": 2622.3,
+          "error": null,
+          "quality_pass": true,
+          "quality_note": "价格命中"
+        },
+        {
+          "query": "一包能用多久",
+          "raw_reply": "具体看个人使用情况噢",
+          "final_reply": "具体看个人使用情况噢",
+          "valid": true,
+          "reason": "",
+          "fallback_type": "",
+          "latency_ms": 2529.5,
+          "error": null,
+          "quality_pass": true,
+          "quality_note": "时长命中"
+        },
+        {
+          "query": "怎么用",
+          "raw_reply": "擦拭即可，具体看个人使用情况",
+          "final_reply": "这个信息我不确定,建议您咨询人工客服。",
+          "valid": false,
+          "reason": "空字段编造:'usage_method'为空但回复未表达不确定",
+          "fallback_type": "template_uncertain",
+          "latency_ms": 2706.8,
+          "error": null,
+          "quality_pass": true,
+          "quality_note": "用法空字段兜底"
+        },
+        {
+          "query": "孕妇可以用吗",
+          "raw_reply": "孕妇",
+          "final_reply": "孕妇",
+          "valid": true,
+          "reason": "",
+          "fallback_type": "",
+          "latency_ms": 2393.6,
+          "error": null,
+          "quality_pass": true,
+          "quality_note": "孕妇字段命中"
+        },
+        {
+          "query": "有味道吗",
+          "raw_reply": "无味",
+          "final_reply": "无味",
+          "valid": true,
+          "reason": "",
+          "fallback_type": "",
+          "latency_ms": 2434.9,
+          "error": null,
+          "quality_pass": true,
+          "quality_note": "香味命中"
+        },
+        {
+          "query": "适合什么肤质",
+          "raw_reply": "所有肤质",
+          "final_reply": "所有肤质",
+          "valid": true,
+          "reason": "",
+          "fallback_type": "",
+          "latency_ms": 2549.4,
+          "error": null,
+          "quality_pass": true,
+          "quality_note": "肤质命中"
+        },
+        {
+          "query": "能清洁卸妆吗",
+          "raw_reply": "清洁、卸妆",
+          "final_reply": "清洁、卸妆",
+          "valid": true,
+          "reason": "",
+          "fallback_type": "",
+          "latency_ms": 2526.4,
+          "error": null,
+          "quality_pass": true,
+          "quality_note": "功效命中"
+        }
+      ],
+      "pass_count": 8,
+      "turn_count": 8
+    }
+  ],
+  "summary": {
+    "turns": 32,
+    "quality_pass": 32,
+    "quality_pass_rate": 1.0,
+    "validator_valid": 30,
+    "validator_valid_rate": 0.9375,
+    "fallback_count": 2
+  }
+}

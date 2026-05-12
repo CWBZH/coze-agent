@@ -193,9 +193,9 @@ class PromptBuilder:
         if not sku_options:
             return "请咨询人工客服了解详细规格"
 
-        # Return first 2-3 SKU options
-        display_options = sku_options[:3]
-        return "、".join(display_options)
+        # For specification questions, the model must see the full expected
+        # answer. Truncating examples teaches it to omit later SKU options.
+        return "、".join(str(option) for option in sku_options)
 
     def _get_age_example_answer(self, suitable_age: str) -> str:
         """Generate example answer for age query based on suitable_age field."""

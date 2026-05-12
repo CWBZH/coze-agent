@@ -152,6 +152,35 @@ class TestPromptBuilder:
         assert "一瓶" in system_content
         assert "1瓶" in system_content or "原文" in system_content
 
+    def test_sku_example_answer_includes_all_options(self):
+        """Specification example must include every SKU option."""
+        builder = PromptBuilder()
+        product_json = {
+            "goods_id": "123",
+            "goods_name": "测试商品",
+            "category": "",
+            "brand": "",
+            "price": "",
+            "sku_summary": "2支",
+            "sku_options": ["体验装一支", "2支", "3支", "5支"],
+            "fragrance": "",
+            "effect": [],
+            "ingredients": "",
+            "usage_method": "",
+            "usage_duration": "",
+            "suitable_age": "",
+            "skin_type": "",
+            "foaming": "",
+            "shelf_life": "",
+            "warnings": [],
+            "accessories": [],
+        }
+
+        messages = builder.build_messages(product_json, "这款都有什么规格？")
+        system_content = messages[0]["content"]
+
+        assert "助手：体验装一支、2支、3支、5支" in system_content
+
     def test_build_messages_format(self):
         """Must return OpenAI/Ollama chat-compatible format."""
         builder = PromptBuilder()
