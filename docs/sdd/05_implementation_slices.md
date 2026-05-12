@@ -510,5 +510,5 @@ graph TD
 - 警告返回：invalid_attribute_json、unknown_attribute_fields
 - 字段合并规则：顶层字段优先，已知属性可填充空值
 - 测试覆盖：dict/对象记录、JSON 解析、列表规范化、回退逻辑、警告生成
-- 全部 V3 测试通过：137 tests passed
+- 全部 V3 测试通过：138 tests passed
 - 提交：`fix(v3): align product context adapter contract`

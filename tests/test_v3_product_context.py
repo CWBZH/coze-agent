@@ -234,12 +234,12 @@ def test_11_suitable_age_manual_annotation_preserved():
     record = {
         "goods_id": "g11",
         "attribute_json": {
-            "suitable_age": "12岁以上"
+            "suitable_age": "12岁及以上"
         }
     }
     result = ProductContextAdapter.from_record(record)
 
-    assert result.product["suitable_age"] == "12岁以上"
+    assert result.product["suitable_age"] == "12岁及以上"
 
 
 def test_12_unknown_attr_fields_warning_sorted():
