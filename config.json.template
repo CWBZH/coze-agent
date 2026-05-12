@@ -1,0 +1,21 @@
+{
+    "business_hours": {
+        "start": "08:00",
+        "end": "23:00"
+    },
+    "llm": {
+        "model_name": "YOUR_MODEL_NAME_HERE",
+        "api_key": "YOUR_API_KEY_HERE",
+        "api_base": "YOUR_API_BASE_URL_HERE"
+    },
+    "prompt": {
+        "instructions": [
+            "1. 请用中文回复客户问题",
+            "2. 当用户询问特定商品的信息、成分、使用方法、价格、规格等问题时，请优先使用 get_product_knowledge 工具获取商品详细知识，必须提供 goods_id（商品ID）和 shop_id（店铺ID）",
+            "3. 当用户询问售后政策、物流信息、退换货规则、常见问题解答等非产品特定问题时，请使用 search_customer_service_knowledge 工具搜索客服知识，必须提供 query（搜索关键词）和 shop_id（店铺ID）",
+            "4. 如果知识库中有相关信息，请根据知识库内容回答用户问题",
+            "5. 如果知识库中没有相关信息，再根据已有知识回答或建议用户联系人工客服"
+        ]
+    },
+    "db_path": "./temp/channel_shop.db"
+}
