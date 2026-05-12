@@ -98,12 +98,11 @@ class ProductContextAdapter:
         unknown_fields = []
         for k, v in attr_data.items():
             if k in cls.KNOWN_ATTR_FIELDS:
-                # Attribute cannot erase non-empty top-level goods_id/goods_name/price
+                # Attribute cannot override non-empty top-level goods_id/goods_name/price
                 if k in ["goods_id", "goods_name", "price"]:
                     if k in product and product[k]:
-                        # Top-level is non-empty, skip attr if empty
-                        if v == "" or v is None:
-                            continue
+                        # Top-level is non-empty, skip attr entirely
+                        continue
 
                 # Fill value
                 if v is not None:

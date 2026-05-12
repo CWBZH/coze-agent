@@ -125,6 +125,26 @@ def test_6_attr_empty_does_not_erase_top_level():
     assert result.product["price"] == "40.00"
 
 
+def test_6b_attr_non_empty_does_not_override_top_level():
+    """Test attr non-empty goods_id/goods_name/price cannot override non-empty top-level."""
+    record = {
+        "goods_id": "top123",
+        "goods_name": "Top Product",
+        "price": "100.00",
+        "attribute_json": {
+            "goods_id": "attr456",
+            "goods_name": "Attr Product",
+            "price": "200.00"
+        }
+    }
+    result = ProductContextAdapter.from_record(record)
+
+    # Top-level values must be preserved
+    assert result.product["goods_id"] == "top123"
+    assert result.product["goods_name"] == "Top Product"
+    assert result.product["price"] == "100.00"
+
+
 def test_7_sku_options_string_to_single_item_list():
     """Test sku_options string -> single-item list."""
     record = {
@@ -214,12 +234,12 @@ def test_11_suitable_age_manual_annotation_preserved():
     record = {
         "goods_id": "g11",
         "attribute_json": {
-            "suitable_age": "12??????"
+            "suitable_age": "12岁以上"
         }
     }
     result = ProductContextAdapter.from_record(record)
 
-    assert result.product["suitable_age"] == "12??????"
+    assert result.product["suitable_age"] == "12岁以上"
 
 
 def test_12_unknown_attr_fields_warning_sorted():
