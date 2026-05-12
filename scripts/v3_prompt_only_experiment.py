@@ -3,6 +3,8 @@ V3.0 Prompt-only Experiment Script
 
 Standalone experiment for testing V3.0 prompt-only pipeline without database dependencies.
 Uses hardcoded product data and calls local Ollama customer-service:latest model.
+
+Slice 2: Integrates Response Validator for post-LLM validation.
 """
 import time
 import requests
@@ -13,7 +15,6 @@ from pathlib import Path
 from typing import Any
 
 # Load prompt_builder module directly without triggering __init__.py
-# This avoids dependency on services that aren't initialized in standalone script
 project_root = Path(__file__).parent.parent
 module_path = project_root / "Agent" / "CustomerAgent" / "custom" / "prompt_builder.py"
 spec = importlib.util.spec_from_file_location("prompt_builder", module_path)
@@ -21,6 +22,15 @@ prompt_builder_module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(prompt_builder_module)
 
 PromptBuilder = prompt_builder_module.PromptBuilder
+
+# Load response_validator module
+validator_path = project_root / "Agent" / "CustomerAgent" / "custom" / "response_validator.py"
+spec_validator = importlib.util.spec_from_file_location("response_validator", validator_path)
+validator_module = importlib.util.module_from_spec(spec_validator)
+spec_validator.loader.exec_module(validator_module)
+
+validate_response = validator_module.validate_response
+handle_fallback = validator_module.handle_fallback
 
 
 # Test product data (goods_id: 946901558797)
@@ -118,9 +128,9 @@ class OllamaClient:
 
 
 def run_experiment():
-    """Run V3.0 prompt-only experiment."""
+    """Run V3.0 prompt-only experiment with response validation."""
     print("=" * 80)
-    print("V3.0 Prompt-only Experiment - Slice 1")
+    print("V3.0 Prompt-only Experiment - Slice 2 (With Response Validator)")
     print("=" * 80)
     print()
 
@@ -149,23 +159,47 @@ def run_experiment():
             messages = builder.build_messages(product_json, query)
 
             # Call Ollama
-            reply, latency_ms = ollama.chat(messages)
+            raw_reply, latency_ms = ollama.chat(messages)
+
+            # Validate response
+            validation_result = validate_response(
+                response_text=raw_reply,
+                product_json=product_json,
+                user_query=query
+            )
+
+            # Determine final reply
+            if validation_result.valid:
+                final_reply = raw_reply
+            else:
+                final_reply = handle_fallback(validation_result.fallback_type)
 
             # Record result
             results.append({
                 "query": query,
-                "reply": reply,
+                "raw_reply": raw_reply,
+                "valid": validation_result.valid,
+                "reason": validation_result.reason,
+                "final_reply": final_reply,
                 "latency_ms": latency_ms,
                 "success": True
             })
 
-            print(f"  Reply: {reply}")
+            print(f"  Raw Reply: {raw_reply}")
+            print(f"  Valid: {validation_result.valid}")
+            if not validation_result.valid:
+                print(f"  Reason: {validation_result.reason}")
+                print(f"  Fallback Type: {validation_result.fallback_type}")
+            print(f"  Final Reply: {final_reply}")
             print(f"  Latency: {latency_ms:.1f}ms")
 
         except Exception as e:
             results.append({
                 "query": query,
-                "reply": f"ERROR: {str(e)}",
+                "raw_reply": f"ERROR: {str(e)}",
+                "valid": False,
+                "reason": "Exception",
+                "final_reply": f"ERROR: {str(e)}",
                 "latency_ms": 0,
                 "success": False
             })
@@ -184,6 +218,19 @@ def run_experiment():
     print(f"Successful: {len(successful)}")
     print(f"Failed: {len(failed)}")
 
+    # Validation statistics
+    validated = [r for r in successful if r.get("valid", False)]
+    invalidated = [r for r in successful if not r.get("valid", True)]
+
+    print(f"\nValidation Statistics:")
+    print(f"  Passed validation: {len(validated)}")
+    print(f"  Failed validation: {len(invalidated)}")
+
+    if invalidated:
+        print(f"\nValidation Failures:")
+        for r in invalidated:
+            print(f"  - {r['query']}: {r['reason']}")
+
     if successful:
         avg_latency = sum(r["latency_ms"] for r in successful) / len(successful)
         max_latency = max(r["latency_ms"] for r in successful)
@@ -197,11 +244,16 @@ def run_experiment():
     print()
     print("Detailed Results:")
     print("-" * 80)
-    print(f"{'Query':<30} {'Latency':<10} {'Reply'}")
+    print(f"{'Query':<20} {'Valid':<6} {'Raw Reply':<30} {'Final Reply'}")
     print("-" * 80)
     for r in results:
-        reply_preview = r["reply"][:50] + "..." if len(r["reply"]) > 50 else r["reply"]
-        print(f"{r['query']:<30} {r['latency_ms']:<10.1f} {reply_preview}")
+        if r["success"]:
+            raw_preview = r["raw_reply"][:25] + "..." if len(r["raw_reply"]) > 25 else r["raw_reply"]
+            final_preview = r["final_reply"][:25] + "..." if len(r["final_reply"]) > 25 else r["final_reply"]
+            valid_str = "Yes" if r["valid"] else "No"
+            print(f"{r['query']:<20} {valid_str:<6} {raw_preview:<30} {final_preview}")
+        else:
+            print(f"{r['query']:<20} {'ERROR':<6} {r['raw_reply'][:30]}")
 
     print()
     print("=" * 80)
