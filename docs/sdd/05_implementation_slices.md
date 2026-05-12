@@ -479,3 +479,21 @@ graph TD
 - [[02_prompt_contract]] 定义 Prompt 合同（切片 1、7 的依据）
 - [[03_response_validator_spec]] 定义校验器规格（切片 2、8 的依据）
 - [[04_eval_plan]] 定义回归测试计划（切片 6 的依据）
+
+---
+
+## 8. 完成记录
+
+### 2026-05-12
+
+**Task 006: V3 Product Locator Primitive**
+- 创建 `Agent/CustomerAgent/custom/product_locator.py`
+- 创建 `tests/test_v3_product_locator.py`
+- 实现 `ProductLocator` 类，提供确定性 `goods_id` 解析
+- 优先级：platform_goods_id (1.0) > locked_goods_id (0.95) > parsed link (0.9) > keyword (0.60-0.85) > none (0.0)
+- 链接解析支持：`goods_id=`、`goodsId=`、URL编码格式、中文模式
+- 关键词匹配：名称包含评分 (0.85/0.75)、搜索词匹配评分 (0.60-0.84)
+- 模糊匹配平局返回 `ambiguous_keyword_match`
+- 测试覆盖：平台/锁定优先级、链接格式、关键词匹配、歧义处理、中文名称、标点空格
+- 全部 V3 测试通过：115 tests passed
+- 提交：`feat(v3): add product locator primitive`
