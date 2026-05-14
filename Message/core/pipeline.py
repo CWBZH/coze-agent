@@ -35,7 +35,7 @@ class MessagePipeline:
 
         session_id = None
         try:
-            conv = await self.session_mgr.get_or_create_conversation(shop.id, buyer_id, user_id)
+            conv = await self.session_mgr.get_or_create_conversation(shop['id'], buyer_id, user_id)
             session_id = conv.session_id
 
             # 检查会话状态
@@ -47,7 +47,7 @@ class MessagePipeline:
             self.session_mgr.add_message(session_id, "user", buyer_text)
 
             # Step 3: 关键词预检
-            kw_result = self.keyword_handler.check(shop.id, buyer_text)
+            kw_result = self.keyword_handler.check(shop['id'], buyer_text)
             if kw_result["matched"]:
                 action = kw_result["action"]
                 if action == "auto_reply":
@@ -66,13 +66,13 @@ class MessagePipeline:
             # Step 4: 构建上下文
             cached_products = self._product_cache.get(session_id, "")
             messages = self.session_mgr.build_context_messages(
-                session_id, shop.shop_name, SYSTEM_PROMPT_TEMPLATE, buyer_text, cached_products
+                session_id, shop['shop_name'], SYSTEM_PROMPT_TEMPLATE, buyer_text, cached_products
             )
 
             # Step 5: FastGPT 调用（chatId 实现多店铺多用户会话隔离）
             chat_id = f"{shop_platform_id}_{buyer_id}_{session_id}"
             t0 = datetime.now()
-            result = self.fastgpt.call(messages, shop.fastgpt_dataset_id or "", chat_id=chat_id)
+            result = self.fastgpt.call(messages, shop.get('fastgpt_dataset_id') or "", chat_id=chat_id)
             latency_ms = (datetime.now() - t0).total_seconds() * 1000
 
             if result["success"] and result["content"]:
