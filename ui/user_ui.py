@@ -656,7 +656,7 @@ class UserManagerWidget(QFrame):
             # 注意：这里的add_account可能需要更多参数，我们传递所有已知信息
             success = db_manager.add_account(
                 channel_name=channel_name,
-                shop_platform_id=shop_id,
+                shop_id=shop_id,
                 username=username,
                 password=result["password"],
                 user_id=result.get("user_id"),
