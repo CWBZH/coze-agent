@@ -30,9 +30,12 @@ from qfluentwidgets import (
     ComboBox,
 )
 
-from services.knowledge_sync_service import KnowledgeSyncService
-from database.models import ProductKnowledge, CustomerServiceKnowledge, Shop
+from database.models import ProductKnowledge, Shop, CustomerServiceKnowledge
 from utils.logger_loguru import get_logger
+
+# V3.0: knowledge_sync_service 已移除，UI 直接通过 db_manager 操作数据
+KnowledgeSyncService = None
+logger = get_logger("KnowledgeUI")
 
 if TYPE_CHECKING:
     from database.knowledge_service import KnowledgeService
@@ -302,11 +305,14 @@ class KnowledgeUI(QWidget):
 
         # 初始化同步服务（通过依赖注入或直接创建）
         if knowledge_service is None:
-            from core.di_container import container
-            from database.knowledge_service import KnowledgeService
-            knowledge_service = container.get(KnowledgeService)
+            try:
+                from core.di_container import container
+                from database.knowledge_service import KnowledgeService
+                knowledge_service = container.get(KnowledgeService)
+            except (ImportError, ValueError):
+                knowledge_service = None
 
-        self.sync_service = KnowledgeSyncService(knowledge_service, self)
+        self.sync_service = KnowledgeSyncService(knowledge_service, self) if KnowledgeSyncService else None
 
         # 当前选中的店铺
         self.current_shop_id: Optional[int] = None
@@ -384,12 +390,16 @@ class KnowledgeUI(QWidget):
 
     def _connect_signals(self):
         """连接同步服务的信号"""
+        if not self.sync_service:
+            return
         self.sync_service.progress_updated.connect(self._on_sync_progress)
         self.sync_service.sync_finished.connect(self._on_sync_finished)
         self.sync_service.sync_error.connect(self._on_sync_error)
 
     def _load_shops(self):
         """加载店铺列表到下拉框"""
+        if not self.sync_service:
+            return
         self.shop_combo.clear()
         self._shop_cache.clear()
 

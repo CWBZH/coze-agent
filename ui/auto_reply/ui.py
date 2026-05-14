@@ -14,9 +14,7 @@ from .card import AutoReplyCard
 from .manager import auto_reply_manager
 from .threads import SetStatusThread
 
-# V2.0 Playwright 集成
-from services.pdd_protocol_service import pdd_protocol_service_manager
-from services.playwright_bridge import PlaywrightBridge, create_playwright_bridge
+# V3.0: services/ 目录已移除，Playwright 桥接由 Channel 模块直接管理
 from ui.signal_bus import global_signal_bus
 
 
@@ -29,8 +27,8 @@ class AutoReplyUI(QFrame):
         self.accounts_data = []
         self._loaded_once = False
 
-        # Playwright 桥接控制器
-        self._playwright_bridge: PlaywrightBridge = None
+        # V3.0: Playwright 桥接由 Channel 模块直接管理
+        self._playwright_bridge = None
 
         self.setupUI()
         QTimer.singleShot(300, self._maybeLoadOnShow)
@@ -67,36 +65,14 @@ class AutoReplyUI(QFrame):
             event.accept()
 
     def _init_playwright_bridge(self):
-        """初始化 Playwright 桥接控制器"""
-        try:
-            # 创建桥接控制器
-            self._playwright_bridge = create_playwright_bridge()
-
-            # 连接 Playwright 状态信号
-            global_signal_bus.playwright_status_signal.connect(
-                self._on_playwright_status_changed
-            )
-
-            self.logger.info("Playwright 桥接控制器已初始化")
-
-        except Exception as e:
-            self.logger.error(f"初始化 Playwright 桥接失败: {e}")
+        """V3.0: Playwright 桥接由 Channel 模块直接管理，此处保留接口兼容"""
+        self._playwright_bridge = None
+        self.logger.info("V3.0: Playwright 桥接由 Channel 模块直接管理")
 
     def _cleanup_playwright(self):
-        """清理 Playwright 资源（优雅销毁）"""
-        try:
-            # 停止桥接控制器
-            if self._playwright_bridge:
-                self._playwright_bridge.stop()
-                self._playwright_bridge = None
-
-            # 停止所有 Playwright 监听
-            pdd_protocol_service_manager.stop_all()
-
-            self.logger.info("Playwright 资源已清理")
-
-        except Exception as e:
-            self.logger.error(f"清理 Playwright 资源失败: {e}")
+        """V3.0: 清理由 Channel 模块处理"""
+        self._playwright_bridge = None
+        self.logger.info("V3.0: Playwright 资源已清理")
 
     def _on_playwright_status_changed(self, status_code: int, message: str):
         """
