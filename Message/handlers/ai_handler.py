@@ -18,9 +18,8 @@ from typing import Dict, Any, Optional, List
 from bridge.context import Context, ContextType
 from .base import BaseHandler
 from .preprocessor import MessagePreprocessor
-from Agent.bot import Bot
 
-# 导入 Redis 管理器
+# 导入 Redis 管理器 (V3.0 存根，所有方法返回安全默认值)
 from database.redis_manager import redis_manager
 
 # 导入集中式配置和常量
@@ -29,7 +28,7 @@ from core.constants import IMAGE_INTERCEPT_REPLY, FALLBACK_REPLY
 
 
 class AIReplyHandler(BaseHandler):
-    """专注的AI回复处理器"""
+    """V3.0 AI回复处理器 — 移除 Agent 依赖，通过 MessagePipeline 调用 FastGPT"""
 
     # 危险词汇黑名单（医疗/安全相关）
     DANGEROUS_KEYWORDS = [
@@ -41,18 +40,10 @@ class AIReplyHandler(BaseHandler):
     # 安全兜底话术
     SAFETY_FALLBACK = "非常抱歉，我们无法提供相关建议。为安全起见，请您立即停止使用并寻求专业人士/医生的帮助。"
 
-    def __init__(self, bot: Bot = None, auto_reply_types: set = None):
+    def __init__(self, bot: Any = None, auto_reply_types: set = None):
         super().__init__("AIReplyHandler")
-        # 从 DI 容器获取 CustomerAgent（如果未传入）
-        if bot is None:
-            try:
-                from core.di_container import container
-                from Agent.CustomerAgent.custom.customer_agent import CustomerAgent
-                bot = container.get(CustomerAgent)
-            except Exception as e:
-                from utils.logger_loguru import get_logger
-                get_logger("AIReplyHandler").warning(f"从DI容器获取CustomerAgent失败: {e}, 将使用无Bot模式")
-        self.bot = bot
+        self.bot = bot  # V3.0: bot 可为 None，此时走 MessagePipeline
+        self._pipeline = None
         self.preprocessor = MessagePreprocessor()
         self.auto_reply_types = auto_reply_types or {
             ContextType.TEXT,
@@ -225,26 +216,62 @@ class AIReplyHandler(BaseHandler):
             if term.strip()
         ]
 
+    def _get_pipeline(self):
+        """V3.0: 惰性初始化 MessagePipeline"""
+        if self._pipeline is None:
+            try:
+                from database.db_manager import db_manager
+                from Message.core.pipeline import MessagePipeline
+                from Message.handlers.fastgpt_handler import FastGPTHandler
+                from Message.handlers.keyword_handler import KeywordHandler
+                from Session.session_manager import SessionManager
+                from core.config_manager import config_manager
+
+                fastgpt = FastGPTHandler()
+                keyword = KeywordHandler(db_manager)
+                session_mgr = SessionManager(db_manager)
+                self._pipeline = MessagePipeline(
+                    db_manager, session_mgr, keyword, fastgpt, config_manager
+                )
+            except Exception as e:
+                self.logger.error(f"V3.0 Pipeline 初始化失败: {e}")
+        return self._pipeline
+
     async def _get_ai_reply(self, query: str, context: Context) -> Optional[str]:
-        """获取AI回复"""
-        if not self.bot:
-            return None
+        """获取AI回复 — V3.0: 优先 MessagePipeline，其次 bot"""
+        # 尝试 V3.0 MessagePipeline
+        pipeline = self._get_pipeline()
+        if pipeline:
+            try:
+                kwargs = context.kwargs
+                message = {
+                    "buyer_id": str(getattr(kwargs, 'from_uid', '')),
+                    "shop_platform_id": str(getattr(kwargs, 'shop_id', '')),
+                    "content": query,
+                    "user_id": str(getattr(kwargs, 'user_id', '')),
+                }
+                result = await pipeline.process(message)
+                action = result.get("action", "")
+                if action in ("reply", "transfer_human"):
+                    return result.get("text", "")
+                if action == "skip":
+                    self.logger.info(f"Pipeline skip: {result}")
+            except Exception as e:
+                self.logger.error(f"Pipeline 调用失败: {e}")
 
-        try:
-            # 优先使用异步接口，其次回退到同步接口
-            if hasattr(self.bot, 'async_reply'):
-                res = await self.bot.async_reply(query, context)
-                return getattr(res, 'content', str(res))
-            elif hasattr(self.bot, 'reply'):
-                res = self.bot.reply(query, context)
-                return getattr(res, 'content', str(res))
-            else:
-                self.logger.warning("Bot不支持reply或async_reply方法")
-                return None
+        # 回退到旧 bot (V2.0 兼容)
+        if self.bot:
+            try:
+                if hasattr(self.bot, 'async_reply'):
+                    res = await self.bot.async_reply(query, context)
+                    return getattr(res, 'content', str(res))
+                elif hasattr(self.bot, 'reply'):
+                    res = self.bot.reply(query, context)
+                    return getattr(res, 'content', str(res))
+            except Exception as e:
+                self.logger.error(f"Bot 调用失败: {e}")
 
-        except Exception as e:
-            self.logger.error(f"AI Bot调用失败: {e}")
-            return None
+        return None
 
     def _post_process_guardrail(self, response_text: str, session_id: str, metadata: Dict[str, Any]) -> str:
         """

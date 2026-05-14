@@ -143,15 +143,14 @@ def _get_keyword_handler():
 
 # 提供兼容的handler_chain函数实现
 def handler_chain(use_ai=True, businessHours=None, bot=None):
-    """简化版处理器链创建函数 - V2.0 架构：移除旧版关键词拦截器"""
+    """V3.0 处理器链：AI 处理器内部使用 MessagePipeline 替代 CustomerAgent"""
     handlers = []
 
-    # V2.0 修复：移除 KeywordDetectionHandler，所有消息流经 LangGraph 意图大脑
-    # 旧版拦截器已被 node_router 的五级漏斗路由替代
-
-    # 1. 如果启用AI，添加AI处理器
+    # 1. 如果启用AI，添加AI处理器（V3.0: bot 可为 None）
     if use_ai:
-        handlers.append(create_ai_handler(bot))
+        ai_handler = create_ai_handler(bot)
+        if ai_handler is not None:
+            handlers.append(ai_handler)
 
     # 2. 最后添加兜底处理器
     handlers.append(CatchAllHandler())

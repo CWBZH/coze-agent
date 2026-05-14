@@ -19,9 +19,8 @@ class MessageHandlerMixin:
     """消息处理 Mixin"""
 
     async def _setup_message_consumer(self, queue_name: str):
-        """设置消息消费者和处理器链"""
+        """V3.0: 设置消息消费者 — 使用 MessagePipeline 替代 CustomerAgent"""
         from Message import message_consumer_manager, queue_manager, handler_chain
-        from Agent.CustomerAgent.custom.customer_agent import CustomerAgent
 
         try:
             existing_consumer = message_consumer_manager.get_consumer(queue_name)
@@ -38,14 +37,11 @@ class MessageHandlerMixin:
 
             consumer = message_consumer_manager.create_consumer(queue_name, max_concurrent=10)
 
-            try:
-                from core.di_container import container
-                bot = container.get(CustomerAgent)
-            except Exception:
-                bot = CustomerAgent()
-            handlers = handler_chain(use_ai=True, businessHours=self.businessHours, bot=bot)
+            # V3.0: 不再注入 CustomerAgent，handler 内部使用 MessagePipeline
+            handlers = handler_chain(use_ai=True, businessHours=self.businessHours, bot=None)
             for handler in handlers:
-                consumer.add_handler(handler)
+                if handler is not None:
+                    consumer.add_handler(handler)
 
             await message_consumer_manager.start_consumer(queue_name)
             self.logger.debug(f"消息消费者已启动: {queue_name}")
