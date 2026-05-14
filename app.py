@@ -43,8 +43,20 @@ configure_standard_services(_app_config)
 
 # ============================================================================
 
-from ui.main_ui import MainWindow
 import time
+
+# V3.0 模块初始化
+from database.db_manager import get_db_manager
+from Session.session_manager import SessionManager
+from Message.handlers.keyword_handler import KeywordHandler
+from Message.handlers.fastgpt_handler import FastGPTHandler
+from Message.core.pipeline import MessagePipeline
+
+_db_v3 = get_db_manager()
+_session_mgr_v3 = SessionManager(_db_v3)
+_keyword_handler_v3 = KeywordHandler(_db_v3)
+_fastgpt_handler_v3 = FastGPTHandler()
+_pipeline_v3 = MessagePipeline(_db_v3, _session_mgr_v3, _keyword_handler_v3, _fastgpt_handler_v3, {})
 
 # 设置 Playwright 浏览器路径（支持打包后的 exe）
 def get_project_root():
@@ -83,6 +95,10 @@ def main():
     window.show()
     logger.info(f"  MainWindow 实例化耗时: {time.perf_counter() - t_window:.2f}s")
     logger.info(f"窗口创建与显示总耗时: {time.perf_counter() - t0:.2f}s")
+
+    # 将 V3.0 模块挂载到窗口
+    window.pipeline = _pipeline_v3
+    window.session_mgr = _session_mgr_v3
 
     # 将窗口设为应用级别的变量，防止被垃圾回收
     app.main_window = window

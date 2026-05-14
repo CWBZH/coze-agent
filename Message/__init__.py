@@ -3,6 +3,16 @@ Message模块重构版入口
 保持向后兼容性的同时简化架构
 """
 
+# V3.0 新管道 — 独立依赖，优先加载
+from .core.pipeline import MessagePipeline
+
+# V3.0 处理器
+try:
+    from .handlers.fastgpt_handler import FastGPTHandler, SYSTEM_PROMPT_TEMPLATE
+    from .handlers.keyword_handler import KeywordHandler
+except ImportError:
+    pass
+
 # 核心模块 - 新的简化实现
 from .core.queue import SimpleMessageQueue, queue_manager
 from .core.consumer import MessageConsumer, message_consumer_manager
@@ -13,9 +23,12 @@ from .message import ChatMessage
 from .models.queue_models import MessageWrapper, QueueStats
 
 # 处理器 - 新的模块化实现
-from .handlers.base import BaseHandler
-from .handlers.ai_handler import AIReplyHandler
-from .handlers.preprocessor import MessagePreprocessor
+try:
+    from .handlers.base import BaseHandler
+    from .handlers.ai_handler import AIReplyHandler
+    from .handlers.preprocessor import MessagePreprocessor
+except ImportError:
+    pass
 
 # 管理器 - 直接使用核心队列管理器
 from .core.queue import QueueManager
@@ -83,23 +96,24 @@ async def get_message(queue_name: str, timeout: float = None):
 # 便捷的处理器创建函数
 # ============================================================================
 
-def create_ai_handler(bot=None) -> AIReplyHandler:
-    """创建AI回复处理器"""
-    return AIReplyHandler(bot)
+def create_ai_handler(bot=None):
+    """创建AI回复处理器（V3.0: 尝试导入，失败则返回None）"""
+    try:
+        from .handlers.ai_handler import AIReplyHandler
+        return AIReplyHandler(bot)
+    except ImportError:
+        return None
 
 
 def create_simple_handlers() -> list:
     """创建简单处理器列表"""
-    # TODO: 实现或导入 SimpleReplyHandler, TextOnlyHandler, LoggingHandler
     return []
 
 
 def create_comprehensive_handlers(bot=None) -> list:
     """创建全面的处理器列表"""
-    handlers = []
-    if bot:
-        handlers.insert(0, AIReplyHandler(bot))
-    return handlers
+    handler = create_ai_handler(bot)
+    return [handler] if handler else []
 
 
 # ============================================================================
@@ -155,7 +169,6 @@ __all__ = [
     'MessageQueueManager',
     'MessageHandler',
     'MessageConsumer',
-    'MessageConsumerManager',
     'TypeBasedHandler',
     'ChannelBasedHandler',
     'ChatMessage',
@@ -171,11 +184,14 @@ __all__ = [
     'message_consumer_manager',
     'QueueManager',
 
-    # 处理器类
+    # V3.0 新组件
+    'MessagePipeline',
+    'FastGPTHandler',
+    'KeywordHandler',
+
+    # 处理器类（V2.0 向后兼容）
     'BaseHandler',
-    'AIReplyHandler',
     'MessagePreprocessor',
-    'KeywordDetectionHandler',
 
     # 便捷函数
     'init_message_system',

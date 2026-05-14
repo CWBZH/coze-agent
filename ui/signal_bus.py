@@ -53,6 +53,22 @@ class SignalBus(QObject):
     # 回复发送结果信号：参数 (shop_id, user_id, success, error_msg)
     playwright_reply_result_signal = pyqtSignal(str, str, bool, str)
 
+    # =========================================================================
+    # V3.0 多店铺客服系统信号
+    # =========================================================================
+    # 转人工信号：参数 (shop_id, buyer_id, session_id, reason, history)
+    on_transfer_human = pyqtSignal(str, str, str, str, str)
+    # 新消息信号：参数 (shop_id, buyer_id, session_id, content)
+    on_new_message = pyqtSignal(str, str, str, str)
+    # AI 回复信号：参数 (shop_id, buyer_id, session_id, reply, latency_ms)
+    on_ai_reply = pyqtSignal(str, str, str, str, float)
+    # 店铺状态变化：参数 (shop_id, status)  status: online/offline
+    on_status_change = pyqtSignal(str, str)
+    # 关键词匹配信号：参数 (shop_id, buyer_id, keyword, action)
+    on_keyword_match = pyqtSignal(str, str, str, str)
+    # 错误信号：参数 (module, error_msg)
+    on_error = pyqtSignal(str, str)
+
 
 # 全局单例广播站
 global_signal_bus = SignalBus()

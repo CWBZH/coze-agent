@@ -46,6 +46,9 @@ class MainWindow(FluentWindow):
         global_signal_bus.human_fallback_signal.connect(self._show_fallback_alert)
         self.logger.info("  已连接人工接管警报信号广播")
 
+        # V3.0 新信号连接
+        global_signal_bus.on_transfer_human.connect(self._show_fallback_alert)
+
         t = time.perf_counter()
         # 立即初始化导航和窗口
         self.initWindow()
@@ -197,6 +200,9 @@ class MainWindow(FluentWindow):
         t0 = time.perf_counter()
         # 局部按需导入，减少启动时的重依赖加载
         t = time.perf_counter()
+        from ui.dashboard_ui import DashboardWidget
+        self.logger.info(f"  import DashboardWidget: {time.perf_counter()-t:.2f}s")
+        t = time.perf_counter()
         from ui.auto_reply_ui import AutoReplyUI
         self.logger.info(f"  import AutoReplyUI: {time.perf_counter()-t:.2f}s")
         t = time.perf_counter()
@@ -214,6 +220,9 @@ class MainWindow(FluentWindow):
         t = time.perf_counter()
         from ui.Knowledge_ui import KnowledgeUI
         self.logger.info(f"  import KnowledgeUI: {time.perf_counter()-t:.2f}s")
+        t = time.perf_counter()
+        self.dashboard_view = DashboardWidget(self)
+        self.logger.info(f"  DashboardWidget: {time.perf_counter()-t:.2f}s")
         t = time.perf_counter()
         self.monitor_view = AutoReplyUI(self)
         self.logger.info(f"  AutoReplyUI: {time.perf_counter()-t:.2f}s")
@@ -241,6 +250,7 @@ class MainWindow(FluentWindow):
     def initNavigation(self):
         self.navigationInterface.setExpandWidth(200)
         self.navigationInterface.setMinimumWidth(200)
+        self.addSubInterface(self.dashboard_view, FIF.HOME, '首页')
         self.addSubInterface(self.monitor_view, FIF.CHAT, '自动回复')
         self.addSubInterface(self.keyword_manager_view, FIF.EDIT, '关键词管理')
         self.addSubInterface(self.user_manager_view, FIF.PEOPLE, '账号管理')

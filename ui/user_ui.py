@@ -457,33 +457,33 @@ class UserManagerWidget(QFrame):
         """从数据库加载账号数据"""
         try:
             self.accounts_data = []
-            
+
             # 获取所有渠道
             channels = db_manager.get_all_channels()
-            
+
             for channel in channels:
-                channel_name = channel["channel_name"]
-                
+                channel_name = channel.channel_name if hasattr(channel, 'channel_name') else channel["channel_name"]
+
                 # 获取该渠道下的所有店铺
                 shops = db_manager.get_shops_by_channel(channel_name)
-                
+
                 for shop in shops:
-                    shop_id = shop["shop_id"]
-                    
+                    shop_id = shop.shop_id if hasattr(shop, 'shop_id') else shop["shop_id"]
+
                     # 获取该店铺下的所有账号
                     accounts = db_manager.get_accounts_by_shop(channel_name, shop_id)
-                    
+
                     for account in accounts:
                         account_data = {
                             "channel_name": channel_name,
                             "shop_id": shop_id,
-                            "shop_name": shop["shop_name"],
-                            "shop_logo": shop.get("shop_logo"),
-                            "user_id": account["user_id"],
-                            "username": account["username"],
-                            "password": account["password"],
-                            "status": account["status"],
-                            "cookies": account.get("cookies")
+                            "shop_name": shop.shop_name if hasattr(shop, 'shop_name') else shop["shop_name"],
+                            "shop_logo": shop.shop_logo if hasattr(shop, 'shop_logo') else shop.get("shop_logo"),
+                            "user_id": account.user_id if hasattr(account, 'user_id') else account["user_id"],
+                            "username": account.username if hasattr(account, 'username') else account["username"],
+                            "password": account.password if hasattr(account, 'password') else account["password"],
+                            "status": account.status if hasattr(account, 'status') else account["status"],
+                            "cookies": account.cookies if hasattr(account, 'cookies') else account.get("cookies")
                         }
                         self.accounts_data.append(account_data)
             
@@ -656,7 +656,7 @@ class UserManagerWidget(QFrame):
             # 注意：这里的add_account可能需要更多参数，我们传递所有已知信息
             success = db_manager.add_account(
                 channel_name=channel_name,
-                shop_id=shop_id,
+                shop_platform_id=shop_id,
                 username=username,
                 password=result["password"],
                 user_id=result.get("user_id"),

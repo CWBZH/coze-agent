@@ -366,15 +366,7 @@ def configure_standard_services(config_instance: Any = None) -> 'DIContainer':
             factory=lambda: DatabaseManager(db_path=db_path)
         )
 
-    # 3. KnowledgeService（知识库服务）
-    from database.knowledge_service import KnowledgeService
-    if not container.is_registered(KnowledgeService):
-        container.register_singleton(
-            KnowledgeService,
-            factory=lambda: KnowledgeService()
-        )
-
-    # 4. NotificationService（UI 通知服务）- 环境隔离注入
+    # 3. NotificationService（UI 通知服务）- 环境隔离注入
     from core.notification import NotificationService, DummyNotificationService
     import os
 
