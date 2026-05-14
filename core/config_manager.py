@@ -3,7 +3,7 @@
 
 职责：
 - 封装 .env 文件读写（通过 python-dotenv）
-- 封装 Redis 提示词配置读写
+- 封装 SQLite 提示词配置读写
 - 提供统一的配置访问接口给 UI 层
 - 实现 UI 与底层配置存储的物理隔离
 
@@ -193,52 +193,6 @@ class ConfigManager:
         return success
 
     # =========================================================================
-    # Redis 配置
-    # =========================================================================
-
-    def get_redis_config(self) -> Dict[str, Any]:
-        """获取 Redis 配置"""
-        return {
-            "host": self.get_env("REDIS_HOST", "localhost"),
-            "port": self.get_int("REDIS_PORT", 6379),
-            "password": self.get_env("REDIS_PASSWORD", "123456"),
-            "db": self.get_int("REDIS_DB", 0),
-        }
-
-    def set_redis_config(self, host: str, port: int, password: str, db: int) -> bool:
-        """设置 Redis 配置"""
-        success = True
-        success &= self.set_env("REDIS_HOST", host)
-        success &= self.set_env("REDIS_PORT", str(port))
-        success &= self.set_env("REDIS_PASSWORD", password)
-        success &= self.set_env("REDIS_DB", str(db))
-
-        if success:
-            logger.info("Redis 配置已更新")
-        return success
-
-    # =========================================================================
-    # Qdrant 配置
-    # =========================================================================
-
-    def get_qdrant_config(self) -> Dict[str, Any]:
-        """获取 Qdrant 配置"""
-        return {
-            "host": self.get_env("QDRANT_HOST", "localhost"),
-            "port": self.get_int("QDRANT_PORT", 6333),
-        }
-
-    def set_qdrant_config(self, host: str, port: int) -> bool:
-        """设置 Qdrant 配置"""
-        success = True
-        success &= self.set_env("QDRANT_HOST", host)
-        success &= self.set_env("QDRANT_PORT", str(port))
-
-        if success:
-            logger.info("Qdrant 配置已更新")
-        return success
-
-    # =========================================================================
     # TTL 时间配置
     # =========================================================================
 
@@ -322,7 +276,7 @@ class ConfigManager:
         return success
 
     # =========================================================================
-    # 提示词配置（存储在 Redis）
+    # 提示词配置（存储在 SQLite）
     # =========================================================================
 
     def get_prompt_instructions(self, shop_id: str = "default") -> list:
@@ -336,17 +290,16 @@ class ConfigManager:
             指令列表
         """
         try:
-            from database.redis_manager import redis_manager
+            from database.db_manager import db_manager
 
             key = f"shop:{shop_id}:prompt_instructions"
-            data = redis_manager._client.get(key) if redis_manager._client else None
+            row = db_manager.get_config(key)
 
-            if data:
-                instructions = json.loads(data)
-                logger.debug(f"从 Redis 加载提示词指令: shop_id={shop_id}, count={len(instructions)}")
+            if row:
+                instructions = json.loads(row["config_value"])
+                logger.debug(f"从 SQLite 加载提示词指令: shop_id={shop_id}, count={len(instructions)}")
                 return instructions
 
-            # 返回默认指令
             return self._get_default_instructions()
         except Exception as e:
             logger.warning(f"获取提示词指令失败: {e}")
@@ -364,14 +317,10 @@ class ConfigManager:
             是否设置成功
         """
         try:
-            from database.redis_manager import redis_manager
-
-            if not redis_manager._client:
-                logger.warning("Redis 未连接，无法保存提示词指令")
-                return False
+            from database.db_manager import db_manager
 
             key = f"shop:{shop_id}:prompt_instructions"
-            redis_manager._client.set(key, json.dumps(instructions, ensure_ascii=False))
+            db_manager.set_config(key, json.dumps(instructions, ensure_ascii=False))
 
             logger.info(f"提示词指令已保存: shop_id={shop_id}, count={len(instructions)}")
             return True
@@ -390,21 +339,21 @@ class ConfigManager:
         ]
 
     # =========================================================================
-    # 一级拦截与固定话术配置（存储在 Redis）
+    # 一级拦截与固定话术配置（存储在 SQLite）
     # =========================================================================
 
     def get_agent_reply_rules(self, shop_id: str = "default") -> Dict[str, Any]:
         """获取一级拦截层和模板回复规则。"""
         defaults = self._get_default_agent_reply_rules()
         try:
-            from database.redis_manager import redis_manager
+            from database.db_manager import db_manager
 
             key = f"shop:{shop_id}:agent_reply_rules"
-            data = redis_manager._client.get(key) if redis_manager._client else None
-            if not data:
+            row = db_manager.get_config(key)
+            if not row:
                 return defaults
 
-            saved = json.loads(data)
+            saved = json.loads(row["config_value"])
             if not isinstance(saved, dict):
                 return defaults
             return self._normalize_agent_reply_rules({**defaults, **saved})
@@ -415,18 +364,14 @@ class ConfigManager:
     def set_agent_reply_rules(self, rules: Dict[str, Any], shop_id: str = "default") -> bool:
         """保存一级拦截层和模板回复规则。"""
         try:
-            from database.redis_manager import redis_manager
-
-            if not redis_manager._client:
-                logger.warning("Redis 未连接，无法保存一级拦截话术配置")
-                return False
+            from database.db_manager import db_manager
 
             key = f"shop:{shop_id}:agent_reply_rules"
             normalized = self._normalize_agent_reply_rules({
                 **self._get_default_agent_reply_rules(),
                 **(rules or {}),
             })
-            redis_manager._client.set(key, json.dumps(normalized, ensure_ascii=False))
+            db_manager.set_config(key, json.dumps(normalized, ensure_ascii=False))
             logger.info(f"一级拦截话术配置已保存: shop_id={shop_id}")
             return True
         except Exception as e:
@@ -481,21 +426,21 @@ class ConfigManager:
         }
 
     # =========================================================================
-    # 路由关键词配置（存储在 Redis）
+    # 路由关键词配置（存储在 SQLite）
     # =========================================================================
 
     def get_route_keywords(self, shop_id: str = "default") -> Dict[str, list]:
         """获取路由关键词配置。"""
         defaults = self._get_default_route_keywords()
         try:
-            from database.redis_manager import redis_manager
+            from database.db_manager import db_manager
 
             key = f"shop:{shop_id}:route_keywords"
-            data = redis_manager._client.get(key) if redis_manager._client else None
-            if not data:
+            row = db_manager.get_config(key)
+            if not row:
                 return defaults
 
-            saved = json.loads(data)
+            saved = json.loads(row["config_value"])
             if not isinstance(saved, dict):
                 return defaults
             return self._normalize_route_keywords({**defaults, **saved})
@@ -506,18 +451,14 @@ class ConfigManager:
     def set_route_keywords(self, keywords: Dict[str, Any], shop_id: str = "default") -> bool:
         """保存路由关键词配置。"""
         try:
-            from database.redis_manager import redis_manager
-
-            if not redis_manager._client:
-                logger.warning("Redis 未连接，无法保存路由关键词配置")
-                return False
+            from database.db_manager import db_manager
 
             normalized = self._normalize_route_keywords({
                 **self._get_default_route_keywords(),
                 **(keywords or {}),
             })
             key = f"shop:{shop_id}:route_keywords"
-            redis_manager._client.set(key, json.dumps(normalized, ensure_ascii=False))
+            db_manager.set_config(key, json.dumps(normalized, ensure_ascii=False))
             logger.info(f"路由关键词配置已保存: shop_id={shop_id}")
             return True
         except Exception as e:
@@ -582,8 +523,6 @@ class ConfigManager:
             config_data: 配置数据字典，支持以下键：
                 - llm: LLM 配置
                 - local_model: 本地模型配置
-                - redis: Redis 配置
-                - qdrant: Qdrant 配置
                 - ttl: TTL 配置
                 - threshold: 阈值配置
                 - business_hours: 业务时间配置
@@ -614,24 +553,6 @@ class ConfigManager:
                 max_tokens=lm.get("max_tokens", 50),
                 temperature=lm.get("temperature", 0.3),
                 timeout=lm.get("timeout", 30),
-            )
-
-        # Redis 配置
-        if "redis" in config_data:
-            redis = config_data["redis"]
-            success &= self.set_redis_config(
-                host=redis.get("host", "localhost"),
-                port=redis.get("port", 6379),
-                password=redis.get("password", "123456"),
-                db=redis.get("db", 0),
-            )
-
-        # Qdrant 配置
-        if "qdrant" in config_data:
-            qdrant = config_data["qdrant"]
-            success &= self.set_qdrant_config(
-                host=qdrant.get("host", "localhost"),
-                port=qdrant.get("port", 6333),
             )
 
         # TTL 配置
@@ -694,8 +615,6 @@ class ConfigManager:
         return {
             "llm": self.get_llm_config(),
             "local_model": self.get_local_model_config(),
-            "redis": self.get_redis_config(),
-            "qdrant": self.get_qdrant_config(),
             "ttl": self.get_ttl_config(),
             "threshold": self.get_threshold_config(),
             "business_hours": self.get_business_hours(),
@@ -705,55 +624,6 @@ class ConfigManager:
             "agent_reply_rules": self.get_agent_reply_rules(shop_id),
             "route_keywords": self.get_route_keywords(shop_id),
         }
-
-    # =========================================================================
-    # Redis 连接重建
-    # =========================================================================
-
-    def reinit_redis_client(self, host: str, port: int, password: str, db: int) -> bool:
-        """
-        重新初始化 Redis 客户端
-
-        当 Redis 配置变更时调用，重建连接池。
-
-        Args:
-            host: Redis 主机
-            port: Redis 端口
-            password: Redis 密码
-            db: Redis 数据库编号
-
-        Returns:
-            是否重建成功
-        """
-        try:
-            from database.redis_manager import redis_manager
-            import redis
-
-            # 关闭旧连接
-            if redis_manager._client:
-                try:
-                    redis_manager._client.close()
-                except Exception:
-                    pass
-
-            # 创建新连接
-            redis_manager._client = redis.Redis(
-                host=host,
-                port=port,
-                password=password,
-                db=db,
-                decode_responses=True,
-            )
-
-            # 测试连接
-            redis_manager._client.ping()
-
-            logger.info(f"Redis 连接已重建: {host}:{port}")
-            return True
-        except Exception as e:
-            logger.error(f"Redis 连接重建失败: {e}")
-            return False
-
 
 # 全局单例
 config_manager = ConfigManager()

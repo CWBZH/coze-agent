@@ -219,6 +219,22 @@ class TestDatabase(unittest.TestCase):
         result = self.db.get_config("test:del")
         self.assertIsNone(result)
 
+    def test_22_config_manager_sqlite_store(self):
+        """ConfigManager 通过 SQLite 存储配置"""
+        from core.config_manager import config_manager
+        instructions = ["测试指令1", "测试指令2"]
+        result = config_manager.set_prompt_instructions(instructions, shop_id="test_shop")
+        self.assertTrue(result)
+        loaded = config_manager.get_prompt_instructions(shop_id="test_shop")
+        self.assertEqual(loaded, instructions)
+
+    def test_23_config_manager_returns_defaults(self):
+        """ConfigManager 无配置时返回默认值"""
+        from core.config_manager import config_manager
+        result = config_manager.get_prompt_instructions(shop_id="nonexistent_xyz")
+        self.assertGreaterEqual(len(result), 5)
+        self.assertIn("请用中文回复", result[0])
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
