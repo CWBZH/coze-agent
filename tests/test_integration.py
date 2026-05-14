@@ -194,7 +194,8 @@ class TestDatabase(unittest.TestCase):
         self.db.set_config("test:key1", '{"name": "value"}')
         result = self.db.get_config("test:key1")
         self.assertIsNotNone(result)
-        self.assertIn("test:key1", result["config_key"])
+        self.assertEqual(result["config_key"], "test:key1")
+        self.assertEqual(result["config_value"], '{"name": "value"}')
 
     def test_19_overwrite_config(self):
         """覆盖已有配置项"""
