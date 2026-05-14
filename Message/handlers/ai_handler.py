@@ -227,7 +227,13 @@ class AIReplyHandler(BaseHandler):
                 from Session.session_manager import SessionManager
                 from core.config_manager import config_manager
 
-                fastgpt = FastGPTHandler()
+                # 从 AppConfig 读取 FastGPT API Key，没有则使用默认值
+                api_key = ""
+                fastgpt_config = db_manager.get_config("fastgpt:api_key")
+                if fastgpt_config:
+                    api_key = fastgpt_config["config_value"]
+
+                fastgpt = FastGPTHandler(api_key=api_key)
                 keyword = KeywordHandler(db_manager)
                 session_mgr = SessionManager(db_manager)
                 self._pipeline = MessagePipeline(

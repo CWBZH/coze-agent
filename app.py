@@ -53,9 +53,16 @@ from Message.handlers.fastgpt_handler import FastGPTHandler
 from Message.core.pipeline import MessagePipeline
 
 _db_v3 = get_db_manager()
+
+# 初始化 FastGPT API Key 到 AppConfig（首次运行持久化）
+_FASTGPT_API_KEY = "fastgpt-fsFMCzs5HZ8GleWaO1p7Pk69yNU2O8H9MDqGxMatuUgOXlNT85besEXeMtGDeTYd"
+_existing_key = _db_v3.get_config("fastgpt:api_key")
+if not _existing_key:
+    _db_v3.set_config("fastgpt:api_key", _FASTGPT_API_KEY)
+
 _session_mgr_v3 = SessionManager(_db_v3)
 _keyword_handler_v3 = KeywordHandler(_db_v3)
-_fastgpt_handler_v3 = FastGPTHandler()
+_fastgpt_handler_v3 = FastGPTHandler(api_key=_FASTGPT_API_KEY)
 _pipeline_v3 = MessagePipeline(_db_v3, _session_mgr_v3, _keyword_handler_v3, _fastgpt_handler_v3, {})
 
 # 设置 Playwright 浏览器路径（支持打包后的 exe）

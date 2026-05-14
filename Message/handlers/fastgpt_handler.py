@@ -25,9 +25,10 @@ FALLBACK_HARD = "亲，您的问题已转接人工客服处理~"
 
 
 class FastGPTHandler:
-    def __init__(self, fastgpt_url: str = "http://host.docker.internal:3000",
-                 timeout: int = 10, max_retries: int = 1):
+    def __init__(self, fastgpt_url: str = "http://localhost:3000/api",
+                 api_key: str = "", timeout: int = 10, max_retries: int = 1):
         self.fastgpt_url = fastgpt_url.rstrip('/')
+        self.api_key = api_key
         self.timeout = timeout
         self.max_retries = max_retries
         self._session_failures: Dict[str, int] = {}
@@ -35,7 +36,10 @@ class FastGPTHandler:
     def call(self, messages: List[Dict], dataset_id: str,
              chat_id: str = "", temperature: float = 0.7,
              max_tokens: int = 120) -> Dict:
-        url = f"{self.fastgpt_url}/api/v1/chat/completions"
+        url = f"{self.fastgpt_url}/v1/chat/completions"
+        headers = {"Content-Type": "application/json"}
+        if self.api_key:
+            headers["Authorization"] = f"Bearer {self.api_key}"
         payload = {
             "model": "doubao-seed-2-0-lite-260215",
             "messages": messages,
@@ -48,8 +52,7 @@ class FastGPTHandler:
         for attempt in range(self.max_retries + 1):
             try:
                 logger.debug(f"FastGPT call attempt={attempt+1}")
-                resp = requests.post(url, json=payload, timeout=self.timeout,
-                                     headers={"Content-Type": "application/json"})
+                resp = requests.post(url, json=payload, timeout=self.timeout, headers=headers)
                 if resp.status_code == 200:
                     data = resp.json()
                     content = (data.get("choices", [{}])[0].get("message", {}).get("content", "") or "")
