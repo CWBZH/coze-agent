@@ -1,152 +1,117 @@
 from sqlalchemy import Column, Integer, String, Text, ForeignKey, DateTime, Boolean, UniqueConstraint, Index
 from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import relationship, sessionmaker
+from sqlalchemy.orm import relationship
 from datetime import datetime
-import json
 
 Base = declarative_base()
 
+
 class Channel(Base):
-    """渠道表，存储电商渠道基本信息"""
     __tablename__ = 'channels'
-
     id = Column(Integer, primary_key=True, autoincrement=True)
-    channel_name = Column(String(50), unique=True, nullable=False, comment='渠道名称')
-    description = Column(String(255), comment='渠道描述')
-
-    # 关联关系 - 一个渠道可以有多个店铺
+    channel_name = Column(String(50), unique=True, nullable=False)
+    description = Column(String(255))
     shops = relationship('Shop', back_populates='channel', cascade='all, delete-orphan')
-
-    def __repr__(self):
-        return f"<Channel(channel_name='{self.channel_name}')>"
 
 
 class Shop(Base):
-    """店铺表，存储店铺基本信息"""
     __tablename__ = 'shops'
-
     id = Column(Integer, primary_key=True, autoincrement=True)
     channel_id = Column(Integer, ForeignKey('channels.id'), nullable=False)
-    shop_id = Column(String(100), nullable=False, comment='店铺ID')
-    shop_name = Column(String(100), nullable=False, comment='店铺名称')
-    shop_logo = Column(String(255), nullable=True, comment='店铺logo')
-    description = Column(String(255), comment='店铺描述')
-
-    # 关联关系 - 多个店铺属于一个渠道，一个店铺可以有多个账号
+    shop_id = Column(String(100), nullable=False)
+    shop_name = Column(String(100), nullable=False)
+    shop_logo = Column(String(255), nullable=True)
+    description = Column(String(255), nullable=True)
+    fastgpt_dataset_id = Column(String(100), nullable=True)
+    created_at = Column(DateTime, default=datetime.now)
     channel = relationship('Channel', back_populates='shops')
     accounts = relationship('Account', back_populates='shop', cascade='all, delete-orphan')
 
-    def __repr__(self):
-        return f"<Shop(shop_id='{self.shop_id}', shop_name='{self.shop_name}', channel='{self.channel.channel_name if self.channel else None}')>"
-
 
 class Account(Base):
-    """账号表，存储店铺账号信息"""
     __tablename__ = 'accounts'
-
     id = Column(Integer, primary_key=True, autoincrement=True)
     shop_id = Column(Integer, ForeignKey('shops.id'), nullable=False)
-    user_id = Column(String(100), nullable=False, comment='用户ID')
-    username = Column(String(100), nullable=False, comment='登录用户名')
-    password = Column(String(255), nullable=False, comment='登录密码')
-    cookies = Column(Text, comment='存储登录cookies信息的JSON字符串')
-    status = Column(Integer, default=None, comment='账号状态: None-未验证, 0-休息,1-在线, 3-离线')
-
-    # 关联关系 - 多个账号属于一个店铺
+    user_id = Column(String(100), nullable=False)
+    username = Column(String(100), nullable=False)
+    password = Column(String(255), nullable=False)
+    cookies = Column(Text, nullable=True)
+    status = Column(Integer, default=None)
     shop = relationship('Shop', back_populates='accounts')
-
-    def __repr__(self):
-        return f"<Account(username='{self.username}', shop='{self.shop.shop_name if self.shop else None}')>"
-
-
-class Keyword(Base):
-    """关键词表，存储关键词信息"""
-    __tablename__ = 'keywords'
-
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    keyword = Column(String(100), nullable=False, comment='关键词')
-
-    def __repr__(self):
-        return f"<Keyword(keyword='{self.keyword}')>"
 
 
 class ProductKnowledge(Base):
-    """产品知识表，存储LLM提取的商品详细知识"""
     __tablename__ = 'product_knowledge'
-
+    __table_args__ = (UniqueConstraint('shop_id', 'goods_id', name='uix_product_shop_goods'),)
     id = Column(Integer, primary_key=True, autoincrement=True)
-    shop_id = Column(Integer, ForeignKey('shops.id', ondelete='CASCADE'), nullable=False, comment='店铺ID')
-
-    __table_args__ = (
-        UniqueConstraint('shop_id', 'goods_id', name='uix_product_knowledge_shop_goods'),
-    )
-    goods_id = Column(Integer, nullable=False, comment='商品ID')
-    goods_name = Column(String(255), nullable=False, comment='商品名称')
-    price = Column(String(50), nullable=True, comment='价格范围（文本格式）')
-    price_min = Column(Integer, nullable=True, comment='最低价（分）')
-    price_max = Column(Integer, nullable=True, comment='最高价（分）')
-    sold_quantity = Column(Integer, nullable=True, comment='已售数量')
-    thumb_url = Column(String(500), nullable=True, comment='商品缩略图URL')
-    specifications = Column(Text, nullable=True, comment='规格信息（JSON格式）')
-    extracted_content = Column(Text, nullable=True, comment='LLM提取的详细产品知识')
-    raw_detail_json = Column(Text, nullable=True, comment='平台原始商品详情JSON')
-    attribute_json = Column(Text, nullable=True, comment='结构化商品属性JSON')
-    attribute_source_json = Column(Text, nullable=True, comment='属性来源、证据、置信度JSON')
-    knowledge_status = Column(String(30), nullable=False, default='pending', comment='pending/extracted/failed')
-    knowledge_version = Column(Integer, nullable=False, default=1, comment='知识抽取规则版本')
-    created_at = Column(DateTime, default=datetime.now, comment='创建时间')
-    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now, comment='更新时间')
-    last_extracted_at = Column(DateTime, default=datetime.now, comment='上次提取时间')
-
-    # 关联关系
+    shop_id = Column(Integer, ForeignKey('shops.id', ondelete='CASCADE'), nullable=False)
+    goods_id = Column(String(50), nullable=False)
+    goods_name = Column(String(255), nullable=False)
+    price = Column(String(50), nullable=True)
+    price_min = Column(Integer, nullable=True)
+    price_max = Column(Integer, nullable=True)
+    sold_quantity = Column(Integer, nullable=True)
+    thumb_url = Column(String(500), nullable=True)
+    specifications = Column(Text, nullable=True)
+    raw_detail_json = Column(Text, nullable=True)
+    knowledge_status = Column(String(30), nullable=False, default='pending')
+    created_at = Column(DateTime, default=datetime.now)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
     shop = relationship('Shop', backref='product_knowledge')
 
-    def __repr__(self):
-        return f"<ProductKnowledge(goods_id='{self.goods_id}', goods_name='{self.goods_name}')>"
 
-
-class ProductSearchTerm(Base):
-    """商品检索词倒排表，用于推荐场景的确定性召回"""
-    __tablename__ = 'product_search_terms'
-
+class Keyword(Base):
+    __tablename__ = 'keywords'
     id = Column(Integer, primary_key=True, autoincrement=True)
-    shop_id = Column(Integer, ForeignKey('shops.id', ondelete='CASCADE'), nullable=False, comment='店铺ID')
-    goods_id = Column(Integer, nullable=False, comment='商品ID')
-    term = Column(String(100), nullable=False, comment='检索词')
-    term_type = Column(String(30), nullable=False, comment='词类型: core/alias/sku/category/attribute')
-    weight = Column(Integer, nullable=False, default=10, comment='召回权重')
-    source = Column(String(100), nullable=True, comment='词来源')
-    created_at = Column(DateTime, default=datetime.now, comment='创建时间')
-    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now, comment='更新时间')
-
-    __table_args__ = (
-        UniqueConstraint('shop_id', 'goods_id', 'term', 'term_type', name='uix_product_search_term'),
-        Index('idx_product_search_terms_shop_term', 'shop_id', 'term'),
-        Index('idx_product_search_terms_shop_goods', 'shop_id', 'goods_id'),
-    )
-
-    shop = relationship('Shop', backref='product_search_terms')
-
-    def __repr__(self):
-        return f"<ProductSearchTerm(goods_id='{self.goods_id}', term='{self.term}', type='{self.term_type}')>"
+    shop_id = Column(Integer, ForeignKey('shops.id', ondelete='CASCADE'), nullable=False)
+    keyword = Column(String(100), nullable=False)
+    reply_text = Column(Text, nullable=True)
+    action = Column(String(30), nullable=False, default='auto_reply')
+    enabled = Column(Boolean, default=True, nullable=False)
+    shop = relationship('Shop', backref='keywords')
 
 
 class CustomerServiceKnowledge(Base):
-    """客服知识表，存储人工添加的客服话术和规则知识"""
     __tablename__ = 'customer_service_knowledge'
-
     id = Column(Integer, primary_key=True, autoincrement=True)
-    shop_id = Column(Integer, ForeignKey('shops.id', ondelete='CASCADE'), nullable=False, comment='店铺ID')
-    title = Column(String(255), nullable=False, comment='知识标题')
-    content = Column(Text, nullable=False, comment='知识内容')
-    tags = Column(String(255), nullable=True, comment='标签（逗号分隔）')
-    enabled = Column(Boolean, default=True, nullable=False, comment='是否启用')
-    is_vectorized = Column(Boolean, default=False, nullable=False, comment='是否已成功写入Qdrant向量库')
-    created_at = Column(DateTime, default=datetime.now, comment='创建时间')
-    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now, comment='更新时间')
-
-    # 关联关系
+    shop_id = Column(Integer, ForeignKey('shops.id', ondelete='CASCADE'), nullable=False)
+    title = Column(String(255), nullable=False)
+    content = Column(Text, nullable=False)
+    tags = Column(String(255), nullable=True)
+    enabled = Column(Boolean, default=True, nullable=False)
+    created_at = Column(DateTime, default=datetime.now)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
     shop = relationship('Shop', backref='customer_service_knowledge')
 
-    def __repr__(self):
-        return f"<CustomerServiceKnowledge(title='{self.title}', enabled={self.enabled}, is_vectorized={self.is_vectorized})>"
+
+class AppConfig(Base):
+    __tablename__ = 'app_config'
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    config_key = Column(String(255), unique=True, nullable=False, index=True)
+    config_value = Column(Text, nullable=False)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+
+
+class Conversation(Base):
+    __tablename__ = 'conversations'
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    session_id = Column(String(36), unique=True, nullable=False, index=True)
+    shop_id = Column(Integer, ForeignKey('shops.id', ondelete='CASCADE'), nullable=False)
+    buyer_id = Column(String(100), nullable=False)
+    user_id = Column(String(100), nullable=True)
+    status = Column(String(30), nullable=False, default='active')
+    created_at = Column(DateTime, default=datetime.now)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+    shop = relationship('Shop', backref='conversations')
+    messages = relationship('AgentMessage', back_populates='conversation', cascade='all, delete-orphan')
+
+
+class AgentMessage(Base):
+    __tablename__ = 'agent_messages'
+    __table_args__ = (Index('ix_agent_messages_session_timestamp', 'session_id', 'timestamp'),)
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    session_id = Column(String(36), ForeignKey('conversations.session_id', ondelete='CASCADE'), nullable=False)
+    role = Column(String(16), nullable=False)
+    content = Column(Text, nullable=True)
+    timestamp = Column(DateTime, default=datetime.now, nullable=False)
+    conversation = relationship('Conversation', back_populates='messages')
