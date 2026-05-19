@@ -3,22 +3,13 @@
 """
 import os
 # 必须在导入 playwright 之前设置浏览器路径
-from pathlib import Path
 from utils.path_utils import get_app_dir
 from utils.playwright_path import configure_playwright_browsers_path
 from utils.logger_loguru import get_logger
 
 # 设置 Playwright 浏览器路径
-app_dir = get_app_dir()
-browsers_path = app_dir / ".browsers"
-if browsers_path.exists():
-    os.environ["PLAYWRIGHT_BROWSERS_PATH"] = str(browsers_path)
-    logger_temp = get_logger("Pdd_login_init")
-    logger_temp.info(f"设置 Playwright 浏览器路径: {browsers_path}")
-else:
-    # 回退到用户目录
-    os.environ["PLAYWRIGHT_BROWSERS_PATH"] = os.path.join(os.getenv("LOCALAPPDATA", ""), "ms-playwright")
 
+app_dir = get_app_dir()
 browsers_path = configure_playwright_browsers_path()
 logger_temp = get_logger("Pdd_login_init")
 logger_temp.info(f"璁剧疆 Playwright 娴忚鍣ㄨ矾寰? {browsers_path}")

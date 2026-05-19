@@ -124,6 +124,13 @@ LOG_DIR = resolve_path(get_str("LOG_DIR", "./logs") or "./logs")
 CACHE_DIR = resolve_path(get_str("CACHE_DIR", str(DATA_DIR / "cache")) or str(DATA_DIR / "cache"))
 EXPORT_DIR = resolve_path(get_str("EXPORT_DIR", str(DATA_DIR / "exports")) or str(DATA_DIR / "exports"))
 DB_PATH = resolve_path(get_str("DB_PATH", str(DATA_DIR / "channel_shop.db")) or str(DATA_DIR / "channel_shop.db"))
+BROWSER_CACHE_DIR = resolve_path(get_str("BROWSER_CACHE_DIR", str(BASE_DIR / ".browsers")) or str(BASE_DIR / ".browsers"))
+_PLAYWRIGHT_BROWSERS_PATH_VALUE = get_str("PLAYWRIGHT_BROWSERS_PATH")
+PLAYWRIGHT_BROWSERS_PATH = (
+    resolve_path(_PLAYWRIGHT_BROWSERS_PATH_VALUE)
+    if _PLAYWRIGHT_BROWSERS_PATH_VALUE
+    else None
+)
 
 
 def fastgpt_base_url() -> str:
@@ -212,3 +219,22 @@ def ensure_db_parent() -> Path:
 
 def log_file_path(filename: str = "app.log") -> Path:
     return LOG_DIR / filename
+
+
+def browser_cache_dir() -> Path:
+    return BROWSER_CACHE_DIR
+
+
+def playwright_browsers_path() -> Optional[Path]:
+    return PLAYWRIGHT_BROWSERS_PATH
+
+
+def project_browsers_dir() -> Path:
+    return BASE_DIR / ".browsers"
+
+
+def windows_playwright_browsers_dir() -> Optional[Path]:
+    local_app_data = get_str("LOCALAPPDATA")
+    if not local_app_data:
+        return None
+    return Path(local_app_data).expanduser() / "ms-playwright"

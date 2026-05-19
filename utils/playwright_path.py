@@ -5,7 +5,7 @@ import os
 from pathlib import Path
 from typing import Iterable, Optional
 
-from utils.path_utils import get_app_dir
+from core import settings
 
 
 def _playwright_browsers_json() -> Optional[Path]:
@@ -42,29 +42,54 @@ def _has_required_chromium(candidate: Path) -> bool:
     headless_revision = revisions.get("chromium-headless-shell")
 
     if chromium_revision:
-        chrome = candidate / f"chromium-{chromium_revision}" / "chrome-win" / "chrome.exe"
-        if not chrome.exists():
+        chrome_root = candidate / f"chromium-{chromium_revision}"
+        chrome_candidates = [
+            chrome_root / "chrome-win" / "chrome.exe",
+            chrome_root / "chrome-linux" / "chrome",
+            chrome_root / "chrome-mac" / "Chromium.app" / "Contents" / "MacOS" / "Chromium",
+        ]
+        if not any(path.exists() for path in chrome_candidates):
             return False
 
     if headless_revision:
-        headless = (
-            candidate
-            / f"chromium_headless_shell-{headless_revision}"
-            / "chrome-win"
-            / "headless_shell.exe"
-        )
-        if not headless.exists():
+        headless_root = candidate / f"chromium_headless_shell-{headless_revision}"
+        headless_candidates = [
+            headless_root / "chrome-win" / "headless_shell.exe",
+            headless_root / "chrome-linux" / "headless_shell",
+            headless_root / "chrome-mac" / "headless_shell",
+        ]
+        if not any(path.exists() for path in headless_candidates):
             return False
 
     return bool(chromium_revision or headless_revision)
 
 
 def _candidate_paths() -> Iterable[Path]:
-    yield get_app_dir() / ".browsers"
+    seen: set[Path] = set()
 
-    local_app_data = os.getenv("LOCALAPPDATA")
-    if local_app_data:
-        yield Path(local_app_data) / "ms-playwright"
+    configured = settings.playwright_browsers_path()
+    if configured:
+        resolved = configured.resolve()
+        seen.add(resolved)
+        yield configured
+
+    cache_dir = settings.browser_cache_dir()
+    resolved_cache = cache_dir.resolve()
+    if resolved_cache not in seen:
+        seen.add(resolved_cache)
+        yield cache_dir
+
+    project_dir = settings.project_browsers_dir()
+    resolved_project = project_dir.resolve()
+    if resolved_project not in seen:
+        seen.add(resolved_project)
+        yield project_dir
+
+    windows_dir = settings.windows_playwright_browsers_dir()
+    if windows_dir:
+        resolved_windows = windows_dir.resolve()
+        if resolved_windows not in seen:
+            yield windows_dir
 
 
 def configure_playwright_browsers_path() -> Path:
@@ -76,11 +101,21 @@ def configure_playwright_browsers_path() -> Path:
     the expected revision before setting the environment variable.
     """
 
+    configured = settings.playwright_browsers_path()
+    if configured:
+        os.environ["PLAYWRIGHT_BROWSERS_PATH"] = str(configured)
+        return configured
+
+    if os.getenv("BROWSER_CACHE_DIR"):
+        cache_dir = settings.browser_cache_dir()
+        os.environ["PLAYWRIGHT_BROWSERS_PATH"] = str(cache_dir)
+        return cache_dir
+
     for candidate in _candidate_paths():
         if candidate.exists() and _has_required_chromium(candidate):
             os.environ["PLAYWRIGHT_BROWSERS_PATH"] = str(candidate)
             return candidate
 
-    fallback = get_app_dir() / ".browsers"
+    fallback = settings.project_browsers_dir()
     os.environ["PLAYWRIGHT_BROWSERS_PATH"] = str(fallback)
     return fallback

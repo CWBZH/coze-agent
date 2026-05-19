@@ -49,8 +49,8 @@
 | `SESSION_COMPRESS_TIMEOUT` | 会话压缩超时秒数 | 是，`core/config.py` | `20` | `20` | 否 | `20` |
 | `SESSION_COMPRESS_MAX_TOKENS` | 会话压缩最大 tokens | 是，`core/config.py` | `80` | `80` | 否 | `80` |
 | `SESSION_COMPRESS_TEMPERATURE` | 会话压缩温度 | 是，`core/config.py` | `0.3` | `0.3` | 否 | `0.3` |
-| `PLAYWRIGHT_BROWSERS_PATH` | Playwright 浏览器目录 | 是，`pdd_login.py` 设置/读取环境 | `./.browsers` | `/ms-playwright` | 否 | 项目 `.browsers` |
-| `BROWSER_CACHE_DIR` | 浏览器缓存目录 | 否，reserved for Linux delivery | `./.browsers` | `/ms-playwright` | 否 | `./.browsers` |
+| `PLAYWRIGHT_BROWSERS_PATH` | Playwright browser directory | Yes, `core/settings.py` and `utils/playwright_path.py` | `./.browsers` | `/ms-playwright` | No | project `.browsers` |
+| `BROWSER_CACHE_DIR` | Browser cache directory | Yes, `core/settings.py` and `utils/playwright_path.py` | `./.browsers` | `/ms-playwright` | No | `./.browsers` |
 | `WORKER_CONCURRENCY` | consumer worker 数量 | 否，reserved for T021 配置加载 | `10` | `10` | 否 | `10` |
 | `MESSAGE_QUEUE_MAX_SIZE` | 消息队列最大长度 | 否，reserved for Linux delivery | `1000` | `1000` | 否 | `1000` |
 | `RECONNECT_MAX_ATTEMPTS` | 重连最大次数 | 否，reserved for T021 配置加载 | `10` | `10` | 否 | `10` |
@@ -232,3 +232,26 @@ Security policy:
 - No hardcoded Redis password is provided by code defaults.
 - Production deployments should set `REDIS_PASSWORD` explicitly when Redis requires authentication.
 - This task does not change Redis lock semantics, Fail-Safe behavior, or Docker Compose Redis exposure.
+
+## T021-E Playwright browser path settings update
+
+`customer-agent-refactor-v3` now centralizes Playwright browser cache path selection through `core/settings.py` and `utils/playwright_path.py`.
+
+Currently centralized:
+
+- `PLAYWRIGHT_BROWSERS_PATH`
+- `BROWSER_CACHE_DIR`
+
+Path priority:
+
+- Explicit `PLAYWRIGHT_BROWSERS_PATH` wins.
+- If unset, explicit `BROWSER_CACHE_DIR` is used.
+- If both are unset, the project `.browsers` directory is used.
+- Windows local fallback keeps `LOCALAPPDATA/ms-playwright`.
+- Linux deployments can set `PLAYWRIGHT_BROWSERS_PATH=/ms-playwright`.
+
+Compatibility policy:
+
+- Windows local `.browsers` and `LOCALAPPDATA/ms-playwright` fallback are preserved.
+- Browser detection now checks Windows and Linux Chromium/headless-shell layouts.
+- This task does not change Pinduoduo login flow, account storage, cookie storage, Docker, or headless worker behavior.
