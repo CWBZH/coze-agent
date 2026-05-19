@@ -26,26 +26,84 @@ class MessageConsumer:
         self.running = False
         self.consumer_task = None
         self._tasks: set = set()
+        self._loop = None
         self.logger = get_logger(f"Consumer.{queue_name}")
 
     def add_handler(self, handler: MessageHandler):
         """添加处理器"""
+        if handler is None:
+            return
+        handler_key = self._handler_key(handler)
+        for existing in self.handlers:
+            if self._handler_key(existing) == handler_key:
+                self.logger.debug(
+                    f"Handler already registered: queue_name={self.queue_name}, "
+                    f"handler={handler_key}, handler_count={len(self.handlers)}"
+                )
+                return
         self.handlers.append(handler)
-        self.logger.debug(f"Added handler: {handler.__class__.__name__}")
+        self.logger.debug(
+            f"Added handler: queue_name={self.queue_name}, handler={handler_key}, "
+            f"handler_count={len(self.handlers)}"
+        )
 
     def is_running(self) -> bool:
         """检查消费者是否正在运行"""
-        return self.running
+        if not self.running:
+            return False
+        if self.consumer_task is None:
+            self.running = False
+            return False
+        if self.consumer_task.done():
+            self.running = False
+            return False
+        return True
+
+    def is_bound_to_current_loop(self) -> bool:
+        """Return True when this consumer belongs to the active asyncio loop."""
+        if self._loop is None:
+            return True
+        try:
+            return self._loop is asyncio.get_running_loop()
+        except RuntimeError:
+            return True
+
+    def loop_id(self) -> str:
+        return str(id(self._loop)) if self._loop is not None else "none"
+
+    def handler_count(self) -> int:
+        return len(self.handlers)
+
+    def diagnostic_state(self) -> Dict[str, Any]:
+        return {
+            "queue_name": self.queue_name,
+            "loop_id": self.loop_id(),
+            "consumer_id": id(self),
+            "handler_count": len(self.handlers),
+            "running": self.is_running(),
+        }
+
+    def _handler_key(self, handler: MessageHandler) -> str:
+        cls = handler.__class__
+        return f"{cls.__module__}.{cls.__name__}"
 
     async def start(self):
         """启动消费者"""
-        if self.running:
-            self.logger.warning(f"Consumer {self.queue_name} is already running")
+        if self.is_running():
+            self.logger.warning(
+                f"Consumer already running: queue_name={self.queue_name}, "
+                f"loop_id={self.loop_id()}, consumer_id={id(self)}, "
+                f"handler_count={len(self.handlers)}, running=True"
+            )
             return
 
+        self._loop = asyncio.get_running_loop()
         self.running = True
         self.consumer_task = asyncio.create_task(self._consume_loop())
-        self.logger.info(f"Consumer {self.queue_name} started")
+        self.logger.info(
+            f"Consumer started: queue_name={self.queue_name}, loop_id={self.loop_id()}, "
+            f"consumer_id={id(self)}, handler_count={len(self.handlers)}, running=True"
+        )
 
     async def _consume_loop(self):
         """消费循环"""
@@ -60,30 +118,58 @@ class MessageConsumer:
                         task = asyncio.create_task(self._process_message(wrapper))
                         self._tasks.add(task)
                         task.add_done_callback(self._tasks.discard)
+                except RuntimeError as e:
+                    if "bound to a different event loop" in str(e):
+                        self.logger.error(f"Consumer {self.queue_name} stopped: queue is bound to another event loop")
+                        self.running = False
+                        break
+                    self.logger.error(f"Consumer error: {e}")
+                    await asyncio.sleep(0.1)
                 except Exception as e:
                     self.logger.error(f"Consumer error: {e}")
                     await asyncio.sleep(0.1)
         finally:
-            self.logger.info(f"Consumer {self.queue_name} stopped")
+            self.running = False
+            self.logger.info(
+                f"Consumer stopped: queue_name={self.queue_name}, loop_id={self.loop_id()}, "
+                f"consumer_id={id(self)}, handler_count={len(self.handlers)}, running=False"
+            )
 
     async def stop(self):
-        """停止消费者"""
+        """停止消费者（安全处理跨事件循环）"""
         self.running = False
 
-        # 取消消费任务
-        if hasattr(self, 'consumer_task'):
-            self.consumer_task.cancel()
+        # 取消消费任务（处理跨 loop 场景）
+        if hasattr(self, 'consumer_task') and self.consumer_task:
             try:
+                self.consumer_task.cancel()
                 await self.consumer_task
-            except asyncio.CancelledError:
+            except (asyncio.CancelledError, RuntimeError):
                 pass
 
         # 等待所有正在处理的任务完成
         if self._tasks:
-            pending = [t for t in self._tasks if not t.done()]
-            if pending:
-                await asyncio.gather(*pending, return_exceptions=True)
+            try:
+                pending = [t for t in self._tasks if not t.done()]
+                if pending:
+                    await asyncio.gather(*pending, return_exceptions=True)
+            except RuntimeError:
+                pass
             self._tasks.clear()
+
+    async def stop_from_any_loop(self, timeout: float = 5.0) -> bool:
+        """Stop this consumer, scheduling cleanup on its owner loop when needed."""
+        if self.is_bound_to_current_loop():
+            await asyncio.wait_for(self.stop(), timeout=timeout)
+            return not self.is_running()
+
+        if self._loop is None or self._loop.is_closed():
+            self.running = False
+            return not self.is_running()
+
+        future = asyncio.run_coroutine_threadsafe(self.stop(), self._loop)
+        await asyncio.wait_for(asyncio.wrap_future(future), timeout=timeout)
+        return not self.is_running()
 
     async def _process_message(self, wrapper: MessageWrapper):
         """处理单个消息"""
@@ -156,13 +242,26 @@ class MessageConsumerManager:
 
     def create_consumer(self, queue_name: str, max_concurrent: int = 10) -> MessageConsumer:
         """创建消费者"""
-        if queue_name in self._consumers:
-            self.logger.warning(f"Consumer {queue_name} already exists")
-            return self._consumers[queue_name]
+        existing = self._consumers.get(queue_name)
+        if existing:
+            state = existing.diagnostic_state()
+            self.logger.warning(
+                f"Consumer already exists: queue_name={state['queue_name']}, "
+                f"loop_id={state['loop_id']}, consumer_id={state['consumer_id']}, "
+                f"handler_count={state['handler_count']}, running={state['running']}"
+            )
+            if existing.is_running():
+                return existing
+            self._consumers.pop(queue_name, None)
 
         consumer = MessageConsumer(queue_name, max_concurrent)
         self._consumers[queue_name] = consumer
-        self.logger.info(f"Created consumer: {queue_name}")
+        state = consumer.diagnostic_state()
+        self.logger.info(
+            f"Created consumer: queue_name={state['queue_name']}, loop_id={state['loop_id']}, "
+            f"consumer_id={state['consumer_id']}, handler_count={state['handler_count']}, "
+            f"running={state['running']}"
+        )
         return consumer
 
     def get_consumer(self, queue_name: str) -> MessageConsumer:
@@ -177,13 +276,78 @@ class MessageConsumerManager:
         else:
             self.logger.error(f"Consumer {queue_name} not found")
 
-    async def stop_consumer(self, queue_name: str):
-        """停止消费者"""
+    async def stop_consumer(self, queue_name: str, timeout: float = 5.0) -> bool:
+        """停止消费者（安全处理跨事件循环）"""
         consumer = self.get_consumer(queue_name)
         if consumer:
-            await consumer.stop()
+            state = consumer.diagnostic_state()
+            self.logger.info(
+                f"Stopping consumer: queue_name={state['queue_name']}, loop_id={state['loop_id']}, "
+                f"consumer_id={state['consumer_id']}, handler_count={state['handler_count']}, "
+                f"running={state['running']}, timeout={timeout}"
+            )
+            try:
+                stopped = await consumer.stop_from_any_loop(timeout=timeout)
+                if not stopped and consumer.is_running():
+                    self.logger.warning(
+                        f"Consumer still running after stop timeout: queue_name={queue_name}, "
+                        f"loop_id={consumer.loop_id()}, consumer_id={id(consumer)}, "
+                        f"handler_count={consumer.handler_count()}, running=True"
+                    )
+                    return False
+                self._consumers.pop(queue_name, None)
+                self.logger.info(
+                    f"Consumer stopped and removed: queue_name={queue_name}, "
+                    f"loop_id={consumer.loop_id()}, consumer_id={id(consumer)}, "
+                    f"handler_count={consumer.handler_count()}, running={consumer.is_running()}"
+                )
+                return True
+            except RuntimeError as e:
+                self.logger.warning(f"Consumer {queue_name} 停止失败（可能已跨事件循环）: {e}")
+                if consumer.is_running():
+                    self.logger.warning(
+                        f"Consumer stop failed and consumer is still running: queue_name={queue_name}, "
+                        f"loop_id={consumer.loop_id()}, consumer_id={id(consumer)}, "
+                        f"handler_count={consumer.handler_count()}, error={e}"
+                    )
+                    return False
+                self._consumers.pop(queue_name, None)
+                return True
+            except Exception as e:
+                self.logger.warning(f"Consumer {queue_name} 停止异常: {e}")
+                if consumer.is_running():
+                    self.logger.warning(
+                        f"Consumer stop failed and consumer is still running: queue_name={queue_name}, "
+                        f"loop_id={consumer.loop_id()}, consumer_id={id(consumer)}, "
+                        f"handler_count={consumer.handler_count()}, error={e}"
+                    )
+                    return False
+                self._consumers.pop(queue_name, None)
+                return True
         else:
             self.logger.error(f"Consumer {queue_name} not found")
+            return True
+
+    def force_remove(self, queue_name: str) -> bool:
+        """强制移除消费者（不清除资源，用于 event loop 已死的场景）"""
+        consumer = self._consumers.get(queue_name)
+        if not consumer:
+            return True
+        state = consumer.diagnostic_state()
+        if consumer.is_running():
+            self.logger.warning(
+                f"Refuse to force remove running consumer: queue_name={state['queue_name']}, "
+                f"loop_id={state['loop_id']}, consumer_id={state['consumer_id']}, "
+                f"handler_count={state['handler_count']}, running=True"
+            )
+            return False
+        del self._consumers[queue_name]
+        self.logger.info(
+            f"Force removed stopped consumer: queue_name={state['queue_name']}, "
+            f"loop_id={state['loop_id']}, consumer_id={state['consumer_id']}, "
+            f"handler_count={state['handler_count']}, running={state['running']}"
+        )
+        return True
 
     def list_consumers(self) -> List[str]:
         """列出所有消费者"""

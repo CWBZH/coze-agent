@@ -14,9 +14,14 @@ V2.0 战役七：上线预备重构
 """
 from __future__ import annotations
 
+import threading
+
 from PyQt6.QtCore import QObject
 
+from core.human_alert_context import HumanAlertContextBuilder, format_human_alert_message
 from core.notification import NotificationService
+from core.pushplus_notifier import PushPlusNotifier
+from database.db_manager import db_manager
 from database.redis_manager import redis_manager
 from ui.signal_bus import global_signal_bus
 from utils.logger_loguru import get_logger
@@ -53,6 +58,8 @@ class UINotificationService(QObject, NotificationService):
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        self._context_builder = HumanAlertContextBuilder(db_manager)
+        self._pushplus_notifier = PushPlusNotifier()
         logger.info("UINotificationService 初始化完成（Redis 防抖模式 + 警报分级）")
 
     def alert_human_fallback(
@@ -90,3 +97,27 @@ class UINotificationService(QObject, NotificationService):
             f"alert_level={alert_level}, reason={reason}"
         )
         global_signal_bus.human_fallback_signal.emit(shop_id, user_id, reason, alert_level)
+        self._notify_pushplus_async(shop_id, user_id, reason, alert_level)
+
+    def _notify_pushplus_async(self, shop_id: str, user_id: str, reason: str, alert_level: str) -> None:
+        thread = threading.Thread(
+            target=self._notify_pushplus,
+            args=(shop_id, user_id, reason, alert_level),
+            daemon=True,
+        )
+        thread.start()
+
+    def _notify_pushplus(self, shop_id: str, user_id: str, reason: str, alert_level: str) -> None:
+        try:
+            alert_context = self._context_builder.build(shop_id, user_id)
+            content = format_human_alert_message(alert_context, reason, alert_level)
+            title = "客服助手转人工提醒"
+            if alert_level == "high":
+                title = "高危转人工提醒"
+            result = self._pushplus_notifier.send(title, content)
+            if result.skipped:
+                logger.info(f"pushplus 通知跳过: {result.reason}")
+            elif not result.sent:
+                logger.warning(f"pushplus 通知失败: {result.reason}")
+        except Exception as e:
+            logger.warning(f"pushplus 通知线程异常: {e}")

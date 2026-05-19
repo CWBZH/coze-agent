@@ -1,7 +1,10 @@
-"""FastGPT API 调用处理器"""
+"""FastGPT API 调用处理器。"""
+import random
+from typing import Dict, List
+
 import requests
-import time
-from typing import Dict, List, Optional
+
+from core.constants import TRANSFER_HUMAN_REPLY
 from utils.logger_loguru import get_logger
 
 logger = get_logger("FastGPTHandler")
@@ -20,22 +23,45 @@ SYSTEM_PROMPT_TEMPLATE = """你是拼多多店铺【{shop_name}】的客服。
 - 对话轮次: 第 {turn_count} 轮
 - 已有商品缓存: {cached_products}"""
 
-FALLBACK_SOFT = "亲，我正在思考中，请稍等片刻~"
-FALLBACK_HARD = "亲，您的问题已转接人工客服处理~"
+FALLBACK_POOL = [
+    "亲，我正在为您查询，请稍等片刻~",
+    "亲，我正在核实信息，马上就好~",
+    "亲，稍等一下，客服正在为您处理哦~",
+    "亲，正在加急为您查询中~",
+    "亲，信息正在赶来，请稍等~",
+    "亲，已经收到您的消息，马上回复您~",
+]
+FALLBACK_HARD = TRANSFER_HUMAN_REPLY
 
 
 class FastGPTHandler:
-    def __init__(self, fastgpt_url: str = "http://localhost:3000/api",
-                 api_key: str = "", timeout: int = 10, max_retries: int = 1):
-        self.fastgpt_url = fastgpt_url.rstrip('/')
+    def __init__(
+        self,
+        fastgpt_url: str = "http://localhost:3000/api",
+        api_key: str = "",
+        timeout: int = 25,
+        max_retries: int = 1,
+    ):
+        self.fastgpt_url = fastgpt_url.rstrip("/")
         self.api_key = api_key
         self.timeout = timeout
         self.max_retries = max_retries
         self._session_failures: Dict[str, int] = {}
 
-    def call(self, messages: List[Dict], dataset_id: str,
-             chat_id: str = "", temperature: float = 0.7,
-             max_tokens: int = 120) -> Dict:
+    def call(
+        self,
+        messages: List[Dict],
+        dataset_id: str,
+        chat_id: str = "",
+        shop_id: str = "",
+        shop_name: str = "",
+        temperature: float = 0.7,
+        max_tokens: int = 120,
+    ) -> Dict:
+        if not dataset_id:
+            logger.error(f"FastGPT dataset missing: shop_id={shop_id}, shop_name={shop_name}, chat_id={chat_id}")
+            return {"success": False, "content": None, "error": "missing_dataset_id"}
+
         url = f"{self.fastgpt_url}/v1/chat/completions"
         headers = {"Content-Type": "application/json"}
         if self.api_key:
@@ -47,23 +73,25 @@ class FastGPTHandler:
             "chatId": chat_id,
             "temperature": temperature,
             "max_tokens": max_tokens,
-            "stream": False
+            "stream": False,
         }
+        logger.info(
+            f"[FastGPTRoute] shop_id={shop_id}, shop_name={shop_name}, "
+            f"dataset_id={dataset_id}, chat_id={chat_id}"
+        )
         for attempt in range(self.max_retries + 1):
             try:
-                logger.debug(f"FastGPT call attempt={attempt+1}")
+                logger.debug(f"FastGPT call attempt={attempt + 1}")
                 resp = requests.post(url, json=payload, timeout=self.timeout, headers=headers)
                 if resp.status_code == 200:
                     data = resp.json()
                     content = (data.get("choices", [{}])[0].get("message", {}).get("content", "") or "")
                     usage = data.get("usage", {})
-                    return {"success": True, "content": content,
-                            "tokens": usage.get("total_tokens", 0)}
-                else:
-                    logger.error(f"FastGPT HTTP {resp.status_code}: {resp.text[:200]}")
-                    return {"success": False, "content": None, "error": f"HTTP {resp.status_code}"}
+                    return {"success": True, "content": content, "tokens": usage.get("total_tokens", 0)}
+                logger.error(f"FastGPT HTTP {resp.status_code}: {resp.text[:200]}")
+                return {"success": False, "content": None, "error": f"HTTP {resp.status_code}"}
             except requests.exceptions.Timeout:
-                logger.error(f"FastGPT timeout attempt={attempt+1}")
+                logger.error(f"FastGPT timeout attempt={attempt + 1}")
                 if attempt < self.max_retries:
                     continue
                 return {"success": False, "content": None, "error": "timeout"}
@@ -74,12 +102,12 @@ class FastGPTHandler:
 
     def get_fallback(self, session_id: str, max_failures: int = 3, already_failed: bool = False) -> str:
         if not already_failed:
-            return FALLBACK_SOFT
+            return random.choice(FALLBACK_POOL)
         count = self._session_failures.get(session_id, 0) + 1
         self._session_failures[session_id] = count
         if count >= max_failures:
             return FALLBACK_HARD
-        return FALLBACK_SOFT
+        return random.choice(FALLBACK_POOL)
 
     def should_transfer(self, session_id: str, max_failures: int = 3) -> bool:
         return self._session_failures.get(session_id, 0) >= max_failures

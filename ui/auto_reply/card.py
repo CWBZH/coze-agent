@@ -3,6 +3,7 @@ from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 from PyQt6.QtWidgets import QLabel, QWidget, QHBoxLayout, QVBoxLayout
 from PyQt6.QtGui import QFont, QPixmap
 from qfluentwidgets import CardWidget, StrongBodyLabel, CaptionLabel, BodyLabel, PushButton, PrimaryPushButton, InfoBadge, FluentIcon as FIF
+from ui.theme import BORDER, BORDER_SOFT, SURFACE_ALT, TEXT, TEXT_MUTED
 from .threads import LogoLoaderThread
 
 
@@ -60,7 +61,9 @@ class AutoReplyCard(CardWidget):
         self.logo_label = QLabel()
         self.logo_label.setFixedSize(65, 65)
         self.logo_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.logo_label.setStyleSheet("border-radius: 30px; border: 1px solid #e0e0e0; background-color: #f5f5f5;")
+        self.logo_label.setStyleSheet(
+            f"border-radius: 30px; border: 1px solid {BORDER}; background-color: {SURFACE_ALT}; color: {TEXT};"
+        )
         self.logo_label.setText("加载中...")
         return self.logo_label
 
@@ -79,7 +82,7 @@ class AutoReplyCard(CardWidget):
 
         shop_name_label = StrongBodyLabel(self.shop_name)
         shop_name_label.setFont(QFont("Microsoft YaHei", 14, QFont.Weight.Bold))
-        shop_name_label.setStyleSheet("color: #2c3e50;")
+        shop_name_label.setStyleSheet(f"color: {TEXT};")
 
         platform_badge = InfoBadge.info(self.platform, self)
         platform_badge.setFont(QFont("Microsoft YaHei", 9))
@@ -109,11 +112,11 @@ class AutoReplyCard(CardWidget):
         row_layout.setSpacing(8)
 
         label = CaptionLabel(label_text)
-        label.setStyleSheet("color: #7f8c8d; font-weight: 500;")
+        label.setStyleSheet(f"color: {TEXT_MUTED}; font-weight: 700;")
         label.setFixedWidth(60)
 
         value = BodyLabel(value_text)
-        value.setStyleSheet("color: #34495e;")
+        value.setStyleSheet(f"color: {TEXT};")
 
         row_layout.addWidget(label)
         row_layout.addWidget(value)

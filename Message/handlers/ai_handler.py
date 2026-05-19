@@ -15,6 +15,7 @@ V2.0 地狱级压测修复：
 from __future__ import annotations
 
 from typing import Dict, Any, Optional, List
+import time
 from bridge.context import Context, ContextType
 from .base import BaseHandler
 from .preprocessor import MessagePreprocessor
@@ -23,12 +24,16 @@ from .preprocessor import MessagePreprocessor
 from database.redis_manager import redis_manager
 
 # 导入集中式配置和常量
-from core.config import HUMAN_LOCK_TTL, INFERENCE_LOCK_TTL
-from core.constants import IMAGE_INTERCEPT_REPLY, FALLBACK_REPLY
+from core.config import FALLBACK_SECOND_REMINDER_BEFORE_EXPIRY, HUMAN_LOCK_TTL, INFERENCE_LOCK_TTL
+from core.constants import IMAGE_INTERCEPT_REPLY, FALLBACK_REPLY_POOL
+import random
 
 
 class AIReplyHandler(BaseHandler):
     """V3.0 AI回复处理器 — 移除 Agent 依赖，通过 MessagePipeline 调用 FastGPT"""
+
+    PIPELINE_SKIP = "__PIPELINE_SKIP__"
+    _fallback_state: Dict[str, Dict[str, float]] = {}
 
     # 危险词汇黑名单（医疗/安全相关）
     DANGEROUS_KEYWORDS = [
@@ -149,8 +154,12 @@ class AIReplyHandler(BaseHandler):
 
                 # 调用AI生成回复
                 reply = await self._get_ai_reply(processed_content, context)
+                if reply == self.PIPELINE_SKIP:
+                    self.logger.info("Pipeline 已要求静默跳过，终止自动回复")
+                    return True
                 if not reply:
                     self.logger.warning("AI回复生成失败，使用备用回复")
+                    self._alert_manual_transfer(metadata, session_id, "AI reply send failed", "high")
                     return await self._handle_fallback(context, metadata)
 
                 # =====================================================
@@ -164,7 +173,8 @@ class AIReplyHandler(BaseHandler):
                     await self.log_message(context, "AI回复发送成功", f"回复: {reply}...")
                 else:
                     self.logger.warning("AI回复发送失败")
-                    return await self._handle_fallback(context, metadata)
+                    await self.log_message(context, "AI回复发送失败", "已触发转人工告警，避免重复发送备用话术")
+                    return True
 
                 return True
 
@@ -262,6 +272,7 @@ class AIReplyHandler(BaseHandler):
                     return result.get("text", "")
                 if action == "skip":
                     self.logger.info(f"Pipeline skip: {result}")
+                    return self.PIPELINE_SKIP
             except Exception as e:
                 self.logger.error(f"Pipeline 调用失败: {e}")
 
@@ -341,13 +352,17 @@ class AIReplyHandler(BaseHandler):
             # 尝试发送消息
             from Channel.pinduoduo.utils.API.send_message import SendMessage
             sender = SendMessage(shop_id, user_id)
-            result = sender.send_text(from_uid, reply)
-            if isinstance(result, dict) and result.get("success"):
+            import asyncio
+            result = await asyncio.to_thread(sender.send_text, from_uid, reply)
+            pdd_result = result.get("result") if isinstance(result, dict) else None
+            pdd_ok = isinstance(pdd_result, dict) and pdd_result.get("result") == "ok"
+            if isinstance(result, dict) and result.get("success") and pdd_ok:
                 self.logger.info(
                     f"[发送回执] 文本消息接口成功: shop_id={shop_id}, user_id={user_id}, "
                     f"from_uid={from_uid}, result={result.get('result')}"
                 )
                 return True
+            self._alert_manual_transfer(metadata, f"{metadata.get('shop_id')}_{from_uid}", f"PDD send failed: {result}", "high")
             self.logger.warning(
                 f"[发送回执] 文本消息接口未确认成功: shop_id={shop_id}, user_id={user_id}, "
                 f"from_uid={from_uid}, result={result}"
@@ -356,16 +371,43 @@ class AIReplyHandler(BaseHandler):
 
         except Exception as e:
             self.logger.error(f"发送回复失败: {e}")
+            self._alert_manual_transfer(metadata, f"{metadata.get('shop_id')}_{metadata.get('from_uid')}", f"Send reply exception: {e}", "high")
             return False
 
+
+    def _alert_manual_transfer(self, metadata: Dict[str, Any], session_id: str, reason: str,
+                               alert_level: str = "high") -> None:
+        """Notify UI that manual intervention is required."""
+        try:
+            from core.di_container import container
+            from core.notification import NotificationService
+            notification_service = container.get(NotificationService)
+            if notification_service:
+                notification_service.alert_human_fallback(
+                    shop_id=str(metadata.get('shop_id') or 'unknown'),
+                    user_id=str(metadata.get('from_uid') or 'unknown'),
+                    reason=reason,
+                    alert_level=alert_level,
+                )
+        except Exception as alert_error:
+            self.logger.warning(f"Manual transfer alert failed: {alert_error}")
     async def _handle_fallback(self, context: Context, metadata: Dict[str, Any]) -> bool:
         """备用回复处理"""
         try:
-            # 使用集中式常量的备用回复
-            reply_text = FALLBACK_REPLY
+            from_uid = metadata.get('from_uid') or getattr(context.kwargs, 'from_uid', None)
+            session_id = metadata.get('session_id') or f"{metadata.get('shop_id')}_{from_uid}"
+            fallback_stage = self._next_fallback_stage(session_id)
+            if not fallback_stage:
+                self.logger.info(f"fallback 已节流，等待人工处理: session_id={session_id}")
+                return True
+
+            # 使用备用回复池随机选取，避免拼多多重复消息拦截
+            reply_text = random.choice(FALLBACK_REPLY_POOL)
 
             # 记录备用回复
-            self.logger.info("使用备用回复")
+            self.logger.info(f"使用第 {fallback_stage} 次备用回复")
+            self._mark_fallback_sent(session_id, fallback_stage)
+            redis_manager.set_human_lock(session_id, ttl=HUMAN_LOCK_TTL)
 
             # 尝试发送备用回复
             success = await self._send_reply(context, reply_text, metadata)
@@ -380,3 +422,24 @@ class AIReplyHandler(BaseHandler):
         except Exception as e:
             self.logger.error(f"备用回复处理失败: {e}")
             return True  # 即使失败也返回True，避免重复处理
+
+    def _next_fallback_stage(self, session_id: str) -> str:
+        state = self._fallback_state.get(session_id, {})
+        first_sent_at = float(state.get("first_sent_at") or 0)
+        second_sent_at = float(state.get("second_sent_at") or 0)
+        now = time.time()
+        if not first_sent_at:
+            return "first"
+        reminder_after = max(0, HUMAN_LOCK_TTL - FALLBACK_SECOND_REMINDER_BEFORE_EXPIRY)
+        if not second_sent_at and now - first_sent_at >= reminder_after:
+            return "second"
+        return ""
+
+    def _mark_fallback_sent(self, session_id: str, stage: str) -> None:
+        state = self._fallback_state.setdefault(session_id, {})
+        now = time.time()
+        if stage == "first":
+            state.setdefault("first_sent_at", now)
+        elif stage == "second":
+            state.setdefault("second_sent_at", now)
+        state["updated_at"] = now

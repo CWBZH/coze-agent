@@ -244,6 +244,10 @@ class MainWindow(FluentWindow):
 
         # 初始化导航
         self.initNavigation()
+        self._dashboard_timer = QTimer(self)
+        self._dashboard_timer.timeout.connect(self.dashboard_view.refresh)
+        self._dashboard_timer.start(5000)
+        self.dashboard_view.refresh()
         self.logger.info(f"延迟视图初始化耗时: {time.perf_counter() - t0:.2f}s")
 
     # 初始化导航栏
@@ -252,9 +256,9 @@ class MainWindow(FluentWindow):
         self.navigationInterface.setMinimumWidth(200)
         self.addSubInterface(self.dashboard_view, FIF.HOME, '首页')
         self.addSubInterface(self.monitor_view, FIF.CHAT, '自动回复')
-        self.addSubInterface(self.keyword_manager_view, FIF.EDIT, '关键词管理')
+        self.addSubInterface(self.keyword_manager_view, FIF.EDIT, '静态规则')
         self.addSubInterface(self.user_manager_view, FIF.PEOPLE, '账号管理')
-        self.addSubInterface(self.knowledge_view, FIF.DOCUMENT, '知识库')
+        self.addSubInterface(self.knowledge_view, FIF.DOCUMENT, '产品知识')
         self.addSubInterface(self.log_view, FIF.HISTORY, '日志管理', NavigationItemPosition.BOTTOM)
         self.addSubInterface(self.settingInterface, FIF.SETTING, '设置', NavigationItemPosition.BOTTOM)
 

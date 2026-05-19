@@ -88,6 +88,8 @@ def main():
     # 创建应用
     app = QApplication(sys.argv)
     app.setApplicationName("Agent-Customer")
+    from ui.theme import apply_high_contrast_theme
+    apply_high_contrast_theme(app)
 
     # 创建主窗口
     logger = _get_logger("App")

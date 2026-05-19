@@ -72,6 +72,7 @@ class PDDChannel(ConnectionMixin, MessageHandlerMixin, LifecycleMixin, StatusMix
         self.status_manager = status_manager
 
         self._stop_event: Optional[asyncio.Event] = None
+        self._stop_events: Dict[str, asyncio.Event] = {}
         self.base_url = "wss://m-ws.pinduoduo.com/"
         self.ws: Optional[websockets.WebSocketClientProtocol] = None
         self.businessHours = config.get("businessHours")

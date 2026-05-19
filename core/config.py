@@ -7,6 +7,15 @@
 V2.0 战役七：上线预备重构
 """
 import os
+from pathlib import Path
+
+try:
+    from dotenv import load_dotenv
+except Exception:
+    load_dotenv = None
+
+if load_dotenv is not None:
+    load_dotenv(Path(__file__).resolve().parent.parent / ".env", override=False)
 
 # =============================================================================
 # TTL 时间配置 (秒)
@@ -26,6 +35,30 @@ ALERT_COOLDOWN_TTL = int(os.getenv("ALERT_COOLDOWN_TTL", "60"))
 
 # AI 苏醒标记有效期（默认 30 秒）
 AI_AWAKENING_TTL = int(os.getenv("AI_AWAKENING_TTL", "30"))
+
+# pending_human 状态自动过期时间（默认 300 秒 = 5 分钟）
+PENDING_HUMAN_TTL = int(os.getenv("PENDING_HUMAN_TTL", "300"))
+
+# 同一会话 fallback 话术二次提醒窗口：人工锁即将过期前多少秒允许再提醒一次
+FALLBACK_SECOND_REMINDER_BEFORE_EXPIRY = int(os.getenv("FALLBACK_SECOND_REMINDER_BEFORE_EXPIRY", "60"))
+
+# 账号重连熔断冷却时间（默认 15 分钟）
+AUTO_REPLY_RECONNECT_SUSPEND_TTL = int(os.getenv("AUTO_REPLY_RECONNECT_SUSPEND_TTL", "900"))
+
+# pushplus 微信通知配置
+PUSHPLUS_ENABLED = os.getenv("PUSHPLUS_ENABLED", "false").lower() in ("1", "true", "yes", "on")
+PUSHPLUS_TOKEN = os.getenv("PUSHPLUS_TOKEN", "")
+PUSHPLUS_CHANNEL = os.getenv("PUSHPLUS_CHANNEL", "clawbot")
+PUSHPLUS_TEMPLATE = os.getenv("PUSHPLUS_TEMPLATE", "txt")
+PUSHPLUS_TIMEOUT = int(os.getenv("PUSHPLUS_TIMEOUT", "8"))
+
+# Session compression LLM configuration.
+SESSION_COMPRESS_MODEL = os.getenv("SESSION_COMPRESS_MODEL", "doubao-seed-2-0-mini-260215")
+SESSION_COMPRESS_BASE_URL = os.getenv("SESSION_COMPRESS_BASE_URL", "http://host.docker.internal:11435").rstrip("/")
+SESSION_COMPRESS_API_KEY = os.getenv("SESSION_COMPRESS_API_KEY", "")
+SESSION_COMPRESS_TIMEOUT = int(os.getenv("SESSION_COMPRESS_TIMEOUT", "20"))
+SESSION_COMPRESS_MAX_TOKENS = int(os.getenv("SESSION_COMPRESS_MAX_TOKENS", "80"))
+SESSION_COMPRESS_TEMPERATURE = float(os.getenv("SESSION_COMPRESS_TEMPERATURE", "0.3"))
 
 
 # =============================================================================

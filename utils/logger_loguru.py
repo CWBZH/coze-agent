@@ -15,6 +15,14 @@ from pathlib import Path
 
 from loguru import logger
 
+# 修复 Windows 控制台中文乱码
+if sys.platform == "win32":
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
 # 可选的PyQt6依赖
 try:
     from PyQt6.QtCore import QObject, pyqtSignal

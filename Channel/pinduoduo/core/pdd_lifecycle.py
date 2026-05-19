@@ -1,4 +1,4 @@
-# 生命周期管理模块
+﻿# 
 import asyncio
 import time
 import websockets
@@ -10,13 +10,13 @@ from config import config
 
 
 class LifecycleMixin:
-    """生命周期管理 Mixin"""
+    """Lifecycle helper."""
 
     async def start_account(self, shop_id: str, user_id: str, on_success: callable, on_failure: callable):
-        """启动指定店铺下账号"""
+        """Lifecycle helper."""
         account_info = db_manager.get_account(self.channel_name, shop_id, user_id)
         if not account_info:
-            error_msg = f"账号 {user_id} 在数据库中不存在"
+            error_msg = f" {user_id} "
             self.logger.error(error_msg)
             on_failure(error_msg)
             return
@@ -30,6 +30,10 @@ class LifecycleMixin:
             self._reconnect_tasks[connection_key].cancel()
             del self._reconnect_tasks[connection_key]
 
+        if hasattr(self, "_stop_events"):
+            self._stop_events[connection_key] = asyncio.Event()
+            self._stop_event = self._stop_events[connection_key]
+
         if self.reconnect_config.enable_auto_reconnect:
             connect_task = asyncio.create_task(
                 self._connect_with_retry(shop_id, user_id, username, on_success, on_failure)
@@ -42,19 +46,22 @@ class LifecycleMixin:
         self._reconnect_tasks[connection_key] = connect_task
 
     async def stop_account(self, shop_id: str, user_id: str):
-        """停止指定店铺下账号"""
+        """Lifecycle helper."""
         try:
             account_info = db_manager.get_account(self.channel_name, shop_id, user_id)
             if not account_info:
-                self.logger.warning(f"账号 {user_id} 不存在，无法停止")
+                self.logger.warning(f" {user_id} ")
                 return
 
             username = account_info.get("username", user_id)
             connection_key = f"{shop_id}_{user_id}"
 
-            self.logger.info(f"正在停止店铺 {shop_id} 账号 {username}")
+            self.logger.info(f" {shop_id}  {username}")
 
-            if self._stop_event:
+            stop_event = self._stop_events.get(connection_key) if hasattr(self, "_stop_events") else None
+            if stop_event:
+                stop_event.set()
+            elif self._stop_event:
                 self._stop_event.set()
 
             if connection_key in self._reconnect_tasks:
@@ -64,13 +71,13 @@ class LifecycleMixin:
                     try:
                         await asyncio.wait_for(task, timeout=5.0)
                     except asyncio.CancelledError:
-                        self.logger.debug(f"重连任务已被取消: {connection_key}")
+                        self.logger.debug(f": {connection_key}")
                     except asyncio.TimeoutError:
-                        self.logger.warning(f"重连任务取消超时: {connection_key}")
+                        self.logger.warning(f": {connection_key}")
                     except Exception as task_error:
-                        self.logger.error(f"等待重连任务完成时出错: {task_error}")
+                        self.logger.error(f"? {task_error}")
                 del self._reconnect_tasks[connection_key]
-                self.logger.debug(f"已清理重连任务: {connection_key}")
+                self.logger.debug(f"? {connection_key}")
 
             if connection_key in self._heartbeat_tasks:
                 task = self._heartbeat_tasks[connection_key]
@@ -79,39 +86,49 @@ class LifecycleMixin:
                     try:
                         await asyncio.wait_for(task, timeout=3.0)
                     except asyncio.CancelledError:
-                        self.logger.debug(f"心跳任务已被取消: {connection_key}")
+                        self.logger.debug(f": {connection_key}")
                     except asyncio.TimeoutError:
-                        self.logger.warning(f"心跳任务取消超时: {connection_key}")
+                        self.logger.warning(f": {connection_key}")
                     except Exception as task_error:
-                        self.logger.error(f"等待心跳任务完成时出错: {task_error}")
+                        self.logger.error(f"? {task_error}")
                 del self._heartbeat_tasks[connection_key]
-                self.logger.debug(f"已清理心跳任务: {connection_key}")
+                self.logger.debug(f"? {connection_key}")
 
             self.status_manager.update_status(shop_id, user_id, username, ConnectionState.DISCONNECTED)
 
             if self.ws:
                 await self._safe_close_websocket(self.ws)
-                self.logger.info(f"已关闭店铺 {shop_id} 账号 {username} 的WebSocket连接")
+                self.logger.info(f"?{shop_id}  {username} ebSocket")
             else:
-                self.logger.warning(f"店铺 {shop_id} 账号 {username} 的WebSocket连接已经关闭或不存在")
+                self.logger.warning(f" {shop_id}  {username} ebSocket")
 
             await self.cleanup_processing_tasks()
 
             queue_name = f"pdd_{shop_id}"
             await self._cleanup_resources(queue_name)
+            if hasattr(self, "_stop_events"):
+                self._stop_events.pop(connection_key, None)
 
-            self.logger.info(f"成功停止店铺 {shop_id} 账号 {username}")
+            self.logger.info(f" {shop_id}  {username}")
 
         except Exception as e:
-            self.logger.error(f"停止店铺 {shop_id} 账号 {user_id} 时发生错误: {str(e)}")
+            self.logger.error(f" {shop_id}  {user_id} ? {str(e)}")
 
     async def init(self, shop_id: str, user_id: str, username: str, on_success: callable, on_failure: callable):
-        """初始化WebSocket连接和消息处理系统"""
+        """Lifecycle helper."""
         try:
-            self._stop_event = asyncio.Event()
+            connection_key = f"{shop_id}_{user_id}"
+            if hasattr(self, "_stop_events"):
+                stop_event = self._stop_events.get(connection_key)
+                if stop_event is None:
+                    stop_event = asyncio.Event()
+                    self._stop_events[connection_key] = stop_event
+            else:
+                stop_event = asyncio.Event()
+            self._stop_event = stop_event
 
             token = GetToken(shop_id, user_id)
-            access_token = token.get_token()
+            access_token = await asyncio.to_thread(token.get_token)
 
             queue_name = f"pdd_{shop_id}"
             await self._setup_message_consumer(queue_name)
@@ -125,7 +142,7 @@ class LifecycleMixin:
             query = "&".join([f"{k}={v}" for k, v in params.items()])
             full_url = f"{self.base_url}?{query}"
 
-            self.logger.debug(f"正在连接到拼多多WebSocket: {shop_id}-{username}")
+            self.logger.debug(f"WebSocket: {shop_id}-{username}")
 
             async with websockets.connect(
                 full_url,
@@ -140,15 +157,15 @@ class LifecycleMixin:
                     websocket,
                     f"PDD WebSocket ({shop_id}-{username})"
                 )
-                self.logger.debug(f"WebSocket连接已建立: {shop_id}-{username}")
+                self.logger.debug(f"WebSocket? {shop_id}-{username}")
 
                 if self.ws and not self._is_ws_closed(self.ws):
-                    self.logger.debug(f"WebSocket连接正常: {shop_id}-{username}")
+                    self.logger.debug(f"WebSocket: {shop_id}-{username}")
                 else:
-                    self.logger.error(f"WebSocket连接异常: {shop_id}-{username}")
+                    self.logger.error(f"WebSocket: {shop_id}-{username}")
 
                 self.status_manager.update_status(shop_id, user_id, username, ConnectionState.CONNECTED)
-                self.logger.debug(f"暂时跳过在线状态设置: {shop_id}-{username}")
+                self.logger.debug(f"? {shop_id}-{username}")
 
                 on_success()
 
@@ -156,16 +173,16 @@ class LifecycleMixin:
                 if self.heartbeat_config.enable_heartbeat:
                     connection_key = f"{shop_id}_{user_id}"
                     heartbeat_task = asyncio.create_task(
-                        self._heartbeat_loop(websocket, shop_id, user_id, username)
+                        self._heartbeat_loop(websocket, shop_id, user_id, username, stop_event, on_failure)
                     )
                     self._heartbeat_tasks[connection_key] = heartbeat_task
-                    self.logger.debug(f"心跳检查已启动: {shop_id}-{username}")
+                    self.logger.debug(f": {shop_id}-{username}")
 
                 message_task = asyncio.create_task(
-                    self._message_loop(websocket, shop_id, user_id, username, queue_name)
+                    self._message_loop(websocket, shop_id, user_id, username, queue_name, stop_event)
                 )
 
-                stop_task = asyncio.create_task(self._stop_event.wait())
+                stop_task = asyncio.create_task(stop_event.wait())
 
                 try:
                     tasks = [message_task, stop_task]
@@ -178,11 +195,20 @@ class LifecycleMixin:
                     )
 
                     should_cleanup = False
+                    reconnect_exc = None
                     if stop_task in done:
-                        self.logger.debug(f"收到停止信号: {shop_id}-{username}")
+                        self.logger.debug(f": {shop_id}-{username}")
                         should_cleanup = True
                     else:
-                        self.logger.warning(f"消息循环异常结束: {shop_id}-{username}")
+                        if message_task in done:
+                            reconnect_exc = message_task.exception()
+                        if reconnect_exc:
+                            self.logger.warning(
+                                f"? {shop_id}-{username}, "
+                                f": {reconnect_exc}"
+                            )
+                        else:
+                            self.logger.warning(f": {shop_id}-{username}")
                         should_cleanup = True
 
                     for task in pending:
@@ -192,13 +218,16 @@ class LifecycleMixin:
                         except (asyncio.CancelledError, asyncio.TimeoutError, asyncio.InvalidStateError):
                             pass
                         except Exception as e:
-                            self.logger.debug(f"等待任务取消时出错: {e}")
+                            self.logger.debug(f"? {e}")
 
                     if should_cleanup:
                         await self._cleanup_resources(f"pdd_{shop_id}")
 
+                    if reconnect_exc:
+                        raise reconnect_exc
+
                 except asyncio.CancelledError:
-                    self.logger.debug(f"WebSocket任务被取消: {shop_id}-{username}")
+                    self.logger.debug(f"WebSocket? {shop_id}-{username}")
                     message_task.cancel()
                     if heartbeat_task:
                         heartbeat_task.cancel()
@@ -213,28 +242,40 @@ class LifecycleMixin:
                             pass
                     await self._cleanup_resources(f"pdd_{shop_id}")
 
+        except ws_exceptions.ConnectionClosedError as e:
+            self.status_manager.update_status(shop_id, user_id, username, ConnectionState.ERROR, str(e))
+            self.logger.error(f"WebSocket: {shop_id}-{username}, : {str(e)}")
+            on_failure(f"WebSocket: {e}")
+            raise
         except ws_exceptions.ConnectionClosed as e:
             self.status_manager.update_status(shop_id, user_id, username, ConnectionState.ERROR, str(e))
-            self.logger.warning(f"WebSocket连接已关闭: {shop_id}-{username}, 错误: {str(e)}")
-            on_failure(f"WebSocket连接已关闭: {e}")
+            self.logger.warning(f"WebSocket: {shop_id}-{username}, : {e.code}")
+            on_failure(f"WebSocket: {e}")
+            raise
         except Exception as e:
             self.status_manager.update_status(shop_id, user_id, username, ConnectionState.ERROR, str(e))
-            self.logger.error(f"WebSocket连接错误: {shop_id}-{username}, 错误: {str(e)}")
-            on_failure(f"WebSocket连接错误: {e}")
+            self.logger.error(f"WebSocket: {shop_id}-{username}, : {str(e)}")
+            on_failure(f"WebSocket: {e}")
             await self._cleanup_resources(f"pdd_{shop_id}")
 
     def request_stop(self):
-        """请求停止WebSocket连接"""
+        """Lifecycle helper."""
+        if hasattr(self, "_stop_events"):
+            for stop_event in self._stop_events.values():
+                stop_event.set()
         if self._stop_event:
             self._stop_event.set()
 
     async def stop_all_connections(self):
-        """停止所有连接并清理所有任务"""
+        """Lifecycle helper."""
         try:
-            self.logger.info("正在停止所有连接...")
+            self.logger.info("?..")
 
             if self._stop_event:
                 self._stop_event.set()
+            if hasattr(self, "_stop_events"):
+                for stop_event in self._stop_events.values():
+                    stop_event.set()
 
             for connection_key, task in list(self._reconnect_tasks.items()):
                 if not task.done():
@@ -242,9 +283,9 @@ class LifecycleMixin:
                     try:
                         await asyncio.wait_for(task, timeout=5.0)
                     except (asyncio.CancelledError, asyncio.TimeoutError):
-                        self.logger.debug(f"任务已取消或超时: {connection_key}")
+                        self.logger.debug(f": {connection_key}")
                     except Exception as e:
-                        self.logger.error(f"停止任务时出错: {connection_key}, {e}")
+                        self.logger.error(f"? {connection_key}, {e}")
                 del self._reconnect_tasks[connection_key]
 
             for connection_key, task in list(self._heartbeat_tasks.items()):
@@ -253,34 +294,36 @@ class LifecycleMixin:
                     try:
                         await asyncio.wait_for(task, timeout=3.0)
                     except (asyncio.CancelledError, asyncio.TimeoutError):
-                        self.logger.debug(f"心跳任务已取消或超时: {connection_key}")
+                        self.logger.debug(f": {connection_key}")
                     except Exception as e:
-                        self.logger.error(f"停止心跳任务时出错: {connection_key}, {e}")
+                        self.logger.error(f"? {connection_key}, {e}")
                 del self._heartbeat_tasks[connection_key]
 
             if self.ws:
                 await self._safe_close_websocket(self.ws)
                 self.ws = None
+            if hasattr(self, "_stop_events"):
+                self._stop_events.clear()
 
-            self.logger.info("所有连接已停止")
+            self.logger.info("")
 
         except Exception as e:
-            self.logger.error(f"停止所有连接时发生错误: {e}")
+            self.logger.error(f": {e}")
 
-    async def _heartbeat_loop(self, websocket, shop_id: str, user_id: str, username: str):
-        """心跳检查循环"""
+    async def _heartbeat_loop(self, websocket, shop_id: str, user_id: str, username: str, stop_event: Optional[asyncio.Event] = None, on_failure: callable = None):
+        """Lifecycle helper."""
         connection_key = f"{shop_id}_{user_id}"
         consecutive_failures = 0
 
         try:
-            while not (self._stop_event and self._stop_event.is_set()):
+            active_stop_event = stop_event or self._stop_event
+            while not (active_stop_event and active_stop_event.is_set()):
                 try:
                     start_time = time.time()
                     await websocket.ping()
                     response_time = time.time() - start_time
 
                     consecutive_failures = 0
-                    self.logger.debug(f"心跳成功: {shop_id}-{username}, 响应时间: {response_time:.3f}s")
 
                     status = self.status_manager.get_status(shop_id, user_id)
                     if status and status.state == ConnectionState.CONNECTED:
@@ -290,41 +333,44 @@ class LifecycleMixin:
 
                 except asyncio.TimeoutError:
                     consecutive_failures += 1
-                    self.logger.warning(f"心跳超时: {shop_id}-{username}, 连续失败: {consecutive_failures}")
+                    self.logger.warning(f": {shop_id}-{username}, : {consecutive_failures}")
                     await asyncio.sleep(self.heartbeat_config.heartbeat_timeout)
 
                 except Exception as e:
                     consecutive_failures += 1
-                    self.logger.warning(f"心跳失败: {shop_id}-{username}, 错误: {str(e)}, 连续失败: {consecutive_failures}")
+                    self.logger.warning(f": {shop_id}-{username}, : {str(e)}, : {consecutive_failures}")
 
                     if consecutive_failures >= self.heartbeat_config.max_heartbeat_failures:
-                        self.logger.error(f"心跳检查失败次数过多，标记连接为错误状态: {shop_id}-{username}")
+                        self.logger.error(f"? {shop_id}-{username}")
                         self.status_manager.update_status(
                             shop_id, user_id, username,
                             ConnectionState.ERROR,
-                            f"心跳检查失败: 连续{consecutive_failures}次失败"
+                            f"heartbeat failed {consecutive_failures} times"
                         )
+                        if on_failure:
+                            on_failure(f"max retries reached: heartbeat failed {consecutive_failures} times")
                         break
 
                     await asyncio.sleep(self.heartbeat_config.heartbeat_timeout)
 
         except asyncio.CancelledError:
-            self.logger.debug(f"心跳循环被取消: {shop_id}-{username}")
+            self.logger.debug(f"? {shop_id}-{username}")
         except Exception as e:
-            self.logger.error(f"心跳循环异常: {shop_id}-{username}, 错误: {str(e)}")
+            self.logger.error(f": {shop_id}-{username}, : {str(e)}")
         finally:
             if connection_key in self._heartbeat_tasks:
                 del self._heartbeat_tasks[connection_key]
-            self.logger.debug(f"心跳循环已结束: {shop_id}-{username}")
+            self.logger.debug(f"? {shop_id}-{username}")
 
-    async def _message_loop(self, websocket, shop_id: str, user_id: str, username: str, queue_name: str):
-        """消息接收循环"""
+    async def _message_loop(self, websocket, shop_id: str, user_id: str, username: str, queue_name: str, stop_event: Optional[asyncio.Event] = None):
+        """Lifecycle helper."""
         try:
-            self.logger.info(f"消息循环开始: {shop_id}-{username}")
+            self.logger.info(f"Message loop started: {shop_id}-{username}")
 
             async for message in websocket:
-                if self._stop_event and self._stop_event.is_set():
-                    self.logger.info(f"停止事件已设置，退出消息循环: {shop_id}-{username}")
+                active_stop_event = stop_event or self._stop_event
+                if active_stop_event and active_stop_event.is_set():
+                    self.logger.info(f"? {shop_id}-{username}")
                     break
                 task = asyncio.create_task(
                     self._process_websocket_message_concurrent(
@@ -335,27 +381,30 @@ class LifecycleMixin:
                 self.processing_tasks.add(task)
                 task.add_done_callback(self.processing_tasks.discard)
 
-        except ws_exceptions.ConnectionClosed as cc:
-            self.logger.warning(f"WebSocket连接正常关闭: {shop_id}-{username}, 代码: {cc.code}")
         except ws_exceptions.ConnectionClosedError as cce:
-            self.logger.error(f"WebSocket连接异常关闭: {shop_id}-{username}, 错误: {cce}")
+            self.logger.error(f"WebSocket: {shop_id}-{username}, : {cce}")
+            raise
+        except ws_exceptions.ConnectionClosed as cc:
+            self.logger.warning(f"WebSocket: {shop_id}-{username}, : {cc.code}")
+            raise
         except Exception as e:
-            self.logger.error(f"消息循环错误: {shop_id}-{username}, 错误: {str(e)}")
+            self.logger.error(f": {shop_id}-{username}, : {str(e)}")
+            raise
 
     async def _process_websocket_message_concurrent(self, message: str, shop_id: str, user_id: str, username: str, queue_name: str):
-        """并发处理WebSocket消息"""
+        """Lifecycle helper."""
         async with self.message_semaphore:
             try:
                 await self._process_websocket_message(message, shop_id, user_id, username, queue_name)
             except Exception as e:
-                self.logger.error(f"并发处理消息失败: {e}")
+                self.logger.error(f": {e}")
 
     async def cleanup_processing_tasks(self):
-        """清理所有处理任务"""
+        """Lifecycle helper."""
         if not self.processing_tasks:
             return
 
-        self.logger.info(f"清理 {len(self.processing_tasks)} 个处理任务")
+        self.logger.info(f"Cleaning {len(self.processing_tasks)} processing tasks")
         for task in self.processing_tasks:
             if not task.done():
                 task.cancel()
@@ -364,72 +413,79 @@ class LifecycleMixin:
                 except asyncio.CancelledError:
                     pass
                 except Exception as e:
-                    self.logger.error(f"清理任务失败: {e}")
+                    self.logger.error(f": {e}")
 
         self.processing_tasks.clear()
 
     async def _cleanup_reconnect_tasks(self):
-        """清理所有重连任务"""
+        """Lifecycle helper."""
         try:
             for connection_key, task in list(self._reconnect_tasks.items()):
                 if not task.done():
                     task.cancel()
                     try:
                         await asyncio.wait_for(task, timeout=5.0)
-                    except (asyncio.CancelledError, asyncio.TimeoutError):
+                    except (asyncio.CancelledError, asyncio.TimeoutError, RuntimeError):
                         pass
                     except asyncio.InvalidStateError:
-                        self.logger.debug(f"重连任务在不同的的事件循环中: {connection_key}")
+                        self.logger.debug(f": {connection_key}")
                     except Exception as e:
-                        self.logger.error(f"清理重连任务失败: {connection_key}, {e}")
+                        self.logger.error(f": {connection_key}, {e}")
+            self._reconnect_tasks.clear()
+        except RuntimeError:
             self._reconnect_tasks.clear()
         except Exception as e:
-            self.logger.error(f"清理重连任务列表失败: {e}")
+            self.logger.error(f": {e}")
 
     async def _cleanup_heartbeat_tasks(self):
-        """清理所有心跳任务"""
+        """Lifecycle helper."""
         try:
             for connection_key, task in list(self._heartbeat_tasks.items()):
                 if not task.done():
                     task.cancel()
                     try:
                         await asyncio.wait_for(task, timeout=3.0)
-                    except (asyncio.CancelledError, asyncio.TimeoutError):
+                    except (asyncio.CancelledError, asyncio.TimeoutError, RuntimeError):
                         pass
                     except asyncio.InvalidStateError:
-                        self.logger.debug(f"心跳任务在不同的的事件循环中: {connection_key}")
+                        self.logger.debug(f": {connection_key}")
                     except Exception as e:
-                        self.logger.error(f"清理心跳任务失败: {connection_key}, {e}")
+                        self.logger.error(f": {connection_key}, {e}")
+            self._heartbeat_tasks.clear()
+        except RuntimeError:
             self._heartbeat_tasks.clear()
         except Exception as e:
-            self.logger.error(f"清理心跳任务列表失败: {e}")
+            self.logger.error(f": {e}")
 
     async def _cleanup_resources(self, queue_name: str):
-        """清理资源"""
+        """Lifecycle helper."""
         from Message import message_consumer_manager
 
         try:
             await self.cleanup_processing_tasks()
-            await self._cleanup_reconnect_tasks()
             await self._cleanup_heartbeat_tasks()
             await self.resource_manager.cleanup_all()
 
             try:
                 await message_consumer_manager.stop_consumer(queue_name)
-                self.logger.debug(f"已停止消息消费者: {queue_name}")
-            except asyncio.InvalidStateError:
-                self.logger.debug(f"消息消费者已在其他事件循环中停止: {queue_name}")
+                self.logger.debug(f"? {queue_name}")
+            except (asyncio.InvalidStateError, RuntimeError):
+                self.logger.debug(f": {queue_name}")
             except Exception as e:
-                self.logger.warning(f"停止消息消费者失败: {queue_name}, {e}")
+                self.logger.warning(f"? {queue_name}, {e}")
 
             self.ws = None
 
+        except RuntimeError:
+            self.logger.debug(f": {queue_name}")
         except Exception as e:
-            self.logger.error(f"清理资源失败: {e}")
+            self.logger.error(f": {e}")
 
 
-# 延迟导入避免循环依赖
+# 
 from database import db_manager
 from core.connection_status import ConnectionState
 
 __all__ = ['LifecycleMixin']
+
+

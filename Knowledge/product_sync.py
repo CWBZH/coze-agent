@@ -1,5 +1,6 @@
 """商品同步服务 — 从拼多多 API 拉取商品列表"""
 import asyncio
+import json
 from typing import Optional, Callable, Dict, Any
 from dataclasses import dataclass
 from database.models import ProductKnowledge
@@ -27,12 +28,14 @@ class ProductSyncService:
 
     async def sync_shop(self, shop_id: str, shop_db_id: int, user_id: str,
                         progress_callback: Optional[Callable] = None) -> SyncProgress:
-        pm = ProductManager(shop_id=shop_id, user_id=user_id)
+        user_id, cookies = self._resolve_account(shop_id, user_id)
+        pm = ProductManager(shop_id=shop_id, user_id=user_id, cookies=cookies)
         progress = SyncProgress()
 
         first_page = pm.get_product_list(page=1, size=20)
         if not first_page["success"]:
             progress.failed = 1
+            progress.current_goods_name = first_page.get("error_msg", "获取商品列表失败")
             return progress
 
         total = first_page["total"]
@@ -97,6 +100,49 @@ class ProductSyncService:
                 progress_callback(progress)
 
         return progress
+
+    def _resolve_user_id(self, shop_id: str, user_id: str) -> str:
+        resolved_user_id, _cookies = self._resolve_account(shop_id, user_id)
+        return resolved_user_id
+
+    def _resolve_account(self, shop_id: str, user_id: str) -> tuple[str, dict]:
+        if user_id:
+            account = self._find_account(shop_id, str(user_id))
+            return str(user_id), self._parse_cookies(account.get("cookies") if account else None)
+
+        accounts = self.db.get_accounts_by_shop("pinduoduo", str(shop_id))
+        if not accounts:
+            logger.error(f"同步商品失败: 店铺 {shop_id} 没有可用账号，无法加载 cookies")
+            return "", {}
+
+        online_accounts = [account for account in accounts if account.get("status") == 1]
+        account = online_accounts[0] if online_accounts else accounts[0]
+        resolved_user_id = str(account.get("user_id") or "")
+        cookies = self._parse_cookies(account.get("cookies"))
+        logger.info(
+            f"商品同步自动选择账号: shop_id={shop_id}, user_id={resolved_user_id}, "
+            f"username={account.get('username')}, status={account.get('status')}, "
+            f"cookie_keys={len(cookies)}"
+        )
+        return resolved_user_id, cookies
+
+    def _find_account(self, shop_id: str, user_id: str) -> Optional[Dict[str, Any]]:
+        for account in self.db.get_accounts_by_shop("pinduoduo", str(shop_id)):
+            if str(account.get("user_id")) == str(user_id):
+                return account
+        return None
+
+    @staticmethod
+    def _parse_cookies(cookies_data) -> dict:
+        if isinstance(cookies_data, dict):
+            return cookies_data
+        if isinstance(cookies_data, str) and cookies_data.strip():
+            try:
+                data = json.loads(cookies_data)
+                return data if isinstance(data, dict) else {}
+            except json.JSONDecodeError:
+                logger.error("同步商品失败: 账号 cookies 不是合法 JSON")
+        return {}
 
     def _get_product(self, shop_db_id: int, goods_id: str):
         with self.db.session_scope() as session:

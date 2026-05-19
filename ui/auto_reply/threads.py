@@ -90,6 +90,7 @@ class AutoReplyThread(QThread):
                     on_failure=on_failure
                 )
             )
+            self._start_task = task
 
             # 保持事件循环运行，直到显式停止
             self.loop.run_forever()
@@ -98,6 +99,11 @@ class AutoReplyThread(QThread):
             self.logger.error(f"自动回复线程启动失败: {e}")
             self.connection_failed.emit(str(e))
         finally:
+            if self.channel:
+                try:
+                    self.loop.run_until_complete(self.channel.stop_all_connections())
+                except Exception as cleanup_error:
+                    self.logger.debug(f"自动回复线程清理连接失败: {cleanup_error}")
             if self.loop.is_running():
                 self.loop.stop()
             self.loop.close()

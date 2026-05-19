@@ -26,6 +26,10 @@ class SimpleMessageQueue:
 
         # 基本队列
         self._queue = asyncio.Queue(maxsize=config.max_size)
+        try:
+            self._loop = asyncio.get_running_loop()
+        except RuntimeError:
+            self._loop = None
         self._stats = QueueStats()
         self._closed = False
 
@@ -98,6 +102,16 @@ class SimpleMessageQueue:
         )
         return stats
 
+    def is_bound_to_current_loop(self) -> bool:
+        """Return True when this queue belongs to the active asyncio loop."""
+        if self._loop is None:
+            return True
+
+        try:
+            return self._loop is asyncio.get_running_loop()
+        except RuntimeError:
+            return True
+
     def close(self):
         """关闭队列"""
         self._closed = True
@@ -155,6 +169,11 @@ class QueueManager:
 
     def get_or_create_queue(self, name: str, config: Optional[QueueConfig] = None) -> SimpleMessageQueue:
         """获取或创建队列"""
+        queue = self._queues.get(name)
+        if queue is not None and not queue.is_bound_to_current_loop():
+            self.logger.warning(f"Queue {name} is bound to another event loop, recreating")
+            return self.recreate_queue(name, config or queue.config)
+
         if name not in self._queues:
             if config is None:
                 config = QueueConfig()

@@ -20,6 +20,7 @@ from qfluentwidgets import (CardWidget, SubtitleLabel, CaptionLabel, BodyLabel,
                            PrimaryPushButton, PushButton, StrongBodyLabel,
                            ComboBox, LineEdit, ScrollArea, FluentIcon as FIF,
                            InfoBar, InfoBarPosition, ToolButton, CheckBox)
+from ui.theme import BORDER_SOFT, PRIMARY, PRIMARY_HOVER, SELECTION, SURFACE, TEXT
 from utils.logger_loguru import get_logger, logger, UILogHandler
 
 
@@ -314,30 +315,33 @@ class LogTableView(QTableView):
         # 消息列自动拉伸
 
         # 设置样式
-        self.setStyleSheet("""
-            QTableView {
-                background-color: #ffffff;
-                alternate-background-color: #f8f9fa;
-                gridline-color: #e9ecef;
-                selection-background-color: #007bff;
+        self.setStyleSheet(f"""
+            QTableView {{
+                background-color: {SURFACE};
+                alternate-background-color: #EEF2FF;
+                color: {TEXT};
+                gridline-color: {BORDER_SOFT};
+                selection-background-color: {SELECTION};
                 selection-color: white;
-            }
-            QTableView::item {
+                border: 1px solid {BORDER_SOFT};
+            }}
+            QTableView::item {{
                 padding: 4px;
                 border: none;
-            }
-            QTableView::item:selected {
-                background-color: #007bff;
+            }}
+            QTableView::item:selected {{
+                background-color: {SELECTION};
                 color: white;
-            }
-            QHeaderView::section {
-                background-color: #e9ecef;
+            }}
+            QHeaderView::section {{
+                background-color: {PRIMARY};
+                color: white;
                 padding: 8px;
                 border: none;
-                border-right: 1px solid #dee2e6;
-                border-bottom: 1px solid #dee2e6;
+                border-right: 1px solid {PRIMARY_HOVER};
+                border-bottom: 1px solid {PRIMARY_HOVER};
                 font-weight: bold;
-            }
+            }}
         """)
 
     def set_highlight(self, text: str):

@@ -17,6 +17,7 @@ from qfluentwidgets import (CardWidget, SubtitleLabel, CaptionLabel, BodyLabel,
                            TimePicker)
 
 from core.config_manager import config_manager
+from ui.theme import TEXT_MUTED
 from utils.logger_loguru import get_logger
 
 logger = get_logger("SettingUI")
@@ -69,7 +70,7 @@ class LLMConfigCard(CardWidget):
             "配置LLM模型的连接参数。\n"
             "支持OpenAI兼容的API接口，包括豆包、通义千问等模型。"
         )
-        description_label.setStyleSheet("color: #666; padding: 8px 0;")
+        description_label.setStyleSheet(f"color: {TEXT_MUTED}; padding: 8px 0; font-weight: 500;")
         layout.addWidget(description_label)
 
     def getConfig(self) -> dict:
@@ -125,7 +126,7 @@ class PromptConfigCard(CardWidget):
             "配置AI助手的行为指令。\n"
             "角色描述和工具说明由系统自动管理，无需手动配置。"
         )
-        description_label.setStyleSheet("color: #666; padding: 8px 0;")
+        description_label.setStyleSheet(f"color: {TEXT_MUTED}; padding: 8px 0; font-weight: 500;")
         layout.addWidget(description_label)
 
     def getConfig(self) -> dict:
@@ -196,7 +197,7 @@ class ReplyRulesConfigCard(CardWidget):
         description_label = CaptionLabel(
             "这些配置会作用于一级拦截层和确定性模板回复，保存后重启或重新初始化 Agent 生效。"
         )
-        description_label.setStyleSheet("color: #666; padding: 8px 0;")
+        description_label.setStyleSheet(f"color: {TEXT_MUTED}; padding: 8px 0; font-weight: 500;")
         layout.addWidget(description_label)
 
     def getConfig(self) -> dict:
@@ -268,7 +269,7 @@ class BusinessHoursCard(CardWidget):
             "设置AI客服的工作时间。在工作时间内，系统将自动响应客户消息。\n"
             "在非工作时间，系统将不会自动回复。"
         )
-        description_label.setStyleSheet("color: #666; padding: 8px 0;")
+        description_label.setStyleSheet(f"color: {TEXT_MUTED}; padding: 8px 0; font-weight: 500;")
         layout.addWidget(description_label)
 
     def getConfig(self) -> dict:
@@ -339,7 +340,7 @@ class SettingUI(QFrame):
 
         # 描述
         description_label = CaptionLabel("配置AI客服的基本参数和工作时间")
-        description_label.setStyleSheet("color: #666;")
+        description_label.setStyleSheet(f"color: {TEXT_MUTED}; font-weight: 500;")
 
         # 左侧标题区域
         title_area = QWidget()

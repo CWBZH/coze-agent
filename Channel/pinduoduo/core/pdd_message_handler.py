@@ -23,17 +23,53 @@ class MessageHandlerMixin:
         from Message import message_consumer_manager, queue_manager, handler_chain
 
         try:
+            loop_id = id(asyncio.get_running_loop())
+            existing_consumer = message_consumer_manager.get_consumer(queue_name)
+            if existing_consumer:
+                running = existing_consumer.is_running()
+                same_loop = existing_consumer.is_bound_to_current_loop()
+                self.logger.info(
+                    f"Message consumer setup check: queue_name={queue_name}, loop_id={loop_id}, "
+                    f"consumer_id={id(existing_consumer)}, handler_count={existing_consumer.handler_count()}, "
+                    f"running={running}, same_loop={same_loop}"
+                )
+                if running and same_loop:
+                    self.logger.info(
+                        f"Reusing existing message consumer: queue_name={queue_name}, loop_id={loop_id}, "
+                        f"consumer_id={id(existing_consumer)}, handler_count={existing_consumer.handler_count()}, "
+                        f"running=True"
+                    )
+                    return
             existing_consumer = message_consumer_manager.get_consumer(queue_name)
             if existing_consumer:
                 self.logger.info(f"消费者 {queue_name} 已存在，先停止并重新创建")
                 try:
-                    await message_consumer_manager.stop_consumer(queue_name)
+                    stopped = await message_consumer_manager.stop_consumer(queue_name, timeout=5.0)
+                    if not stopped:
+                        raise RuntimeError(f"consumer still running, refuse replacement: queue_name={queue_name}")
+                except RuntimeError as e:
+                    # Stop must finish before a replacement consumer can be created.
+                    self.logger.warning(
+                        f"停止旧消费者失败，拒绝替换: {queue_name}, {e}"
+                    )
+                    raise
                 except Exception as e:
                     self.logger.warning(f"停止旧消费者失败: {queue_name}, {e}")
+                remaining_consumer = message_consumer_manager.get_consumer(queue_name)
+                if remaining_consumer and remaining_consumer.is_running():
+                    raise RuntimeError(
+                        f"consumer still running, refuse replacement: queue_name={queue_name}, "
+                        f"consumer_id={id(remaining_consumer)}, handler_count={remaining_consumer.handler_count()}"
+                    )
                 try:
-                    queue_manager.recreate_queue(queue_name)
+                    queue_manager.get_or_create_queue(queue_name)
                 except Exception as e:
                     self.logger.warning(f"重新创建队列失败: {queue_name}, {e}")
+
+            try:
+                queue_manager.get_or_create_queue(queue_name)
+            except Exception as e:
+                self.logger.warning(f"重新创建队列失败: {queue_name}, {e}")
 
             consumer = message_consumer_manager.create_consumer(queue_name, max_concurrent=10)
 
@@ -44,6 +80,11 @@ class MessageHandlerMixin:
                     consumer.add_handler(handler)
 
             await message_consumer_manager.start_consumer(queue_name)
+            self.logger.info(
+                f"Message consumer setup complete: queue_name={queue_name}, loop_id={loop_id}, "
+                f"consumer_id={id(consumer)}, handler_count={consumer.handler_count()}, "
+                f"running={consumer.is_running()}"
+            )
             self.logger.debug(f"消息消费者已启动: {queue_name}")
 
         except Exception as e:
@@ -163,7 +204,7 @@ class MessageHandlerMixin:
 
             elif context.type == ContextType.WITHDRAW:
                 self.logger.info(f"收到撤回消息: {context.content}")
-                send_message.send_text(recipient_uid, "[玫瑰]")
+                await asyncio.to_thread(send_message.send_text, recipient_uid, "[玫瑰]")
 
             elif context.type == ContextType.SYSTEM_STATUS:
                 self.logger.debug(f"系统状态消息: {context.content}")
@@ -182,7 +223,7 @@ class MessageHandlerMixin:
 
             elif context.type == ContextType.TRANSFER:
                 self.logger.info(f"转接消息: {context.content}")
-                send_message.send_text(recipient_uid, "[玫瑰]")
+                await asyncio.to_thread(send_message.send_text, recipient_uid, "[玫瑰]")
 
         except Exception as e:
             self.logger.error(f"立即处理消息失败: {e}")

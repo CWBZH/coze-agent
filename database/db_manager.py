@@ -164,7 +164,8 @@ class DatabaseManager:
 
     def update_shop_info(self, channel_name: str, shop_id: str,
                          shop_name: str = None, shop_logo: str = None,
-                         description: str = None) -> bool:
+                         description: str = None,
+                         fastgpt_dataset_id: str = None) -> bool:
         with self.session_scope() as session:
             channel = self._get_channel(session, channel_name)
             if not channel:
@@ -178,6 +179,8 @@ class DatabaseManager:
                 shop.shop_logo = shop_logo
             if description is not None:
                 shop.description = description
+            if fastgpt_dataset_id is not None:
+                shop.fastgpt_dataset_id = fastgpt_dataset_id
             return True
 
     def delete_shop(self, channel_name: str, shop_id: str) -> bool:

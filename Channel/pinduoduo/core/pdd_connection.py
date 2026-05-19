@@ -14,9 +14,11 @@ class ConnectionMixin:
     async def _connect_with_retry(self, shop_id: str, user_id: str, username: str, on_success: callable, on_failure: callable):
         """带重连机制的WebSocket连接"""
         logger = get_logger("PDDChannel")
+        connection_key = f"{shop_id}_{user_id}"
+        stop_event = self._stop_events.get(connection_key, self._stop_event) if hasattr(self, "_stop_events") else self._stop_event
 
         for attempt in range(self.reconnect_config.max_attempts):
-            if self._stop_event and self._stop_event.is_set():
+            if stop_event and stop_event.is_set():
                 logger.info(f"收到停止信号，取消重连: {shop_id}-{username}")
                 self.status_manager.update_status(shop_id, user_id, username, ConnectionState.DISCONNECTED)
                 return
@@ -26,19 +28,27 @@ class ConnectionMixin:
                     self.status_manager.update_status(shop_id, user_id, username, ConnectionState.RECONNECTING)
                     logger.info(f"尝试重连 ({attempt + 1}/{self.reconnect_config.max_attempts}): {shop_id}-{username}")
 
-                await self._connect_single_attempt(shop_id, user_id, username, on_success, on_failure)
+                failure_callback = (
+                    lambda error_msg: logger.warning(
+                        f"连接尝试失败: {shop_id}-{username}, 错误: {error_msg}"
+                    )
+                )
+
+                await self._connect_single_attempt(shop_id, user_id, username, on_success, failure_callback)
                 return
 
             except Exception as e:
-                if self._stop_event and self._stop_event.is_set():
+                if stop_event and stop_event.is_set():
                     logger.info(f"连接被停止信号中断: {shop_id}-{username}")
                     self.status_manager.update_status(shop_id, user_id, username, ConnectionState.DISCONNECTED)
                     return
 
                 if attempt == self.reconnect_config.max_attempts - 1:
-                    self.status_manager.update_status(shop_id, user_id, username, ConnectionState.ERROR, str(e))
+                    self.status_manager.update_status(shop_id, user_id, username, ConnectionState.SUSPENDED, str(e))
                     logger.error(f"连接失败，已达到最大重试次数: {shop_id}-{username}, 错误: {str(e)}")
                     on_failure(f"连接失败，已达到最大重试次数: {e}")
+                    if stop_event:
+                        stop_event.set()
                     return
 
                 delay = min(
@@ -50,11 +60,15 @@ class ConnectionMixin:
 
                 try:
                     for _ in range(int(delay * 10)):
-                        if self._stop_event and self._stop_event.is_set():
+                        if stop_event and stop_event.is_set():
                             logger.info(f"重连延迟被停止信号中断: {shop_id}-{username}")
                             self.status_manager.update_status(shop_id, user_id, username, ConnectionState.DISCONNECTED)
                             return
-                        await asyncio.sleep(0.1)
+                        try:
+                            await asyncio.sleep(0.1)
+                        except RuntimeError:
+                            logger.info(f"事件循环关闭，退出重连延迟: {shop_id}-{username}")
+                            return
                 except (asyncio.CancelledError, RuntimeError):
                     logger.info(f"重连延迟被中断或事件循环关闭: {shop_id}-{username}")
                     self.status_manager.update_status(shop_id, user_id, username, ConnectionState.DISCONNECTED)

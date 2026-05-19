@@ -16,7 +16,8 @@ class ProductManager(BaseRequest):
             user_id: 用户ID，用于从数据库获取cookies
             cookies: 登录cookies，如果直接传入则不需要从数据库获取
         """
-        super().__init__(shop_id=shop_id, user_id=user_id)
+        super().__init__(shop_id=shop_id, user_id=None if cookies else user_id)
+        self.user_id = user_id
         if cookies:
             self.update_cookies(cookies)
 
@@ -49,14 +50,15 @@ class ProductManager(BaseRequest):
                     "error_msg": str  # 仅在失败时包含
                 }
         """
-        # 构建请求URL
-        url = "https://mms.pinduoduo.com/latitude/goods/recommendGoods"
+        # 构建请求URL。旧版使用 /latitude/goods/recommendGoods，
+        # 当前拼多多客服前端在商品搜索/在售商品列表中使用 queryGoods。
+        url = "https://mms.pinduoduo.com/latitude/goods/queryGoods"
 
         # 构建请求数据
         data = {
-            "uid": "",
-            "pageNum": page,
-            "pageSize": size
+            "pageNo": page,
+            "pageSize": size,
+            "status": 1
         }
 
         # 构建请求头（与浏览器请求完全一致）
@@ -92,7 +94,7 @@ class ProductManager(BaseRequest):
                 "page": page
             }
         else:
-            error_msg = result.get('errorMsg') if result else "获取商品列表失败"
+            error_msg = (result.get('errorMsg') or result.get('error_msg')) if result else "获取商品列表失败"
             self.logger.error(f"获取商品列表失败: {error_msg}")
             return {
                 "success": False,
@@ -176,18 +178,17 @@ class ProductManager(BaseRequest):
         """
         try:
             result_data = response_data.get('result', {})
-            # 拼多多API商品列表在 onSaleGoods 字段中
-            goods_list = result_data.get('onSaleGoods', [])
+            goods_list = result_data.get('goods') or result_data.get('onSaleGoods') or []
 
             products = []
             for goods in goods_list:
                 # 价格：使用区间价格，最低价-最高价
-                min_price = goods.get('minOnSaleGroupPrice')
-                max_price = goods.get('maxOnSaleGroupPrice')
-                if min_price and max_price and min_price != max_price:
-                    price_str = f"{min_price/100:.2f}-{max_price/100:.2f}"
+                min_price = goods.get('minOnSaleGroupPrice') or goods.get('minPrice') or goods.get('price')
+                max_price = goods.get('maxOnSaleGroupPrice') or goods.get('maxPrice') or goods.get('price')
+                if min_price and max_price and str(min_price) != str(max_price):
+                    price_str = f"{self._format_price(min_price)}-{self._format_price(max_price)}"
                 elif min_price:
-                    price_str = f"{min_price/100:.2f}"
+                    price_str = self._format_price(min_price)
                 else:
                     price_str = None
 
@@ -197,15 +198,15 @@ class ProductManager(BaseRequest):
                 tag_str = ', '.join(marketing_tags) if marketing_tags else ''
 
                 product = {
-                    "goods_id": goods.get('goodsId'),
+                    "goods_id": goods.get('goodsId') or goods.get('goods_id'),
                     "goods_name": goods.get('goodsName', ''),
                     "thumb_url": goods.get('thumbUrl', ''),
                     "price": price_str,
-                    "price_min": min_price,
-                    "price_max": max_price,
+                    "price_min": self._price_to_cent(min_price),
+                    "price_max": self._price_to_cent(max_price),
                     "sold_quantity": goods.get('soldQuantity', 0),
                     "sold_quantity_30d": goods.get('soldQuantity30d', 0),
-                    "quantity": goods.get('quantity', 0),  # 库存
+                    "quantity": goods.get('quantity') or goods.get('stockCount') or 0,  # 库存
                     "goods_type": goods.get('goodsType', ''),
                     "is_spike": goods.get('isSpike', False),  # 是否秒杀
                     "support_customize": goods.get('supportCustomize', False),  # 是否支持定制
@@ -225,6 +226,25 @@ class ProductManager(BaseRequest):
                 "products": [],
                 "total": 0
             }
+
+    @staticmethod
+    def _price_to_cent(value):
+        if value is None or value == "":
+            return None
+        try:
+            text = str(value)
+            if "." in text:
+                return int(round(float(text) * 100))
+            return int(value)
+        except Exception:
+            return None
+
+    @classmethod
+    def _format_price(cls, value):
+        cents = cls._price_to_cent(value)
+        if cents is None:
+            return str(value)
+        return f"{cents / 100:.2f}"
 
     def _parse_product_detail(self, response_data):
         """

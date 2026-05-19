@@ -73,9 +73,9 @@ async def start_consumer(queue_name: str):
     await message_consumer_manager.start_consumer(queue_name)
 
 
-async def stop_consumer(queue_name: str):
+async def stop_consumer(queue_name: str, timeout: float = 5.0):
     """停止消息消费者（兼容原API）"""
-    await message_consumer_manager.stop_consumer(queue_name)
+    return await message_consumer_manager.stop_consumer(queue_name, timeout=timeout)
 
 
 async def put_message(queue_name: str, context: Context) -> str:

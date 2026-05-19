@@ -112,6 +112,7 @@ class AutoReplyUI(QFrame):
         self.refresh_btn.clicked.connect(self.reloadAccounts)
         self.start_all_btn.clicked.connect(self.onStartAllAutoReply)
         self.stop_all_btn.clicked.connect(self.stopAllAutoReply)
+        self.reset_session_btn.clicked.connect(self.onResetSessions)
 
         main_layout.addWidget(header_widget)
         main_layout.addWidget(content_widget, 1)
@@ -150,6 +151,11 @@ class AutoReplyUI(QFrame):
         self.stop_all_btn.setIcon(FIF.CANCEL)
         self.stop_all_btn.setFixedSize(120, 40)
 
+        self.reset_session_btn = PushButton("重置会话")
+        self.reset_session_btn.setIcon(FIF.SYNC)
+        self.reset_session_btn.setFixedSize(120, 40)
+        self.reset_session_btn.setToolTip("重置所有 pending_human 状态的会话为 active，恢复 AI 自动回复")
+
         buttons_widget = QWidget()
         buttons_layout = QHBoxLayout(buttons_widget)
         buttons_layout.setContentsMargins(0, 0, 0, 0)
@@ -157,6 +163,7 @@ class AutoReplyUI(QFrame):
         buttons_layout.addWidget(self.refresh_btn)
         buttons_layout.addWidget(self.start_all_btn)
         buttons_layout.addWidget(self.stop_all_btn)
+        buttons_layout.addWidget(self.reset_session_btn)
 
         header_layout.addWidget(title_area)
         header_layout.addStretch()
@@ -325,21 +332,18 @@ class AutoReplyUI(QFrame):
             QMessageBox.critical(self, "错误", f"开始所有自动回复失败：{str(e)}")
 
     def stopAllAutoReply(self):
-        """停止所有自动回复（包括 Playwright 监听）"""
+        """停止所有自动回复"""
         try:
             running_count = auto_reply_manager.get_running_count()
-            playwright_count = len(pdd_protocol_service_manager._workers)
 
-            if running_count == 0 and playwright_count == 0:
+            if running_count == 0:
                 QMessageBox.information(self, "提示", "当前没有正在运行的自动回复")
                 return
 
-            total_count = running_count + playwright_count
             reply = QMessageBox.question(
                 self,
                 "确认停止",
-                f"确定要停止所有 {total_count} 个正在运行的任务吗？\n"
-                f"(自动回复: {running_count}, Playwright监听: {playwright_count})",
+                f"确定要停止所有 {running_count} 个正在运行的任务吗？",
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
                 QMessageBox.StandardButton.No
             )
@@ -348,16 +352,31 @@ class AutoReplyUI(QFrame):
                 # 停止自动回复线程
                 auto_reply_manager.stop_all()
 
-                # 停止 Playwright 监听
-                pdd_protocol_service_manager.stop_all()
-
                 self._update_all_cards_auto_reply_status()
                 self.updateStats()
-                QMessageBox.information(self, "成功", "已停止所有自动回复和 Playwright 监听")
+                QMessageBox.information(self, "成功", "已停止所有自动回复")
 
         except Exception as e:
             self.logger.error(f"停止所有自动回复失败: {str(e)}")
             QMessageBox.critical(self, "错误", f"停止所有自动回复失败：{str(e)}")
+
+    def onResetSessions(self):
+        """重置所有 pending_human 状态的会话为 active，恢复 AI 自动回复"""
+        try:
+            from Session.session_manager import SessionManager
+            session_mgr = SessionManager(db_manager)
+            count = session_mgr.reset_all_pending_human()
+            if count > 0:
+                QMessageBox.information(
+                    self, "重置成功",
+                    f"已重置 {count} 个 pending_human 会话为 active，AI 自动回复已恢复。"
+                )
+                self.logger.info(f"手动重置 {count} 个会话状态为 active")
+            else:
+                QMessageBox.information(self, "提示", "当前没有 pending_human 状态的会话需要重置。")
+        except Exception as e:
+            self.logger.error(f"重置会话状态失败: {str(e)}")
+            QMessageBox.critical(self, "错误", f"重置会话状态失败：{str(e)}")
 
     def _update_all_cards_auto_reply_status(self):
         """更新所有卡片的自动回复状态"""

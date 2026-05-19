@@ -19,6 +19,7 @@ class ConnectionState(Enum):
     CONNECTING = "connecting"
     CONNECTED = "connected"
     RECONNECTING = "reconnecting"
+    SUSPENDED = "suspended"
     ERROR = "error"
 
 
@@ -85,6 +86,9 @@ class ConnectionStatusManager:
             elif state == ConnectionState.CONNECTING:
                 status.connect_time = None
             elif state == ConnectionState.ERROR and error:
+                status.error_count += 1
+                status.last_error = error
+            elif state == ConnectionState.SUSPENDED and error:
                 status.error_count += 1
                 status.last_error = error
             elif state == ConnectionState.RECONNECTING:
