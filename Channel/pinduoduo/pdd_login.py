@@ -267,10 +267,10 @@ async def refresh_pdd_cookies(name, password=None):
         
         # 检查是否成功获取到必要信息
         if user_id is None or shop_id is None:
-            pdd_login.logger.error(f"账号 '{name}' cookies刷新成功，但获取用户信息或店铺信息失败")
+            pdd_login.logger.error(f"账号 '{name}' 会话凭据刷新成功，但获取用户信息或店铺信息失败")
             return False
 
-        pdd_login.logger.info(f"账号 '{name}' cookies刷新成功，店铺: {shop_name}({shop_id})")
+        pdd_login.logger.info(f"账号 '{name}' 会话凭据刷新成功，店铺: {shop_name}({shop_id})")
 
         # 刷新成功，返回包含最新信息的字典
         return {
@@ -284,6 +284,6 @@ async def refresh_pdd_cookies(name, password=None):
             "cookies": cookies_json,
         }
     except Exception as e:
-        pdd_login.logger.error(f"账号 '{name}' cookies刷新成功，但在处理后续信息时出错: {e}")
+        pdd_login.logger.error(f"账号 '{name}' 会话凭据刷新成功，但在处理后续信息时出错: {e}")
         return False
 

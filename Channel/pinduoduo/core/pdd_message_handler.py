@@ -302,6 +302,8 @@ class MessageHandlerMixin:
         """立即处理消息"""
         username = context.kwargs.username
         recipient_uid = context.kwargs.from_uid
+        content_length, content_hash = self._content_fingerprint(context.content)
+        message_type = context.type.value if hasattr(context.type, "value") else context.type
         try:
             from Channel.pinduoduo.utils.API.send_message import SendMessage
             send_message = SendMessage(shop_id, user_id)
@@ -315,26 +317,40 @@ class MessageHandlerMixin:
                         self.logger.warning(f"{username}认证失败")
 
             elif context.type == ContextType.WITHDRAW:
-                self.logger.info(f"收到撤回消息: {context.content}")
+                self.logger.info(
+                    f"收到撤回消息: message_type={message_type}, content_length={content_length}, content_hash={content_hash}"
+                )
                 await asyncio.to_thread(send_message.send_text, recipient_uid, "[玫瑰]")
 
             elif context.type == ContextType.SYSTEM_STATUS:
-                self.logger.debug(f"系统状态消息: {context.content}")
+                self.logger.debug(
+                    f"系统状态消息: message_type={message_type}, content_length={content_length}, content_hash={content_hash}"
+                )
 
             elif context.type == ContextType.SYSTEM_HINT:
-                self.logger.info(f"系统提示: {context.content}")
+                self.logger.info(
+                    f"系统提示: message_type={message_type}, content_length={content_length}, content_hash={content_hash}"
+                )
 
             elif context.type == ContextType.MALL_CS:
-                self.logger.debug(f"收到客服消息: {context.content}")
+                self.logger.debug(
+                    f"收到客服消息: message_type={message_type}, content_length={content_length}, content_hash={content_hash}"
+                )
 
             elif context.type == ContextType.SYSTEM_BIZ:
-                self.logger.info(f"系统业务消息: {context.content}")
+                self.logger.info(
+                    f"系统业务消息: message_type={message_type}, content_length={content_length}, content_hash={content_hash}"
+                )
 
             elif context.type == ContextType.MALL_SYSTEM_MSG:
-                self.logger.info(f"商城系统消息: {context.content}")
+                self.logger.info(
+                    f"商城系统消息: message_type={message_type}, content_length={content_length}, content_hash={content_hash}"
+                )
 
             elif context.type == ContextType.TRANSFER:
-                self.logger.info(f"转接消息: {context.content}")
+                self.logger.info(
+                    f"转接消息: message_type={message_type}, content_length={content_length}, content_hash={content_hash}"
+                )
                 await asyncio.to_thread(send_message.send_text, recipient_uid, "[玫瑰]")
 
         except Exception as e:

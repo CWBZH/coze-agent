@@ -2,6 +2,7 @@
 回复类型枚举
 """
 from enum import Enum
+import hashlib
 
 
 class ReplyType(Enum):
@@ -21,4 +22,6 @@ class Reply:
         self.content = content
 
     def __str__(self):
-        return "Reply(type={}, content={})".format(self.type, self.content)
+        content_text = "" if self.content is None else str(self.content)
+        content_hash = hashlib.sha256(content_text.encode("utf-8", errors="ignore")).hexdigest()[:12] if content_text else ""
+        return "Reply(type={}, content_length={}, content_hash={})".format(self.type, len(content_text), content_hash)

@@ -1,4 +1,5 @@
 import requests
+import hashlib
 import json
 import time
 import random
@@ -182,15 +183,15 @@ class BaseRequest:
                     new_cookies = refresh_result.get('cookies')
                     if new_cookies:
                         self._apply_new_cookies(new_cookies)
-                        self.logger.info(f"账号 {self.account_name} cookies刷新成功")
+                        self.logger.info(f"账号 {self.account_name} 会话凭据刷新成功")
                         return True
                     else:
-                        self.logger.warning(f"账号 {self.account_name} cookies刷新返回无效数据")
+                        self.logger.warning(f"账号 {self.account_name} 会话凭据刷新返回无效数据")
                 else:
-                    self.logger.warning(f"账号 {self.account_name} cookies刷新失败，可能登录状态已失效")
+                    self.logger.warning(f"账号 {self.account_name} 会话凭据刷新失败，可能登录状态已失效")
 
             except Exception as refresh_error:
-                self.logger.warning(f"账号 {self.account_name} cookies刷新异常: {str(refresh_error)}")
+                self.logger.warning(f"账号 {self.account_name} 会话凭据刷新异常: {str(refresh_error)}")
 
             # 回退到完整重新登录
             if not password:
@@ -208,10 +209,10 @@ class BaseRequest:
                     new_cookies = login_result.get('cookies')
                     if new_cookies:
                         self._apply_new_cookies(new_cookies)
-                        self.logger.info(f"账号 {self.account_name} 完整重新登录成功，cookies已更新")
+                        self.logger.info(f"账号 {self.account_name} 完整重新登录成功，会话凭据已更新")
                         return True
                     else:
-                        self.logger.error(f"账号 {self.account_name} 完整重新登录失败：未获取到有效cookies")
+                        self.logger.error(f"账号 {self.account_name} 完整重新登录失败：未获取到有效会话凭据")
                         return False
                 else:
                     self.logger.error(f"账号 {self.account_name} 完整重新登录失败")
@@ -222,7 +223,7 @@ class BaseRequest:
                 return False
 
         except Exception as e:
-            self.logger.error(f"账号 {self.account_name} 重新获取cookies过程中发生错误: {str(e)}")
+            self.logger.error(f"账号 {self.account_name} 重新获取会话凭据过程中发生错误: {str(e)}")
             return False
     
     def _should_retry(self, response: requests.Response = None, exception: Exception = None) -> bool:
@@ -375,14 +376,20 @@ class BaseRequest:
         try:
             # 检查HTTP状态码
             if response.status_code != 200:
-                self.logger.error(f"请求失败，状态码: {response.status_code}, 响应: {response.text}")
+                text_length, text_hash = self._text_fingerprint(response.text)
+                self.logger.error(
+                    f"请求失败，状态码: {response.status_code}, response_length={text_length}, response_hash={text_hash}"
+                )
                 return None
             
             if expect_json:
                 try:
                     return response.json()
                 except json.JSONDecodeError:
-                    self.logger.error(f"解析JSON响应失败: {response.text}")
+                    text_length, text_hash = self._text_fingerprint(response.text)
+                    self.logger.error(
+                        f"解析JSON响应失败: response_length={text_length}, response_hash={text_hash}"
+                    )
                     return None
             else:
                 return {"text": response.text, "status_code": response.status_code}
@@ -392,6 +399,13 @@ class BaseRequest:
             return None
     
     _SENSITIVE_KEYS = {'password', 'cookies', 'token', 'api_key', 'access_token', 'anti-content', 'anti_content'}
+
+    def _text_fingerprint(self, value: Any) -> tuple[int, str]:
+        if value is None:
+            return 0, ""
+        text = value if isinstance(value, str) else str(value)
+        digest = hashlib.sha256(text.encode("utf-8", errors="ignore")).hexdigest()[:12] if text else ""
+        return len(text), digest
 
     def _sanitize_for_log(self, data: Any) -> Any:
         """对日志中的敏感字段进行脱敏处理"""
@@ -624,15 +638,15 @@ class BaseRequest:
                 new_cookies = refresh_result.get('cookies')
                 if new_cookies:
                     self._apply_new_cookies(new_cookies)
-                    self.logger.info(f"账号 {self.account_name} cookies刷新成功（仅刷新模式）")
+                    self.logger.info(f"账号 {self.account_name} 会话凭据刷新成功（仅刷新模式）")
                     return True
                 else:
-                    self.logger.error(f"账号 {self.account_name} cookies刷新失败：未获取到有效cookies")
+                    self.logger.error(f"账号 {self.account_name} 会话凭据刷新失败：未获取到有效会话凭据")
                     return False
             else:
-                self.logger.error(f"账号 {self.account_name} cookies刷新失败")
+                self.logger.error(f"账号 {self.account_name} 会话凭据刷新失败")
                 return False
 
         except Exception as e:
-            self.logger.error(f"账号 {self.account_name} cookies刷新过程中发生错误: {str(e)}")
+            self.logger.error(f"账号 {self.account_name} 会话凭据刷新过程中发生错误: {str(e)}")
             return False

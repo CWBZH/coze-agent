@@ -41,22 +41,26 @@ class SendMessage(BaseRequest):
 
         result = self.post(url, json_data=data)
         if result and result.get("success") == True:
+            result_data = result.get("result", {}) if isinstance(result.get("result"), dict) else {}
+            pdd_result = result_data.get("result", "")
+            error_code = result_data.get("error_code", "")
             if result.get("result", {}).get("error_code") == 10002:
                 error_msg = result.get('result', {}).get('error')
                 self.logger.error(
                     f"发送文本消息失败: request_id={request_id}, to={recipient_uid}, "
-                    f"error={error_msg}, result={result}"
+                    f"error_code={error_code}, pdd_result={pdd_result}, error_type={type(error_msg).__name__}"
                 )
                 return error_msg
             else:
                 self.logger.info(
                     f"发送文本消息接口成功: request_id={request_id}, to={recipient_uid}, "
-                    f"result={result.get('result')}"
+                    f"pdd_result={pdd_result}, error_code={error_code}"
                 )
                 return result
         else:
+            success = result.get("success") if isinstance(result, dict) else None
             self.logger.error(
-                f"发送文本消息失败: request_id={request_id}, to={recipient_uid}, result={result}"
+                f"发送文本消息失败: request_id={request_id}, to={recipient_uid}, success={success}"
             )
             return None
 
@@ -92,7 +96,11 @@ class SendMessage(BaseRequest):
 
         result = self.post(url, json_data=data)
         if result:
-            self.logger.debug(f"发送图片消息成功: {result}")
+            result_data = result.get("result", {}) if isinstance(result, dict) and isinstance(result.get("result"), dict) else {}
+            self.logger.debug(
+                f"发送图片消息成功: to={recipient_uid}, success={result.get('success') if isinstance(result, dict) else None}, "
+                f"pdd_result={result_data.get('result', '')}, error_code={result_data.get('error_code', '')}"
+            )
             return result
 
 
@@ -138,7 +146,12 @@ class SendMessage(BaseRequest):
             if result.get("success"):
                 self.logger.info(f"商品卡片发送成功: goods_id={goods_id}, to={recipient_uid}, biz_type={biz_type}")
             else:
-                self.logger.error(f"商品卡片发送失败: {result.get('error_msg', '未知错误')}")
+                error_msg = result.get("error_msg")
+                error_type = type(error_msg).__name__ if error_msg is not None else "None"
+                self.logger.error(
+                    f"商品卡片发送失败: goods_id={goods_id}, to={recipient_uid}, "
+                    f"biz_type={biz_type}, error_type={error_type}"
+                )
             return result
 
 
@@ -179,5 +192,9 @@ class SendMessage(BaseRequest):
         
         result = self.post(url, json_data=data)
         if result:
-            self.logger.debug(f"转移会话成功: {result}")
+            result_data = result.get("result", {}) if isinstance(result, dict) and isinstance(result.get("result"), dict) else {}
+            self.logger.debug(
+                f"转移会话成功: to={recipient_uid}, success={result.get('success') if isinstance(result, dict) else None}, "
+                f"pdd_result={result_data.get('result', '')}, error_code={result_data.get('error_code', '')}"
+            )
             return result

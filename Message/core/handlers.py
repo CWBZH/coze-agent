@@ -4,6 +4,7 @@
 """
 
 from abc import ABC, abstractmethod
+import hashlib
 from typing import Dict, Any
 from bridge.context import Context
 from utils.logger_loguru import get_logger
@@ -102,14 +103,16 @@ class CatchAllHandler(MessageHandler):
         """记录所有消息，用于调试和统计（不记录完整内容以保护隐私）"""
         user_id = metadata.get('user_id', 'unknown')
         message_id = metadata.get('message_id', 'unknown')
-        content_preview = str(context.content)[:50] + "..." if context.content else ""
+        content_text = "" if context.content is None else str(context.content)
+        content_length = len(content_text)
+        content_hash = hashlib.sha256(content_text.encode("utf-8", errors="ignore")).hexdigest()[:12] if content_text else ""
 
         self.logger.info(f"=== 消息处理记录 ===")
         self.logger.info(f"用户ID: {user_id}")
         self.logger.info(f"消息ID: {message_id}")
         self.logger.info(f"消息类型: {context.type}")
         self.logger.info(f"渠道类型: {context.channel_type}")
-        self.logger.info(f"消息内容预览: {content_preview}")
+        self.logger.info(f"消息内容摘要: content_length={content_length}, content_hash={content_hash}")
         self.logger.info(f"消息已被CatchAllHandler处理")
         self.logger.info(f"===================")
 

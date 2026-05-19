@@ -1,4 +1,5 @@
 """FastGPT API 调用处理器。"""
+import hashlib
 import random
 from typing import Dict, List
 
@@ -8,6 +9,14 @@ from core.constants import TRANSFER_HUMAN_REPLY
 from utils.logger_loguru import get_logger
 
 logger = get_logger("FastGPTHandler")
+
+
+def _fingerprint(value) -> tuple[int, str]:
+    if value is None:
+        return 0, ""
+    text = value if isinstance(value, str) else str(value)
+    digest = hashlib.sha256(text.encode("utf-8", errors="ignore")).hexdigest()[:12] if text else ""
+    return len(text), digest
 
 SYSTEM_PROMPT_TEMPLATE = """你是拼多多店铺【{shop_name}】的客服。
 
@@ -88,7 +97,10 @@ class FastGPTHandler:
                     content = (data.get("choices", [{}])[0].get("message", {}).get("content", "") or "")
                     usage = data.get("usage", {})
                     return {"success": True, "content": content, "tokens": usage.get("total_tokens", 0)}
-                logger.error(f"FastGPT HTTP {resp.status_code}: {resp.text[:200]}")
+                response_length, response_hash = _fingerprint(resp.text)
+                logger.error(
+                    f"FastGPT HTTP {resp.status_code}: response_length={response_length}, response_hash={response_hash}"
+                )
                 return {"success": False, "content": None, "error": f"HTTP {resp.status_code}"}
             except requests.exceptions.Timeout:
                 logger.error(f"FastGPT timeout attempt={attempt + 1}")

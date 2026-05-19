@@ -24,7 +24,8 @@ class GetToken(BaseRequest):
             elif 'result' in result and 'token' in result['result']:
                 return result['result']['token']
             else:
-                self.logger.error(f"账号 {self.account_name} 无法从响应中获取token: {result}")
+                result_keys = list(result.keys()) if isinstance(result, dict) else []
+                self.logger.error(f"账号 {self.account_name} 无法从响应中获取访问凭据: result_keys={result_keys}")
         
         return None
 

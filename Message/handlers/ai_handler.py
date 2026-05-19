@@ -143,7 +143,8 @@ class AIReplyHandler(BaseHandler):
             return "dict_no_result"
         if pdd_result is None:
             return "missing_result"
-        return str(pdd_result)
+        value_length, value_hash = AIReplyHandler._fingerprint(pdd_result)
+        return f"{type(pdd_result).__name__}:length={value_length}:hash={value_hash}"
 
     async def handle(self, context: Context, metadata: Dict[str, Any]) -> bool:
         """处理AI回复"""
@@ -343,7 +344,11 @@ class AIReplyHandler(BaseHandler):
                             reply_hash=reply_hash,
                         )
                     )
-                    await self.log_message(context, "AI回复发送成功", f"回复: {reply}...")
+                    await self.log_message(
+                        context,
+                        "AI回复发送成功",
+                        f"reply_length={reply_length} reply_hash={reply_hash}",
+                    )
                 else:
                     duration_ms = int((time.perf_counter() - handle_started_at) * 1000)
                     self.logger.warning(
@@ -514,7 +519,10 @@ class AIReplyHandler(BaseHandler):
                             duration_ms=duration_ms,
                         )
                     )
-                    self.logger.info(f"Pipeline skip: {result}")
+                    self.logger.info(
+                        "Pipeline skip: "
+                        + self._trace_fields(trace, action="skip", duration_ms=duration_ms)
+                    )
                     return self.PIPELINE_SKIP
             except Exception as e:
                 duration_ms = int((time.perf_counter() - request_started_at) * 1000)
@@ -683,7 +691,7 @@ class AIReplyHandler(BaseHandler):
                 )
                 self.logger.info(
                     f"[发送回执] 文本消息接口成功: shop_id={shop_id}, user_id={user_id}, "
-                    f"from_uid={from_uid}, result={result.get('result')}"
+                    f"from_uid={from_uid}, pdd_result={pdd_result_summary}"
                 )
                 return True
             if isinstance(result, dict) and result.get("success") and not isinstance(pdd_result, dict):
@@ -712,9 +720,19 @@ class AIReplyHandler(BaseHandler):
                         reply_hash=reply_hash,
                     )
                 )
-                self._alert_manual_transfer(metadata, f"{metadata.get('shop_id')}_{from_uid}", f"PDD send failed: {result}", "high")
+                self._alert_manual_transfer(
+                    metadata,
+                    f"{metadata.get('shop_id')}_{from_uid}",
+                    f"PDD send failed: pdd_result={pdd_result_summary}",
+                    "high",
+                )
                 return False
-            self._alert_manual_transfer(metadata, f"{metadata.get('shop_id')}_{from_uid}", f"PDD send failed: {result}", "high")
+            self._alert_manual_transfer(
+                metadata,
+                f"{metadata.get('shop_id')}_{from_uid}",
+                f"PDD send failed: pdd_result={pdd_result_summary}",
+                "high",
+            )
             self.logger.warning(
                 "event=pdd.reply.send.failed "
                 + self._trace_fields(
@@ -742,7 +760,7 @@ class AIReplyHandler(BaseHandler):
             )
             self.logger.warning(
                 f"[发送回执] 文本消息接口未确认成功: shop_id={shop_id}, user_id={user_id}, "
-                f"from_uid={from_uid}, result={result}"
+                f"from_uid={from_uid}, pdd_result={pdd_result_summary}"
             )
             return False
 
@@ -816,10 +834,20 @@ class AIReplyHandler(BaseHandler):
             success = await self._send_reply(context, reply_text, metadata)
             if not success:
                 # 如果发送失败，记录日志并返回False让下游有机会处理
-                await self.log_message(context, "备用回复发送失败", f"内容: {reply_text}")
+                reply_length, reply_hash = self._fingerprint(reply_text)
+                await self.log_message(
+                    context,
+                    "备用回复发送失败",
+                    f"reply_length={reply_length} reply_hash={reply_hash}",
+                )
                 return False
 
-            await self.log_message(context, "备用回复发送成功", f"内容: {reply_text}")
+            reply_length, reply_hash = self._fingerprint(reply_text)
+            await self.log_message(
+                context,
+                "备用回复发送成功",
+                f"reply_length={reply_length} reply_hash={reply_hash}",
+            )
             return True
 
         except Exception as e:
