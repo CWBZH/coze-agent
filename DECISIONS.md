@@ -142,13 +142,13 @@
 
 已通过 D011、D012、D013 完成 graceful shutdown 的分阶段改造。
 
-## D008：当前下一步任务是 T005-B
+## D008：当前下一步建议任务是 T006 或 T010
 
 状态：已确认。
 
 说明：
 
-`T004：诊断日志增强` 和 `T005-A：message trace_id 生成与基础透传` 已完成，下一步观测性任务是 `T005-B：AI / Pipeline reply outcome observability`。
+`T005` message trace 闭环已完成，下一步建议执行 `T006：历史隐私债日志清理` 或 `T010：Linux 兼容扫描`。
 
 ## D009：MessageConsumer 已改为固定 worker pool
 
@@ -255,7 +255,71 @@
 
 后续：
 
-下一步执行 `T005-B：AI / Pipeline reply outcome observability`。
+下一步建议执行 `T006：历史隐私债日志清理` 或 `T010：Linux 兼容扫描`。
+
+## D015：message trace 闭环已完成
+
+状态：已完成。
+
+修改文件：
+
+1. `Channel/pinduoduo/core/pdd_message_handler.py`
+2. `Channel/pinduoduo/pdd_message.py`
+3. `bridge/context.py`
+4. `Message/models/queue_models.py`
+5. `Message/core/consumer.py`
+6. `Message/handlers/ai_handler.py`
+7. `Message/core/pipeline.py`
+
+决策：
+
+在不改变业务逻辑、不修改 `queue_name` 的前提下，完成单条买家消息的 trace 闭环：
+
+```text
+WebSocket -> Context -> Queue -> Consumer -> Handler -> Pipeline -> AI -> SendMessage
+```
+
+关键结果：
+
+1. `T005-A` 已完成 WebSocket -> Context -> MessageWrapper -> Consumer 的 `trace_id` / `source_message_id` / `queue_message_id` 透传。
+2. `T005-A.1` 已修正 `shop_id` 为空时的 `trace_id` 规则，并将高频 trace 事件降为 debug。
+3. `T005-B` 已完成 `AIReplyHandler` / `MessagePipeline` 的 pipeline、AI、静态规则、人工锁、转人工 outcome 日志。
+4. `T005-B.1` 已修正事件语义：pipeline outcome 使用 `pdd.pipeline.*`，真实 FastGPT 调用边界才使用 `pdd.ai.request.*`。
+5. `T005-C` 已完成 SendMessage 发送结果追踪。
+6. `T005-C.1` 已修正 unknown delivery 的 final_status 语义。
+
+final_status 语义：
+
+1. `reply_sent`：PDD 明确返回 ok。
+2. `reply_send_failed`：非 ok / None / 异常 / 缺少发送字段。
+3. `reply_delivery_unknown`：调用成功但无明确 ok。
+
+事件边界：
+
+1. `pdd.message.completed` 只在 SendMessage 发送结果明确后记录。
+2. Pipeline 阶段不记录 `pdd.message.completed`。
+3. `pdd.ai.request.started` / `pdd.ai.request.succeeded` / `pdd.ai.request.failed` 只用于真实 FastGPT 调用边界。
+4. `pdd.reply.send.succeeded` 只在 PDD 明确返回 ok 时记录。
+5. unknown delivery 使用 `pdd.reply.send.call_succeeded status=unknown_delivery`。
+
+隐私原则：
+
+1. 不记录完整用户消息。
+2. 不记录完整 AI 回复。
+3. 只记录 `content_length` / `content_hash` / `reply_length` / `reply_hash`。
+4. 不记录 token / cookie / access_token。
+
+验证结果：
+
+1. `py_compile` 通过。
+2. fake trace metadata test 通过。
+3. fake reply / transfer_human / skip 测试通过。
+4. fake SendMessage ok / non-ok / unknown_delivery / exception 测试通过。
+5. grep 确认新增 trace 日志未记录完整 `content` / `reply` / `token` / `cookie`。
+
+后续：
+
+下一步建议执行 `T006：历史隐私债日志清理` 或 `T010：Linux 兼容扫描`。
 
 ## D013：AutoReplyThread.stop 已改为 graceful shutdown
 
@@ -291,7 +355,7 @@
 
 后续：
 
-下一步执行 `T005-B：AI / Pipeline reply outcome observability`。
+下一步建议执行 `T006：历史隐私债日志清理` 或 `T010：Linux 兼容扫描`。
 
 ## D012：shutdown task map 清理保留未退出 task 引用
 
@@ -330,7 +394,7 @@
 
 后续：
 
-下一步执行 `T005-B：AI / Pipeline reply outcome observability`。
+下一步建议执行 `T006：历史隐私债日志清理` 或 `T010：Linux 兼容扫描`。
 
 ## D014：runtime observability 和 message trace 基线已完成
 
@@ -395,4 +459,4 @@ T005-A.1 小补丁：
 
 后续：
 
-下一步执行 `T005-B：AI / Pipeline reply outcome observability`。
+下一步建议执行 `T006：历史隐私债日志清理` 或 `T010：Linux 兼容扫描`。

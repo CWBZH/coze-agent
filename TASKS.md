@@ -311,6 +311,103 @@
 
 - `T005-B：AI / Pipeline reply outcome observability`。
 
+## T005-B：AI / Pipeline reply outcome observability
+
+状态：已完成。
+
+目标：
+
+让 `AIReplyHandler` / `MessagePipeline` 能关联 `trace_id`，并记录 pipeline、AI、静态规则、人工锁、转人工 outcome。
+
+修改文件：
+
+- `Message/handlers/ai_handler.py`
+- `Message/core/pipeline.py`
+
+已完成内容：
+
+- `AIReplyHandler` 从 `metadata` / `context.kwargs` 读取 `trace_id`、`source_message_id`、`queue_message_id`、`shop_id`、`user_id`、`from_uid/customer_uid`、`session_id`。
+- `MessagePipeline.process()` 增加向后兼容可选参数：`trace_id=None`、`source_message_id=None`、`queue_message_id=None`。
+- `AIReplyHandler._get_ai_reply()` 调用 `pipeline.process(...)` 时透传 trace 字段。
+- 新增 outcome 事件：`pdd.pipeline.started`、`pdd.pipeline.completed`、`pdd.pipeline.failed`、`pdd.ai.request.started`、`pdd.ai.request.succeeded`、`pdd.ai.request.failed`、`pdd.human_lock.skipped`、`pdd.static_rule.matched`、`pdd.transfer_human.triggered`、`pdd.message.skipped`。
+- 保持 FastGPT 请求参数、Pipeline 返回结构和业务分支不变。
+
+### T005-B.1：AI / Pipeline outcome 日志语义修正
+
+状态：已完成。
+
+已完成内容：
+
+- `AIReplyHandler` 中包裹 `pipeline.process()` 的事件改为 `pdd.pipeline.started` / `pdd.pipeline.completed` / `pdd.pipeline.failed`。
+- 只有 `MessagePipeline` 内真正 `_call_fastgpt_async(...)` 的边界保留 `pdd.ai.request.started` / `pdd.ai.request.succeeded` / `pdd.ai.request.failed`。
+- Pipeline outcome 阶段不再记录 `pdd.message.completed`。
+- 静态规则生成回复只记录 `pdd.reply.generated`，不记录 `pdd.message.completed`。
+- `pdd.message.completed` 留给 SendMessage 发送结果明确后记录。
+
+验证：
+
+- `python -m py_compile Message/handlers/ai_handler.py Message/core/pipeline.py` 通过。
+- fake reply / transfer_human / skip 测试通过。
+- grep 确认 T005-B 文件中不存在误导性 `event=pdd.message.completed`。
+- grep 确认 `pdd.ai.request.*` 只出现在真实 FastGPT 调用边界。
+- 新增日志未记录完整 `content` / `reply` / `token` / `cookie`。
+
+## T005-C：SendMessage reply send outcome observability
+
+状态：已完成。
+
+目标：
+
+补齐 SendMessage 发送结果追踪，并在发送结果明确后记录最终 `pdd.message.completed`。
+
+修改文件：
+
+- `Message/handlers/ai_handler.py`
+
+已完成内容：
+
+- `_send_reply()` 生成本地 `send_request_id` 用于关联发送调用。
+- 发送前记录 `event=pdd.reply.send.started`。
+- PDD 明确返回 `result.result == "ok"` 时记录 `event=pdd.reply.send.succeeded`。
+- 调用无异常但无法确认投递时记录 `event=pdd.reply.send.call_succeeded status=unknown_delivery`。
+- 非 ok、None、异常、缺少发送字段时记录 `event=pdd.reply.send.failed`。
+- 发送结果明确后记录 `event=pdd.message.completed`。
+- 未修改 `SendMessage.send_text()` 请求参数。
+- 未修改发送逻辑和业务策略。
+
+### T005-C.1：unknown_delivery final_status 语义修正
+
+状态：已完成。
+
+final_status 语义：
+
+- `reply_sent`：PDD 明确返回 ok。
+- `reply_send_failed`：非 ok / None / 异常 / 缺少发送字段。
+- `reply_delivery_unknown`：调用成功但无明确 ok。
+
+已完成内容：
+
+- unknown delivery 分支保持 `event=pdd.reply.send.call_succeeded status=unknown_delivery`。
+- unknown delivery 分支的 `event=pdd.message.completed final_status` 改为 `reply_delivery_unknown`。
+- `_send_reply()` 返回值仍保持 `False`，业务行为不变。
+
+验证：
+
+- `python -m py_compile Message/handlers/ai_handler.py Channel/pinduoduo/utils/API/send_message.py` 通过。
+- fake ok 测试：`final_status=reply_sent`。
+- fake non-ok / exception 测试：`final_status=reply_send_failed`。
+- fake unknown_delivery 测试：`final_status=reply_delivery_unknown`，且 `_send_reply()` 返回 `False`。
+- grep 确认 `pdd.message.completed` 只在 `_send_reply()` 最终发送结果边界出现。
+- 新增日志未记录完整 `reply` / `content` / `token` / `cookie`。
+
+## T006：历史隐私债日志清理
+
+状态：待执行。
+
+目标：
+
+清理历史日志中的完整或截断正文输出，例如旧的 `log_message(... 回复: ...)`、静态规则命中正文、SendMessage 原始 result 直出等，统一改为 length/hash 和安全摘要。
+
 ---
 
 # 阶段 1：Linux 兼容盘点
@@ -429,4 +526,4 @@
 
 ## 下一步
 
-下一步建议执行：`T005-B：AI / Pipeline reply outcome observability`。
+下一步建议执行：`T006：历史隐私债日志清理` 或 `T010：Linux 兼容扫描`。
