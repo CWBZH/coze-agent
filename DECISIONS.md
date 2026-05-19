@@ -218,3 +218,37 @@
 后续：
 
 下一步执行 `T003：graceful shutdown`。
+
+## D011：WebSocket 安全关闭已增加 wait_closed 和 timeout
+
+状态：已完成。
+
+修改文件：
+
+1. `Channel/pinduoduo/core/pdd_connection.py`
+
+决策：
+
+`ConnectionMixin._safe_close_websocket()` 已增强 WebSocket 安全关闭逻辑，在 `close()` 后继续等待 `wait_closed()`，并为两个阶段都增加有界 timeout，降低 event loop 关闭时 WebSocket close handshake 未完成的风险。
+
+关键结果：
+
+1. `ws` 为空时直接返回。
+2. `close()` 返回 coroutine 时使用 `asyncio.wait_for(..., timeout=5.0)`。
+3. `wait_closed()` 返回 coroutine 时使用 `asyncio.wait_for(..., timeout=5.0)`。
+4. `close()` 和 `wait_closed()` 各自只 await 一次。
+5. 未修改调用方。
+6. 未修改业务逻辑。
+7. 保持 `queue_name = pdd_{shop_id}` 不变。
+
+验证结果：
+
+1. `python -m py_compile Channel/pinduoduo/core/pdd_connection.py` 通过。
+2. fake websocket 测试通过。
+3. `close_called == True`。
+4. `wait_closed_called == True`。
+5. 未出现 `RuntimeError: cannot reuse already awaited coroutine`。
+
+后续：
+
+下一步执行 `T003-B：LifecycleMixin.stop_account / stop_all_connections 统一 await 清理`。

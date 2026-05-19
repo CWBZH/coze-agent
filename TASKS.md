@@ -115,6 +115,36 @@
 7. clear processing tasks。
 8. 最后 stop event loop。
 
+### T003-A：_safe_close_websocket close + wait_closed + timeout
+
+状态：已完成。
+
+修改文件：
+
+- `Channel/pinduoduo/core/pdd_connection.py`
+
+已完成内容：
+
+- `_safe_close_websocket()` 增加空 `ws` 直接返回。
+- `close()` 返回 coroutine 时使用 `asyncio.wait_for(..., timeout=5.0)`。
+- `wait_closed()` 返回 coroutine 时使用 `asyncio.wait_for(..., timeout=5.0)`。
+- `close()` 和 `wait_closed()` 各自只 await 一次。
+- 未修改调用方。
+- 未修改业务逻辑。
+- 未修改 `queue_name`。
+
+验证：
+
+- `python -m py_compile Channel/pinduoduo/core/pdd_connection.py` 通过。
+- fake websocket 测试通过。
+- `close_called == True`。
+- `wait_closed_called == True`。
+- 未出现 `RuntimeError: cannot reuse already awaited coroutine`。
+
+下一步：
+
+- `T003-B：LifecycleMixin.stop_account / stop_all_connections 统一 await 清理`。
+
 ## T004：诊断日志增强
 
 状态：待执行。
@@ -255,4 +285,4 @@
 
 ## 下一步
 
-下一步建议执行：`T003：graceful shutdown`。
+下一步建议执行：`T003-B：LifecycleMixin.stop_account / stop_all_connections 统一 await 清理`。

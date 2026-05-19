@@ -83,6 +83,77 @@ class LifecycleMixin:
             f"generation={generation}, current_generation={self._current_generation(connection_key)}"
         )
 
+    def _ensure_shutdown_maps(self):
+        if not hasattr(self, "_connection_queue_names"):
+            self._connection_queue_names = {}
+        if not hasattr(self, "_message_tasks"):
+            self._message_tasks = {}
+        if not hasattr(self, "_stop_wait_tasks"):
+            self._stop_wait_tasks = {}
+
+    async def _cancel_mapped_task(self, task_map: dict, connection_key: str, task_label: str, timeout: float = 5.0):
+        task = task_map.get(connection_key)
+        if task is None:
+            self.logger.debug(
+                f"Shutdown phase task missing: phase=cancel-{task_label}, "
+                f"connection_key={connection_key}"
+            )
+            return
+
+        task_id = id(task)
+        self.logger.info(
+            f"Shutdown phase task cancel requested: phase=cancel-{task_label}, "
+            f"connection_key={connection_key}, {task_label}_task_id={task_id}"
+        )
+        should_pop = task.done()
+        if not task.done():
+            task.cancel()
+            try:
+                await asyncio.wait_for(asyncio.shield(task), timeout=timeout)
+                should_pop = True
+                self.logger.info(
+                    f"Shutdown phase task cancel completed: phase=cancel-{task_label}, "
+                    f"connection_key={connection_key}, {task_label}_task_id={task_id}"
+                )
+            except asyncio.CancelledError:
+                should_pop = task.done() or task.cancelled()
+                self.logger.debug(
+                    f"Shutdown phase task cancelled: phase=cancel-{task_label}, "
+                    f"connection_key={connection_key}, {task_label}_task_id={task_id}"
+                )
+            except asyncio.TimeoutError:
+                should_pop = task.done()
+                self.logger.warning(
+                    f"Shutdown phase task cancel timeout: phase=cancel-{task_label}, "
+                    f"connection_key={connection_key}, {task_label}_task_id={task_id}, "
+                    f"timeout={timeout}, task_done={task.done()}, reference_retained={not task.done()}"
+                )
+            except Exception as e:
+                should_pop = task.done()
+                self.logger.error(
+                    f"Shutdown phase task cancel error: phase=cancel-{task_label}, "
+                    f"connection_key={connection_key}, {task_label}_task_id={task_id}, error={e}"
+                )
+        current = task_map.get(connection_key)
+        if should_pop and current is task:
+            task_map.pop(connection_key, None)
+        elif current is not task:
+            self.logger.debug(
+                f"Shutdown phase task map changed, skip pop: phase=cancel-{task_label}, "
+                f"connection_key={connection_key}, old_task_id={task_id}, "
+                f"current_task_id={id(current) if current else 'none'}"
+            )
+        else:
+            self.logger.warning(
+                f"Shutdown phase task retained: phase=cancel-{task_label}, "
+                f"connection_key={connection_key}, {task_label}_task_id={task_id}, "
+                f"task_done={task.done()}"
+            )
+
+    async def _cancel_task_map(self, task_map: dict, task_label: str, timeout: float = 5.0):
+        for connection_key in list(task_map.keys()):
+            await self._cancel_mapped_task(task_map, connection_key, task_label, timeout=timeout)
+
     async def start_account(self, shop_id: str, user_id: str, on_success: callable, on_failure: callable):
         """Start or replace one account connection."""
         account_info = db_manager.get_account(self.channel_name, shop_id, user_id)
@@ -94,6 +165,9 @@ class LifecycleMixin:
 
         username = account_info.get("username", user_id)
         connection_key = f"{shop_id}_{user_id}"
+        queue_name = f"pdd_{shop_id}"
+        self._ensure_shutdown_maps()
+        self._connection_queue_names[connection_key] = queue_name
         lock = self._get_lifecycle_lock(connection_key)
 
         self.logger.info(f"Lifecycle lock waiting: connection_key={connection_key}")
@@ -114,6 +188,7 @@ class LifecycleMixin:
                     self._stop_events[connection_key] = asyncio.Event()
                     self._stop_event = self._stop_events[connection_key]
 
+                self._connection_queue_names[connection_key] = queue_name
                 if self.reconnect_config.enable_auto_reconnect:
                     connect_task = asyncio.create_task(
                         self._connect_with_retry(
@@ -155,61 +230,62 @@ class LifecycleMixin:
 
             username = account_info.get("username", user_id)
             connection_key = f"{shop_id}_{user_id}"
+            self._ensure_shutdown_maps()
+            queue_name = getattr(self, "_connection_queue_names", {}).get(connection_key, f"pdd_{shop_id}")
+            generation = self._current_generation(connection_key)
+            lock = self._get_lifecycle_lock(connection_key)
 
-            self.logger.info(f"Stopping account: {shop_id} {username}")
+            self.logger.info(
+                f"Shutdown phase start: phase=stop-account, connection_key={connection_key}, "
+                f"queue_name={queue_name}, generation={generation}, ws_id={id(self.ws) if self.ws else 'none'}, "
+                f"processing_tasks_count={len(self.processing_tasks)}"
+            )
 
-            stop_event = self._stop_events.get(connection_key) if hasattr(self, "_stop_events") else None
-            if stop_event:
-                stop_event.set()
-            elif self._stop_event:
-                self._stop_event.set()
+            async with lock:
+                stop_event = self._stop_events.get(connection_key) if hasattr(self, "_stop_events") else None
+                if stop_event:
+                    stop_event.set()
+                elif self._stop_event:
+                    self._stop_event.set()
+                self.logger.info(
+                    f"Shutdown phase set stop_event: connection_key={connection_key}, "
+                    f"queue_name={queue_name}, generation={generation}"
+                )
 
-            if connection_key in self._reconnect_tasks:
-                task = self._reconnect_tasks[connection_key]
-                if not task.done():
-                    task.cancel()
-                    try:
-                        await asyncio.wait_for(task, timeout=5.0)
-                    except asyncio.CancelledError:
-                        self.logger.debug(f"Reconnect task cancelled: {connection_key}")
-                    except asyncio.TimeoutError:
-                        self.logger.warning(f"Reconnect task cancel timeout: {connection_key}")
-                    except Exception as task_error:
-                        self.logger.error(f"Reconnect task cancel error: {task_error}")
-                del self._reconnect_tasks[connection_key]
-                self.logger.debug(f"Reconnect task removed: {connection_key}")
+                await self._cancel_mapped_task(self._reconnect_tasks, connection_key, "reconnect", timeout=5.0)
+                await self._cancel_mapped_task(self._heartbeat_tasks, connection_key, "heartbeat", timeout=5.0)
+                await self._cancel_mapped_task(self._message_tasks, connection_key, "message", timeout=5.0)
+                await self._cancel_mapped_task(self._stop_wait_tasks, connection_key, "stop-wait", timeout=5.0)
 
-            if connection_key in self._heartbeat_tasks:
-                task = self._heartbeat_tasks[connection_key]
-                if not task.done():
-                    task.cancel()
-                    try:
-                        await asyncio.wait_for(task, timeout=3.0)
-                    except asyncio.CancelledError:
-                        self.logger.debug(f"Heartbeat task cancelled: {connection_key}")
-                    except asyncio.TimeoutError:
-                        self.logger.warning(f"Heartbeat task cancel timeout: {connection_key}")
-                    except Exception as task_error:
-                        self.logger.error(f"Heartbeat task cancel error: {task_error}")
-                del self._heartbeat_tasks[connection_key]
-                self.logger.debug(f"Heartbeat task removed: {connection_key}")
+                if self.ws:
+                    self.logger.info(
+                        f"Shutdown phase close websocket: connection_key={connection_key}, "
+                        f"queue_name={queue_name}, generation={generation}, ws_id={id(self.ws)}"
+                    )
+                    await self._safe_close_websocket(self.ws)
+                else:
+                    self.logger.warning(
+                        f"Shutdown phase websocket missing: connection_key={connection_key}, "
+                        f"queue_name={queue_name}, generation={generation}"
+                    )
 
-            self.status_manager.update_status(shop_id, user_id, username, ConnectionState.DISCONNECTED)
+                await self._cleanup_resources(
+                    queue_name,
+                    connection_key=connection_key,
+                    generation=generation,
+                    cleanup_heartbeat_tasks=False,
+                )
+                self.status_manager.update_status(shop_id, user_id, username, ConnectionState.DISCONNECTED)
 
-            if self.ws:
-                await self._safe_close_websocket(self.ws)
-                self.logger.info(f"Closed WebSocket: {shop_id} {username}")
-            else:
-                self.logger.warning(f"No active WebSocket: {shop_id} {username}")
+                if hasattr(self, "_stop_events"):
+                    self._stop_events.pop(connection_key, None)
+                if hasattr(self, "_connection_queue_names"):
+                    self._connection_queue_names.pop(connection_key, None)
 
-            await self.cleanup_processing_tasks()
-
-            queue_name = f"pdd_{shop_id}"
-            await self._cleanup_resources(queue_name)
-            if hasattr(self, "_stop_events"):
-                self._stop_events.pop(connection_key, None)
-
-            self.logger.info(f"Stopped account: {shop_id} {username}")
+            self.logger.info(
+                f"Shutdown phase done: phase=stop-account, connection_key={connection_key}, "
+                f"queue_name={queue_name}, generation={generation}"
+            )
 
         except Exception as e:
             self.logger.error(f"Stop account failed: {shop_id} {user_id}: {str(e)}")
@@ -247,6 +323,8 @@ class LifecycleMixin:
                 return
 
             queue_name = f"pdd_{shop_id}"
+            self._ensure_shutdown_maps()
+            self._connection_queue_names[connection_key] = queue_name
             await self._setup_message_consumer(queue_name)
 
             if not self._is_current_generation(connection_key, generation):
@@ -316,6 +394,8 @@ class LifecycleMixin:
                     self._message_loop(websocket, shop_id, user_id, username, queue_name, stop_event)
                 )
                 stop_task = asyncio.create_task(stop_event.wait())
+                self._message_tasks[connection_key] = message_task
+                self._stop_wait_tasks[connection_key] = stop_task
 
                 try:
                     tasks = [message_task, stop_task]
@@ -352,6 +432,10 @@ class LifecycleMixin:
                             pass
                         except Exception as e:
                             self.logger.debug(f"Pending task cancel error: {e}")
+                    if self._message_tasks.get(connection_key) is message_task:
+                        self._message_tasks.pop(connection_key, None)
+                    if self._stop_wait_tasks.get(connection_key) is stop_task:
+                        self._stop_wait_tasks.pop(connection_key, None)
 
                     if should_cleanup:
                         if self._is_current_generation(connection_key, generation):
@@ -365,10 +449,15 @@ class LifecycleMixin:
                 except asyncio.CancelledError:
                     self.logger.debug(f"WebSocket task cancelled: {shop_id}-{username}")
                     message_task.cancel()
+                    stop_task.cancel()
                     if heartbeat_task:
                         heartbeat_task.cancel()
                     try:
                         await asyncio.wait_for(message_task, timeout=3.0)
+                    except (asyncio.CancelledError, asyncio.TimeoutError, asyncio.InvalidStateError):
+                        pass
+                    try:
+                        await asyncio.wait_for(stop_task, timeout=3.0)
                     except (asyncio.CancelledError, asyncio.TimeoutError, asyncio.InvalidStateError):
                         pass
                     if heartbeat_task:
@@ -376,6 +465,10 @@ class LifecycleMixin:
                             await asyncio.wait_for(heartbeat_task, timeout=3.0)
                         except (asyncio.CancelledError, asyncio.TimeoutError, asyncio.InvalidStateError):
                             pass
+                    if self._message_tasks.get(connection_key) is message_task:
+                        self._message_tasks.pop(connection_key, None)
+                    if self._stop_wait_tasks.get(connection_key) is stop_task:
+                        self._stop_wait_tasks.pop(connection_key, None)
                     if self._is_current_generation(connection_key, generation):
                         await self._cleanup_resources(f"pdd_{shop_id}", connection_key, generation)
                     else:
@@ -415,38 +508,56 @@ class LifecycleMixin:
         """Stop all active connections."""
         try:
             self.logger.info("Stopping all PDD connections")
+            self._ensure_shutdown_maps()
+            queue_names = dict(self._connection_queue_names)
+            generations = {
+                connection_key: self._current_generation(connection_key)
+                for connection_key in queue_names
+            }
 
             if self._stop_event:
                 self._stop_event.set()
             if hasattr(self, "_stop_events"):
-                for stop_event in self._stop_events.values():
+                for connection_key, stop_event in list(self._stop_events.items()):
                     stop_event.set()
+                    self.logger.info(
+                        f"Shutdown phase set stop_event: phase=stop-all, connection_key={connection_key}, "
+                        f"queue_name={queue_names.get(connection_key, 'unknown')}, "
+                        f"generation={generations.get(connection_key, 'unknown')}"
+                    )
 
-            for connection_key, task in list(self._reconnect_tasks.items()):
-                if not task.done():
-                    task.cancel()
-                    try:
-                        await asyncio.wait_for(task, timeout=5.0)
-                    except (asyncio.CancelledError, asyncio.TimeoutError):
-                        self.logger.debug(f"Reconnect task stopped: {connection_key}")
-                    except Exception as e:
-                        self.logger.error(f"Reconnect task stop error: {connection_key}, {e}")
-                del self._reconnect_tasks[connection_key]
-
-            for connection_key, task in list(self._heartbeat_tasks.items()):
-                if not task.done():
-                    task.cancel()
-                    try:
-                        await asyncio.wait_for(task, timeout=3.0)
-                    except (asyncio.CancelledError, asyncio.TimeoutError):
-                        self.logger.debug(f"Heartbeat task stopped: {connection_key}")
-                    except Exception as e:
-                        self.logger.error(f"Heartbeat task stop error: {connection_key}, {e}")
-                del self._heartbeat_tasks[connection_key]
+            await self._cancel_task_map(self._reconnect_tasks, "reconnect", timeout=5.0)
+            await self._cancel_task_map(self._heartbeat_tasks, "heartbeat", timeout=5.0)
+            await self._cancel_task_map(self._message_tasks, "message", timeout=5.0)
+            await self._cancel_task_map(self._stop_wait_tasks, "stop-wait", timeout=5.0)
 
             if self.ws:
+                self.logger.info(
+                    f"Shutdown phase close websocket: phase=stop-all, ws_id={id(self.ws)}, "
+                    f"connection_count={len(queue_names)}"
+                )
                 await self._safe_close_websocket(self.ws)
-                self.ws = None
+
+            for connection_key, queue_name in queue_names.items():
+                generation = generations.get(connection_key)
+                self.logger.info(
+                    f"Shutdown phase cleanup resources: phase=stop-all, connection_key={connection_key}, "
+                    f"queue_name={queue_name}, generation={generation}, "
+                    f"processing_tasks_count={len(self.processing_tasks)}"
+                )
+                await self._cleanup_resources(
+                    queue_name,
+                    connection_key=connection_key,
+                    generation=generation,
+                    cleanup_heartbeat_tasks=False,
+                )
+
+            self._reconnect_tasks.clear()
+            self._heartbeat_tasks.clear()
+            self._message_tasks.clear()
+            self._stop_wait_tasks.clear()
+            self._connection_queue_names.clear()
+            self.ws = None
             if hasattr(self, "_stop_events"):
                 self._stop_events.clear()
 
@@ -565,21 +676,32 @@ class LifecycleMixin:
             except Exception as e:
                 self.logger.error(f"Process websocket message failed: {e}")
 
-    async def cleanup_processing_tasks(self):
+    async def cleanup_processing_tasks(self, timeout: float = 5.0):
         """Cancel and clear processing tasks."""
         if not self.processing_tasks:
             return
 
-        self.logger.info(f"Cleaning {len(self.processing_tasks)} processing tasks")
-        for task in self.processing_tasks:
-            if not task.done():
-                task.cancel()
-                try:
-                    await task
-                except asyncio.CancelledError:
-                    pass
-                except Exception as e:
-                    self.logger.error(f"Processing task cleanup error: {e}")
+        tasks = list(self.processing_tasks)
+        pending = [task for task in tasks if not task.done()]
+        self.logger.info(
+            f"Shutdown phase cleanup processing tasks: processing_tasks_count={len(tasks)}, "
+            f"pending_count={len(pending)}, timeout={timeout}"
+        )
+        for task in pending:
+            task.cancel()
+
+        if pending:
+            try:
+                await asyncio.wait_for(
+                    asyncio.gather(*pending, return_exceptions=True),
+                    timeout=timeout,
+                )
+            except asyncio.TimeoutError:
+                self.logger.warning(
+                    f"Processing task cleanup timeout: processing_tasks_count={len(pending)}, timeout={timeout}"
+                )
+            except Exception as e:
+                self.logger.error(f"Processing task cleanup error: {e}")
 
         self.processing_tasks.clear()
 
@@ -623,7 +745,13 @@ class LifecycleMixin:
         except Exception as e:
             self.logger.error(f"Heartbeat cleanup failed: {e}")
 
-    async def _cleanup_resources(self, queue_name: str, connection_key: str = None, generation: int = None):
+    async def _cleanup_resources(
+        self,
+        queue_name: str,
+        connection_key: str = None,
+        generation: int = None,
+        cleanup_heartbeat_tasks: bool = True,
+    ):
         """Cleanup resources unless the caller is stale."""
         from Message import message_consumer_manager
 
@@ -632,13 +760,22 @@ class LifecycleMixin:
             return
 
         try:
-            await self.cleanup_processing_tasks()
-            await self._cleanup_heartbeat_tasks()
+            self.logger.info(
+                f"Shutdown phase cleanup resources: connection_key={connection_key or 'all'}, "
+                f"queue_name={queue_name}, generation={generation}, "
+                f"processing_tasks_count={len(self.processing_tasks)}"
+            )
+            await self.cleanup_processing_tasks(timeout=5.0)
+            if cleanup_heartbeat_tasks:
+                await self._cleanup_heartbeat_tasks()
             await self.resource_manager.cleanup_all()
 
             try:
-                await message_consumer_manager.stop_consumer(queue_name)
-                self.logger.debug(f"Consumer cleaned: {queue_name}")
+                consumer_stopped = await message_consumer_manager.stop_consumer(queue_name)
+                self.logger.info(
+                    f"Shutdown phase consumer cleanup result: connection_key={connection_key or 'all'}, "
+                    f"queue_name={queue_name}, generation={generation}, result={consumer_stopped}"
+                )
             except (asyncio.InvalidStateError, RuntimeError):
                 self.logger.debug(f"Consumer cleanup skipped: {queue_name}")
             except Exception as e:
