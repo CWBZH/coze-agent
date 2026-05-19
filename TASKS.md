@@ -98,7 +98,7 @@
 
 ## T003：graceful shutdown
 
-状态：待执行。
+状态：已完成。
 
 目标：
 
@@ -194,9 +194,31 @@
 - cancel 后超时且仍未 done 的 task 不会被 pop。
 - map 中已被新 task 替换时不会误删新 task。
 
+### T003-C：AutoReplyThread.stop graceful shutdown
+
+状态：已完成。
+
+修改文件：
+
+- `ui/auto_reply/threads.py`
+
+已完成内容：
+
+- `AutoReplyThread.stop()` 不再直接 `asyncio.all_tasks(self.loop)` 全量 cancel。
+- `stop()` 使用 `asyncio.run_coroutine_threadsafe(self._shutdown_async(), self.loop)` 提交 shutdown coroutine。
+- `_shutdown_async()` 先 `await self.channel.stop_all_connections()`。
+- pending tasks 使用 `asyncio.gather(..., return_exceptions=True)` + `asyncio.wait_for(..., timeout=5.0)` 清理。
+- `run()` finally 在 `_shutdown_complete=True` 时不重复 cleanup。
+- `stop()` 最多等待 5 秒；外层 `thread.wait(5000)` 存在最坏接近 10 秒 UI 阻塞风险，后续根据实测优化。
+
+验证：
+
+- `python -m py_compile ui/auto_reply/threads.py` 通过。
+- T003-C 只修改 `ui/auto_reply/threads.py`。
+
 下一步：
 
-- `T003-C：AutoReplyThread.stop graceful shutdown`。
+- `T004：诊断日志增强`。
 
 ## T004：诊断日志增强
 
@@ -338,4 +360,4 @@
 
 ## 下一步
 
-下一步建议执行：`T003-C：AutoReplyThread.stop graceful shutdown`。
+下一步建议执行：`T004：诊断日志增强`。

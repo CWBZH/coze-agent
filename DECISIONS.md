@@ -115,7 +115,7 @@
 
 ## D007：后续需要 graceful shutdown
 
-状态：待执行。
+状态：已完成。
 
 目标：
 
@@ -138,13 +138,17 @@
 
 不要先 stop event loop，再尝试执行 async cleanup。
 
-## D008：当前下一步任务是 T003
+结果：
+
+已通过 D011、D012、D013 完成 graceful shutdown 的分阶段改造。
+
+## D008：当前下一步任务是 T004
 
 状态：已确认。
 
 说明：
 
-`T002：reconnect lifecycle lock + generation` 完成后，下一步稳定性任务是 `T003：graceful shutdown`。
+`T003：graceful shutdown` 已完成，下一步稳定性任务是 `T004：诊断日志增强`。
 
 ## D009：MessageConsumer 已改为固定 worker pool
 
@@ -251,7 +255,43 @@
 
 后续：
 
-下一步执行 `T003-C：AutoReplyThread.stop graceful shutdown`。
+下一步执行 `T004：诊断日志增强`。
+
+## D013：AutoReplyThread.stop 已改为 graceful shutdown
+
+状态：已完成。
+
+修改文件：
+
+1. `ui/auto_reply/threads.py`
+
+决策：
+
+`AutoReplyThread.stop()` 不再直接全量 cancel 当前 event loop 上的 tasks，而是先向线程内 event loop 提交 shutdown coroutine，等待 `channel.stop_all_connections()` 完成后再停止 loop，降低 pending task destroyed、consumer 未停完、WebSocket close handshake 未完成的风险。
+
+关键结果：
+
+1. `AutoReplyThread.stop()` 不再直接 `asyncio.all_tasks(self.loop)` 全量 cancel。
+2. `stop()` 使用 `asyncio.run_coroutine_threadsafe(self._shutdown_async(), self.loop)`。
+3. `_shutdown_async()` 先 `await self.channel.stop_all_connections()`。
+4. pending tasks 使用 `asyncio.gather(..., return_exceptions=True)` + `asyncio.wait_for(..., timeout=5.0)` 清理。
+5. `run()` finally 在 `_shutdown_complete=True` 时不重复 cleanup。
+6. 未修改业务逻辑。
+7. 保持 `queue_name = pdd_{shop_id}` 不变。
+
+验证结果：
+
+1. `python -m py_compile ui/auto_reply/threads.py` 通过。
+2. T003-C 只修改 `ui/auto_reply/threads.py`。
+
+已知风险：
+
+1. `stop()` 最多等待 5 秒。
+2. 外层 `thread.wait(5000)` 存在最坏接近 10 秒 UI 阻塞风险，后续根据实测优化。
+
+后续：
+
+下一步执行 `T004：诊断日志增强`。
 
 ## D012：shutdown task map 清理保留未退出 task 引用
 
@@ -290,4 +330,4 @@
 
 后续：
 
-下一步执行 `T003-C：AutoReplyThread.stop graceful shutdown`。
+下一步执行 `T004：诊断日志增强`。
