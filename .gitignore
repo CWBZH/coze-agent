@@ -1,3 +1,13 @@
+.env
+.env.*
+!.env.example
+.browsers/
+logs/
+*.log
+app_crash*.log
+temp/
+__pycache__/
+
 __pycache__
 *.pyc
 *.pyo
