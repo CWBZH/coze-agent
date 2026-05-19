@@ -5,6 +5,8 @@ V2.0 新增：
 """
 import json
 import asyncio
+import hashlib
+import uuid
 from websockets import exceptions as ws_exceptions
 from bridge.context import Context, ContextType, ChannelType
 from Channel.pinduoduo.pdd_message import PDDChatMessage
@@ -18,6 +20,15 @@ from database.redis_manager import redis_manager
 class MessageHandlerMixin:
     """消息处理 Mixin"""
 
+    def _build_trace_id(self, shop_id: str, source_message_id: str = None) -> str:
+        shop_part = str(shop_id) if shop_id else "unknown"
+        message_part = str(source_message_id) if source_message_id else uuid.uuid4().hex[:12]
+        return f"pdd:{shop_part}:{message_part}"
+
+    def _content_fingerprint(self, content) -> tuple[int, str]:
+        content_text = "" if content is None else str(content)
+        return len(content_text), hashlib.sha256(content_text.encode("utf-8")).hexdigest()[:12]
+
     async def _setup_message_consumer(self, queue_name: str):
         """V3.0: 设置消息消费者 — 使用 MessagePipeline 替代 CustomerAgent"""
         from Message import message_consumer_manager, queue_manager, handler_chain
@@ -28,24 +39,37 @@ class MessageHandlerMixin:
             if existing_consumer:
                 running = existing_consumer.is_running()
                 same_loop = existing_consumer.is_bound_to_current_loop()
+                queue = queue_manager.get_queue(queue_name)
+                queue_size = queue.size() if queue and hasattr(queue, "size") else "unknown"
                 self.logger.info(
                     f"Message consumer setup check: queue_name={queue_name}, loop_id={loop_id}, "
                     f"consumer_id={id(existing_consumer)}, handler_count={existing_consumer.handler_count()}, "
-                    f"running={running}, same_loop={same_loop}"
+                    f"running={running}, same_loop={same_loop}, worker_count={existing_consumer.worker_count()}, "
+                    f"queue_size={queue_size}"
                 )
                 if running and same_loop:
                     self.logger.info(
                         f"Reusing existing message consumer: queue_name={queue_name}, loop_id={loop_id}, "
                         f"consumer_id={id(existing_consumer)}, handler_count={existing_consumer.handler_count()}, "
-                        f"running=True"
+                        f"running=True, consumer_running=True, worker_count={existing_consumer.worker_count()}, "
+                        f"queue_size={queue_size}"
                     )
                     return
             existing_consumer = message_consumer_manager.get_consumer(queue_name)
             if existing_consumer:
-                self.logger.info(f"消费者 {queue_name} 已存在，先停止并重新创建")
+                self.logger.info(
+                    f"Message consumer replacement requested: queue_name={queue_name}, loop_id={loop_id}, "
+                    f"consumer_id={id(existing_consumer)}, consumer_running={existing_consumer.is_running()}, "
+                    f"handler_count={existing_consumer.handler_count()}, worker_count={existing_consumer.worker_count()}"
+                )
                 try:
                     stopped = await message_consumer_manager.stop_consumer(queue_name, timeout=5.0)
                     if not stopped:
+                        self.logger.warning(
+                            f"Message consumer replacement rejected: queue_name={queue_name}, loop_id={loop_id}, "
+                            f"consumer_id={id(existing_consumer)}, consumer_running={existing_consumer.is_running()}, "
+                            f"handler_count={existing_consumer.handler_count()}, timeout=5.0"
+                        )
                         raise RuntimeError(f"consumer still running, refuse replacement: queue_name={queue_name}")
                 except RuntimeError as e:
                     # Stop must finish before a replacement consumer can be created.
@@ -62,16 +86,29 @@ class MessageHandlerMixin:
                         f"consumer_id={id(remaining_consumer)}, handler_count={remaining_consumer.handler_count()}"
                     )
                 try:
-                    queue_manager.get_or_create_queue(queue_name)
+                    queue = queue_manager.get_or_create_queue(queue_name)
+                    self.logger.info(
+                        f"Message queue checked after consumer replacement: queue_name={queue_name}, "
+                        f"loop_id={loop_id}, queue_size={queue.size() if hasattr(queue, 'size') else 'unknown'}"
+                    )
                 except Exception as e:
                     self.logger.warning(f"重新创建队列失败: {queue_name}, {e}")
 
             try:
-                queue_manager.get_or_create_queue(queue_name)
+                queue = queue_manager.get_or_create_queue(queue_name)
+                self.logger.info(
+                    f"Message queue ready: queue_name={queue_name}, loop_id={loop_id}, "
+                    f"queue_size={queue.size() if hasattr(queue, 'size') else 'unknown'}"
+                )
             except Exception as e:
                 self.logger.warning(f"重新创建队列失败: {queue_name}, {e}")
 
             consumer = message_consumer_manager.create_consumer(queue_name, max_concurrent=10)
+            self.logger.info(
+                f"Message consumer create/get result: queue_name={queue_name}, loop_id={loop_id}, "
+                f"consumer_id={id(consumer)}, consumer_running={consumer.is_running()}, "
+                f"handler_count={consumer.handler_count()}, worker_count={consumer.worker_count()}"
+            )
 
             # V3.0: 不再注入 CustomerAgent，handler 内部使用 MessagePipeline
             handlers = handler_chain(use_ai=True, businessHours=self.businessHours, bot=None)
@@ -80,10 +117,13 @@ class MessageHandlerMixin:
                     consumer.add_handler(handler)
 
             await message_consumer_manager.start_consumer(queue_name)
+            queue = queue_manager.get_queue(queue_name)
             self.logger.info(
                 f"Message consumer setup complete: queue_name={queue_name}, loop_id={loop_id}, "
                 f"consumer_id={id(consumer)}, handler_count={consumer.handler_count()}, "
-                f"running={consumer.is_running()}"
+                f"running={consumer.is_running()}, consumer_running={consumer.is_running()}, "
+                f"worker_count={consumer.worker_count()}, "
+                f"queue_size={queue.size() if queue and hasattr(queue, 'size') else 'unknown'}"
             )
             self.logger.debug(f"消息消费者已启动: {queue_name}")
 
@@ -101,10 +141,25 @@ class MessageHandlerMixin:
                 return
 
             message_data = json.loads(message)
+            source_message_id = message_data.get("message", {}).get("msg_id")
+            trace_id = self._build_trace_id(shop_id, str(source_message_id) if source_message_id else None)
             msg_type = message_data.get("message", {}).get("type", "unknown")
             from_uid_log = message_data.get("message", {}).get("from_uid", "unknown")
             from_role = message_data.get("message", {}).get("from", {}).get("role", "unknown")
-            self.logger.debug(f"收到消息: type={msg_type}, from_uid={from_uid_log}, from_role={from_role}")
+            raw_content = message_data.get("message", {}).get("content")
+            raw_content_length, raw_content_hash = self._content_fingerprint(raw_content)
+            customer_uid = message_data.get("message", {}).get("from", {}).get("uid") or from_uid_log
+            to_uid_log = message_data.get("message", {}).get("to", {}).get("uid")
+            self.logger.debug(
+                f"event=pdd.message.received trace_id={trace_id} source_message_id={source_message_id or ''} "
+                f"queue_message_id= shop_id={shop_id} user_id={user_id} customer_uid={customer_uid or ''} "
+                f"from_uid={customer_uid or ''} to_uid={to_uid_log or ''} queue_name={queue_name} "
+                f"message_type={msg_type} content_length={raw_content_length} content_hash={raw_content_hash}"
+            )
+            self.logger.debug(
+                f"收到消息: shop_id={shop_id}, user_id={user_id}, username={username}, "
+                f"queue_name={queue_name}, type={msg_type}, from_uid={from_uid_log}, from_role={from_role}"
+            )
 
             # =====================================================
             # V2.0 新增：人工客服发话检测与锁续期
@@ -138,25 +193,82 @@ class MessageHandlerMixin:
                 context = self._convert_to_context(pdd_message, shop_id, user_id, username)
                 if not context:
                     self.logger.debug(f"消息转换失败，跳过处理: {shop_id}-{username}")
+                    self.logger.info(
+                        f"event=pdd.message.skipped trace_id={trace_id} source_message_id={source_message_id or ''} "
+                        f"queue_message_id= shop_id={shop_id} user_id={user_id} customer_uid={customer_uid or ''} "
+                        f"queue_name={queue_name} message_type={msg_type} reason=context_empty"
+                    )
                     return
+                context.kwargs.trace_id = trace_id
+                context.kwargs.source_message_id = str(pdd_message.msg_id) if pdd_message.msg_id is not None else str(source_message_id or "")
+                context.kwargs.queue_name = queue_name
+                context.kwargs.message_type = str(context.type.value if hasattr(context.type, "value") else context.type)
+                context.kwargs.content_length, context.kwargs.content_hash = self._content_fingerprint(context.content)
+                self.logger.debug(
+                    f"event=pdd.context.created trace_id={context.kwargs.trace_id} "
+                    f"source_message_id={context.kwargs.source_message_id or ''} queue_message_id= "
+                    f"shop_id={shop_id} user_id={user_id} customer_uid={context.kwargs.from_uid or ''} "
+                    f"from_uid={context.kwargs.from_uid or ''} to_uid={context.kwargs.to_uid or ''} "
+                    f"queue_name={queue_name} message_type={context.kwargs.message_type} "
+                    f"content_length={context.kwargs.content_length} content_hash={context.kwargs.content_hash}"
+                )
             except Exception as ctx_error:
                 self.logger.error(f"转换Context失败: {shop_id}-{username}, 错误: {ctx_error}")
+                self.logger.info(
+                    f"event=pdd.message.skipped trace_id={trace_id} source_message_id={source_message_id or ''} "
+                    f"queue_message_id= shop_id={shop_id} user_id={user_id} customer_uid={customer_uid or ''} "
+                    f"queue_name={queue_name} message_type={msg_type} reason=context_error"
+                )
                 return
 
             if context:
                 if self._should_process_immediately(context):
                     await self._handle_immediate_message(context, shop_id, user_id)
                     self.logger.debug(f"立即处理消息: {context.type}, ID: {pdd_message.msg_id}")
+                    self.logger.info(
+                        f"event=pdd.message.skipped trace_id={context.kwargs.trace_id} "
+                        f"source_message_id={context.kwargs.source_message_id or ''} queue_message_id= "
+                        f"shop_id={shop_id} user_id={user_id} customer_uid={context.kwargs.from_uid or ''} "
+                        f"queue_name={queue_name} message_type={context.kwargs.message_type} reason=immediate_message"
+                    )
                 elif self._should_queue_message(context):
                     msg_id = await put_message(queue_name, context)
-                    self.logger.debug(f"消息已入队: {queue_name}, ID: {msg_id}, 类型: {context.type}")
+                    from Message import queue_manager
+                    queue = queue_manager.get_queue(queue_name)
+                    queue_size = queue.size() if queue and hasattr(queue, 'size') else 'unknown'
+                    self.logger.debug(
+                        f"消息已入队: queue_name={queue_name}, ID={msg_id}, 类型={context.type}, "
+                        f"shop_id={shop_id}, user_id={user_id}, "
+                        f"queue_size={queue_size}"
+                    )
+                    self.logger.debug(
+                        f"event=pdd.message.queued trace_id={context.kwargs.trace_id} "
+                        f"source_message_id={context.kwargs.source_message_id or ''} queue_message_id={msg_id} "
+                        f"shop_id={shop_id} user_id={user_id} customer_uid={context.kwargs.from_uid or ''} "
+                        f"from_uid={context.kwargs.from_uid or ''} to_uid={context.kwargs.to_uid or ''} "
+                        f"queue_name={queue_name} message_type={context.kwargs.message_type} "
+                        f"content_length={context.kwargs.content_length} content_hash={context.kwargs.content_hash} "
+                        f"queue_size={queue_size}"
+                    )
                 else:
                     self.logger.debug(f"忽略消息: {context.type}, ID: {pdd_message.msg_id}")
+                    self.logger.info(
+                        f"event=pdd.message.skipped trace_id={context.kwargs.trace_id} "
+                        f"source_message_id={context.kwargs.source_message_id or ''} queue_message_id= "
+                        f"shop_id={shop_id} user_id={user_id} customer_uid={context.kwargs.from_uid or ''} "
+                        f"queue_name={queue_name} message_type={context.kwargs.message_type} reason=unsupported_type"
+                    )
             else:
                 self.logger.warning("消息转换失败，跳过处理")
+                self.logger.info(
+                    f"event=pdd.message.skipped trace_id={trace_id} source_message_id={source_message_id or ''} "
+                    f"queue_message_id= shop_id={shop_id} user_id={user_id} customer_uid={customer_uid or ''} "
+                    f"queue_name={queue_name} message_type={msg_type} reason=context_missing"
+                )
 
         except json.JSONDecodeError:
-            self.logger.error(f"JSON解析失败: {message}")
+            raw_length, raw_hash = self._content_fingerprint(message)
+            self.logger.error(f"JSON解析失败: content_length={raw_length}, content_hash={raw_hash}")
         except Exception as e:
             self.logger.error(f"处理WebSocket消息失败: {e}")
 
@@ -262,7 +374,8 @@ class MessageHandlerMixin:
             shop_name=str(shop_name),
             goods_id=str(goods_id) if goods_id else None,
             raw_data=pdd_message.raw_data,
-            channel_type=ChannelType.PINDUODUO
+            channel_type=ChannelType.PINDUODUO,
+            source_message_id=str(pdd_message.source_message_id) if getattr(pdd_message, "source_message_id", None) is not None else "",
         )
         return context
 

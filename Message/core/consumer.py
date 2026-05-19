@@ -79,6 +79,12 @@ class MessageConsumer:
     def worker_task_ids(self) -> List[int]:
         return [id(task) for task in self._worker_tasks if not task.done()]
 
+    def queue_size(self) -> Any:
+        queue = queue_manager.get_queue(self.queue_name)
+        if queue and hasattr(queue, "size"):
+            return queue.size()
+        return "unknown"
+
     def diagnostic_state(self) -> Dict[str, Any]:
         return {
             "queue_name": self.queue_name,
@@ -88,6 +94,7 @@ class MessageConsumer:
             "running": self.is_running(),
             "worker_count": self.worker_count(),
             "worker_task_ids": self.worker_task_ids(),
+            "queue_size": self.queue_size(),
         }
 
     def _handler_key(self, handler: MessageHandler) -> str:
@@ -101,7 +108,8 @@ class MessageConsumer:
                 f"Consumer already running: queue_name={self.queue_name}, "
                 f"loop_id={self.loop_id()}, consumer_id={id(self)}, "
                 f"handler_count={len(self.handlers)}, running=True, "
-                f"worker_count={self.worker_count()}, max_concurrent={self.max_concurrent}"
+                f"worker_count={self.worker_count()}, max_concurrent={self.max_concurrent}, "
+                f"queue_size={self.queue_size()}"
             )
             return
 
@@ -115,7 +123,8 @@ class MessageConsumer:
         self.logger.info(
             f"Consumer started: queue_name={self.queue_name}, loop_id={self.loop_id()}, "
             f"consumer_id={id(self)}, handler_count={len(self.handlers)}, running=True, "
-            f"worker_count={self.worker_count()}, max_concurrent={self.max_concurrent}"
+            f"worker_count={self.worker_count()}, max_concurrent={self.max_concurrent}, "
+            f"worker_task_ids={self.worker_task_ids()}, queue_size={self.queue_size()}"
         )
 
     async def _consume_loop(self):
@@ -155,6 +164,17 @@ class MessageConsumer:
                 try:
                     wrapper = await queue.get(timeout=1.0)
                     if wrapper:
+                        metadata = wrapper.to_metadata()
+                        self.logger.debug(
+                            f"event=pdd.consumer.dequeued trace_id={metadata.get('trace_id') or ''} "
+                            f"source_message_id={metadata.get('source_message_id') or ''} "
+                            f"queue_message_id={metadata.get('queue_message_id') or metadata.get('message_id') or ''} "
+                            f"shop_id={metadata.get('shop_id') or ''} user_id={metadata.get('user_id') or ''} "
+                            f"customer_uid={metadata.get('from_uid') or ''} queue_name={metadata.get('queue_name') or self.queue_name} "
+                            f"message_type={metadata.get('message_type') or ''} "
+                            f"content_length={metadata.get('content_length')} content_hash={metadata.get('content_hash') or ''} "
+                            f"consumer_id={id(self)} worker_id={worker_id} queue_size={self.queue_size()}"
+                        )
                         await self._process_message(wrapper)
                 except asyncio.CancelledError:
                     self.logger.debug(
@@ -187,15 +207,26 @@ class MessageConsumer:
         finally:
             self.logger.debug(
                 f"Consumer worker exited: queue_name={self.queue_name}, loop_id={self.loop_id()}, "
-                f"consumer_id={id(self)}, worker_id={worker_id}, running={self.running}"
+                f"consumer_id={id(self)}, worker_id={worker_id}, running={self.running}, "
+                f"queue_size={self.queue_size()}"
             )
 
     async def stop(self):
         """停止消费者（安全处理跨事件循环）"""
+        self.logger.info(
+            f"Consumer stop requested: queue_name={self.queue_name}, loop_id={self.loop_id()}, "
+            f"consumer_id={id(self)}, handler_count={len(self.handlers)}, running={self.running}, "
+            f"worker_count={self.worker_count()}, queue_size={self.queue_size()}"
+        )
         self.running = False
 
         # 取消消费任务（处理跨 loop 场景）
         worker_tasks = [task for task in self._worker_tasks if not task.done()]
+        self.logger.info(
+            f"Consumer worker cancel requested: queue_name={self.queue_name}, loop_id={self.loop_id()}, "
+            f"consumer_id={id(self)}, worker_count={len(worker_tasks)}, "
+            f"worker_task_ids={[id(task) for task in worker_tasks]}, timeout=5.0"
+        )
         for task in worker_tasks:
             task.cancel()
 
@@ -251,7 +282,7 @@ class MessageConsumer:
         self.logger.info(
             f"Consumer stopped: queue_name={self.queue_name}, loop_id={self.loop_id()}, "
             f"consumer_id={id(self)}, handler_count={len(self.handlers)}, running=False, "
-            f"worker_count={self.worker_count()}"
+            f"worker_count={self.worker_count()}, queue_size={self.queue_size()}"
         )
 
     async def stop_from_any_loop(self, timeout: float = 5.0) -> bool:
@@ -290,20 +321,74 @@ class MessageConsumer:
                 for handler in self.handlers:
                     try:
                         if handler.can_handle(wrapper.context):
+                            self.logger.debug(
+                                f"event=pdd.handler.selected trace_id={metadata.get('trace_id') or ''} "
+                                f"source_message_id={metadata.get('source_message_id') or ''} "
+                                f"queue_message_id={metadata.get('queue_message_id') or metadata.get('message_id') or ''} "
+                                f"shop_id={metadata.get('shop_id') or ''} user_id={metadata.get('user_id') or ''} "
+                                f"customer_uid={metadata.get('from_uid') or ''} queue_name={metadata.get('queue_name') or self.queue_name} "
+                                f"message_type={metadata.get('message_type') or ''} "
+                                f"content_length={metadata.get('content_length')} content_hash={metadata.get('content_hash') or ''} "
+                                f"consumer_id={id(self)} handler={handler.__class__.__name__}"
+                            )
                             success = await handler.handle(wrapper.context, metadata)
                             if success:
                                 processed = True
+                                self.logger.debug(
+                                    f"event=pdd.handler.completed trace_id={metadata.get('trace_id') or ''} "
+                                    f"source_message_id={metadata.get('source_message_id') or ''} "
+                                    f"queue_message_id={metadata.get('queue_message_id') or metadata.get('message_id') or ''} "
+                                    f"shop_id={metadata.get('shop_id') or ''} user_id={metadata.get('user_id') or ''} "
+                                    f"customer_uid={metadata.get('from_uid') or ''} queue_name={metadata.get('queue_name') or self.queue_name} "
+                                    f"message_type={metadata.get('message_type') or ''} "
+                                    f"content_length={metadata.get('content_length')} content_hash={metadata.get('content_hash') or ''} "
+                                    f"consumer_id={id(self)} handler={handler.__class__.__name__} success=True"
+                                )
                                 self.logger.debug(f"Message {wrapper.message_id} handled by {handler.__class__.__name__}")
                                 break
                     except Exception as e:
+                        self.logger.warning(
+                            f"event=pdd.handler.failed trace_id={metadata.get('trace_id') or ''} "
+                            f"source_message_id={metadata.get('source_message_id') or ''} "
+                            f"queue_message_id={metadata.get('queue_message_id') or metadata.get('message_id') or ''} "
+                            f"shop_id={metadata.get('shop_id') or ''} user_id={metadata.get('user_id') or ''} "
+                            f"customer_uid={metadata.get('from_uid') or ''} queue_name={metadata.get('queue_name') or self.queue_name} "
+                            f"message_type={metadata.get('message_type') or ''} "
+                            f"content_length={metadata.get('content_length')} content_hash={metadata.get('content_hash') or ''} "
+                            f"consumer_id={id(self)} handler={handler.__class__.__name__} error={e}"
+                        )
                         self.logger.error(f"Handler {handler.__class__.__name__} error: {e}")
                         # 尝试下一个处理器
                         continue
 
                 if not processed:
+                    self.logger.info(
+                        f"event=pdd.message.skipped trace_id={metadata.get('trace_id') or ''} "
+                        f"source_message_id={metadata.get('source_message_id') or ''} "
+                        f"queue_message_id={metadata.get('queue_message_id') or metadata.get('message_id') or ''} "
+                        f"shop_id={metadata.get('shop_id') or ''} user_id={metadata.get('user_id') or ''} "
+                        f"customer_uid={metadata.get('from_uid') or ''} queue_name={metadata.get('queue_name') or self.queue_name} "
+                        f"message_type={metadata.get('message_type') or ''} "
+                        f"content_length={metadata.get('content_length')} content_hash={metadata.get('content_hash') or ''} "
+                        f"consumer_id={id(self)} reason=no_handler_processed"
+                    )
                     self.logger.warning(f"Message {wrapper.message_id} not processed by any handler")
 
             except Exception as e:
+                try:
+                    metadata = wrapper.to_metadata()
+                except Exception:
+                    metadata = {}
+                self.logger.warning(
+                    f"event=pdd.handler.failed trace_id={metadata.get('trace_id') or ''} "
+                    f"source_message_id={metadata.get('source_message_id') or ''} "
+                    f"queue_message_id={metadata.get('queue_message_id') or getattr(wrapper, 'message_id', '')} "
+                    f"shop_id={metadata.get('shop_id') or ''} user_id={metadata.get('user_id') or ''} "
+                    f"customer_uid={metadata.get('from_uid') or ''} queue_name={metadata.get('queue_name') or self.queue_name} "
+                    f"message_type={metadata.get('message_type') or ''} "
+                    f"content_length={metadata.get('content_length')} content_hash={metadata.get('content_hash') or ''} "
+                    f"consumer_id={id(self)} error={e}"
+                )
                 self.logger.error(f"Failed to process message {wrapper.message_id}: {e}")
 
     def _extract_user_id(self, context: Context) -> str:
@@ -346,7 +431,7 @@ class MessageConsumerManager:
                 f"Consumer already exists: queue_name={state['queue_name']}, "
                 f"loop_id={state['loop_id']}, consumer_id={state['consumer_id']}, "
                 f"handler_count={state['handler_count']}, running={state['running']}, "
-                f"worker_count={state['worker_count']}"
+                f"worker_count={state['worker_count']}, queue_size={state['queue_size']}"
             )
             if existing.is_running():
                 return existing
@@ -358,7 +443,8 @@ class MessageConsumerManager:
         self.logger.info(
             f"Created consumer: queue_name={state['queue_name']}, loop_id={state['loop_id']}, "
             f"consumer_id={state['consumer_id']}, handler_count={state['handler_count']}, "
-            f"running={state['running']}, worker_count={state['worker_count']}"
+            f"running={state['running']}, worker_count={state['worker_count']}, "
+            f"queue_size={state['queue_size']}"
         )
         return consumer
 
@@ -382,7 +468,9 @@ class MessageConsumerManager:
             self.logger.info(
                 f"Stopping consumer: queue_name={state['queue_name']}, loop_id={state['loop_id']}, "
                 f"consumer_id={state['consumer_id']}, handler_count={state['handler_count']}, "
-                f"running={state['running']}, worker_count={state['worker_count']}, timeout={timeout}"
+                f"running={state['running']}, consumer_running={state['running']}, "
+                f"worker_count={state['worker_count']}, queue_size={state['queue_size']}, "
+                f"timeout={timeout}"
             )
             try:
                 stopped = await consumer.stop_from_any_loop(timeout=timeout)
@@ -397,7 +485,9 @@ class MessageConsumerManager:
                 self.logger.info(
                     f"Consumer stopped and removed: queue_name={queue_name}, "
                     f"loop_id={consumer.loop_id()}, consumer_id={id(consumer)}, "
-                    f"handler_count={consumer.handler_count()}, running={consumer.is_running()}"
+                    f"handler_count={consumer.handler_count()}, running={consumer.is_running()}, "
+                    f"consumer_running={consumer.is_running()}, worker_count={consumer.worker_count()}, "
+                    f"queue_size={consumer.queue_size()}"
                 )
                 return True
             except RuntimeError as e:

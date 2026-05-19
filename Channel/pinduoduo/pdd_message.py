@@ -159,6 +159,7 @@ class PDDChatMessage(ChatMessage):
         #获取基本信息
         basic_info = self.base_handler.get_basic_info()
         self.msg_id = basic_info.get("msg_id")
+        self.source_message_id = self.msg_id
         self.nickname = basic_info.get("nickname")
         self.from_user = basic_info.get("from_role")
         self.from_uid = basic_info.get("from_uid")

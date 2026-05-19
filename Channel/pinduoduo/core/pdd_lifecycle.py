@@ -170,9 +170,15 @@ class LifecycleMixin:
         self._connection_queue_names[connection_key] = queue_name
         lock = self._get_lifecycle_lock(connection_key)
 
-        self.logger.info(f"Lifecycle lock waiting: connection_key={connection_key}")
+        self.logger.info(
+            f"Lifecycle lock waiting: connection_key={connection_key}, shop_id={shop_id}, "
+            f"user_id={user_id}, queue_name={queue_name}, loop_id={id(asyncio.get_running_loop())}"
+        )
         async with lock:
-            self.logger.info(f"Lifecycle lock acquired: connection_key={connection_key}")
+            self.logger.info(
+                f"Lifecycle lock acquired: connection_key={connection_key}, shop_id={shop_id}, "
+                f"user_id={user_id}, queue_name={queue_name}, loop_id={id(asyncio.get_running_loop())}"
+            )
             try:
                 self.status_manager.update_status(shop_id, user_id, username, ConnectionState.CONNECTING)
 
@@ -181,7 +187,8 @@ class LifecycleMixin:
                 generation = self._next_generation(connection_key)
                 self.logger.info(
                     f"Connection generation advanced: connection_key={connection_key}, "
-                    f"generation={generation}"
+                    f"shop_id={shop_id}, user_id={user_id}, queue_name={queue_name}, "
+                    f"generation={generation}, loop_id={id(asyncio.get_running_loop())}"
                 )
 
                 if hasattr(self, "_stop_events"):
@@ -215,10 +222,15 @@ class LifecycleMixin:
                 self._reconnect_tasks[connection_key] = connect_task
                 self.logger.info(
                     f"Reconnect task created: connection_key={connection_key}, "
-                    f"generation={generation}, new_task_id={id(connect_task)}"
+                    f"shop_id={shop_id}, user_id={user_id}, queue_name={queue_name}, "
+                    f"generation={generation}, loop_id={id(asyncio.get_running_loop())}, "
+                    f"new_task_id={id(connect_task)}, reconnect_task_id={id(connect_task)}"
                 )
             finally:
-                self.logger.info(f"Lifecycle lock released: connection_key={connection_key}")
+                self.logger.info(
+                    f"Lifecycle lock released: connection_key={connection_key}, shop_id={shop_id}, "
+                    f"user_id={user_id}, queue_name={queue_name}, loop_id={id(asyncio.get_running_loop())}"
+                )
 
     async def stop_account(self, shop_id: str, user_id: str):
         """Stop one account connection."""
@@ -237,7 +249,12 @@ class LifecycleMixin:
 
             self.logger.info(
                 f"Shutdown phase start: phase=stop-account, connection_key={connection_key}, "
-                f"queue_name={queue_name}, generation={generation}, ws_id={id(self.ws) if self.ws else 'none'}, "
+                f"shop_id={shop_id}, user_id={user_id}, queue_name={queue_name}, generation={generation}, "
+                f"loop_id={id(asyncio.get_running_loop())}, ws_id={id(self.ws) if self.ws else 'none'}, "
+                f"reconnect_task_id={id(self._reconnect_tasks.get(connection_key)) if self._reconnect_tasks.get(connection_key) else 'none'}, "
+                f"heartbeat_task_id={id(self._heartbeat_tasks.get(connection_key)) if self._heartbeat_tasks.get(connection_key) else 'none'}, "
+                f"message_task_id={id(self._message_tasks.get(connection_key)) if self._message_tasks.get(connection_key) else 'none'}, "
+                f"stop_wait_task_id={id(self._stop_wait_tasks.get(connection_key)) if self._stop_wait_tasks.get(connection_key) else 'none'}, "
                 f"processing_tasks_count={len(self.processing_tasks)}"
             )
 
@@ -249,7 +266,8 @@ class LifecycleMixin:
                     self._stop_event.set()
                 self.logger.info(
                     f"Shutdown phase set stop_event: connection_key={connection_key}, "
-                    f"queue_name={queue_name}, generation={generation}"
+                    f"shop_id={shop_id}, user_id={user_id}, queue_name={queue_name}, "
+                    f"generation={generation}, loop_id={id(asyncio.get_running_loop())}"
                 )
 
                 await self._cancel_mapped_task(self._reconnect_tasks, connection_key, "reconnect", timeout=5.0)
@@ -260,7 +278,9 @@ class LifecycleMixin:
                 if self.ws:
                     self.logger.info(
                         f"Shutdown phase close websocket: connection_key={connection_key}, "
-                        f"queue_name={queue_name}, generation={generation}, ws_id={id(self.ws)}"
+                        f"shop_id={shop_id}, user_id={user_id}, queue_name={queue_name}, "
+                        f"generation={generation}, loop_id={id(asyncio.get_running_loop())}, "
+                        f"websocket_id={id(self.ws)}, ws_id={id(self.ws)}"
                     )
                     await self._safe_close_websocket(self.ws)
                 else:
@@ -284,7 +304,8 @@ class LifecycleMixin:
 
             self.logger.info(
                 f"Shutdown phase done: phase=stop-account, connection_key={connection_key}, "
-                f"queue_name={queue_name}, generation={generation}"
+                f"shop_id={shop_id}, user_id={user_id}, queue_name={queue_name}, "
+                f"generation={generation}, loop_id={id(asyncio.get_running_loop())}"
             )
 
         except Exception as e:
@@ -325,6 +346,11 @@ class LifecycleMixin:
             queue_name = f"pdd_{shop_id}"
             self._ensure_shutdown_maps()
             self._connection_queue_names[connection_key] = queue_name
+            self.logger.info(
+                f"Message consumer setup begin: connection_key={connection_key}, shop_id={shop_id}, "
+                f"user_id={user_id}, queue_name={queue_name}, generation={generation}, "
+                f"loop_id={id(asyncio.get_running_loop())}"
+            )
             await self._setup_message_consumer(queue_name)
 
             if not self._is_current_generation(connection_key, generation):
@@ -342,7 +368,8 @@ class LifecycleMixin:
 
             self.logger.debug(
                 f"WebSocket connecting: {shop_id}-{username}, "
-                f"connection_key={connection_key}, generation={generation}"
+                f"connection_key={connection_key}, user_id={user_id}, queue_name={queue_name}, "
+                f"generation={generation}, loop_id={id(asyncio.get_running_loop())}"
             )
 
             async with websockets.connect(
@@ -362,7 +389,11 @@ class LifecycleMixin:
                     websocket,
                     f"PDD WebSocket ({shop_id}-{username})",
                 )
-                self.logger.debug(f"WebSocket connected: {shop_id}-{username}")
+                self.logger.info(
+                    f"WebSocket connected: shop_id={shop_id}, user_id={user_id}, username={username}, "
+                    f"connection_key={connection_key}, queue_name={queue_name}, generation={generation}, "
+                    f"loop_id={id(asyncio.get_running_loop())}, websocket_id={id(websocket)}"
+                )
 
                 if self.ws and not self._is_ws_closed(self.ws):
                     self.logger.debug(f"WebSocket active: {shop_id}-{username}")
@@ -388,7 +419,12 @@ class LifecycleMixin:
                         )
                     )
                     self._heartbeat_tasks[connection_key] = heartbeat_task
-                    self.logger.debug(f"Heartbeat started: {shop_id}-{username}")
+                    self.logger.info(
+                        f"Heartbeat task created: shop_id={shop_id}, user_id={user_id}, "
+                        f"connection_key={connection_key}, queue_name={queue_name}, generation={generation}, "
+                        f"loop_id={id(asyncio.get_running_loop())}, heartbeat_task_id={id(heartbeat_task)}, "
+                        f"websocket_id={id(websocket)}"
+                    )
 
                 message_task = asyncio.create_task(
                     self._message_loop(websocket, shop_id, user_id, username, queue_name, stop_event)
@@ -396,6 +432,13 @@ class LifecycleMixin:
                 stop_task = asyncio.create_task(stop_event.wait())
                 self._message_tasks[connection_key] = message_task
                 self._stop_wait_tasks[connection_key] = stop_task
+                self.logger.info(
+                    f"Connection tasks created: shop_id={shop_id}, user_id={user_id}, "
+                    f"connection_key={connection_key}, queue_name={queue_name}, generation={generation}, "
+                    f"loop_id={id(asyncio.get_running_loop())}, websocket_id={id(websocket)}, "
+                    f"message_task_id={id(message_task)}, stop_wait_task_id={id(stop_task)}, "
+                    f"heartbeat_task_id={id(heartbeat_task) if heartbeat_task else 'none'}"
+                )
 
                 try:
                     tasks = [message_task, stop_task]
@@ -499,7 +542,13 @@ class LifecycleMixin:
     def request_stop(self):
         """Request all active connections to stop."""
         if hasattr(self, "_stop_events"):
-            for stop_event in self._stop_events.values():
+            for connection_key, stop_event in self._stop_events.items():
+                self.logger.info(
+                    f"Shutdown phase request_stop: connection_key={connection_key}, "
+                    f"queue_name={getattr(self, '_connection_queue_names', {}).get(connection_key, 'unknown')}, "
+                    f"generation={self._current_generation(connection_key)}, "
+                    f"loop_id=sync-request"
+                )
                 stop_event.set()
         if self._stop_event:
             self._stop_event.set()
@@ -507,13 +556,20 @@ class LifecycleMixin:
     async def stop_all_connections(self):
         """Stop all active connections."""
         try:
-            self.logger.info("Stopping all PDD connections")
             self._ensure_shutdown_maps()
             queue_names = dict(self._connection_queue_names)
             generations = {
                 connection_key: self._current_generation(connection_key)
                 for connection_key in queue_names
             }
+            self.logger.info(
+                f"Stopping all PDD connections: shutdown_phase=stop-all-start, "
+                f"connection_count={len(queue_names)}, reconnect_task_count={len(self._reconnect_tasks)}, "
+                f"heartbeat_task_count={len(self._heartbeat_tasks)}, message_task_count={len(self._message_tasks)}, "
+                f"stop_wait_task_count={len(self._stop_wait_tasks)}, "
+                f"processing_tasks_count={len(self.processing_tasks)}, "
+                f"loop_id={id(asyncio.get_running_loop())}"
+            )
 
             if self._stop_event:
                 self._stop_event.set()
@@ -561,7 +617,10 @@ class LifecycleMixin:
             if hasattr(self, "_stop_events"):
                 self._stop_events.clear()
 
-            self.logger.info("All PDD connections stopped")
+            self.logger.info(
+                f"All PDD connections stopped: shutdown_phase=stop-all-done, "
+                f"connection_count={len(queue_names)}, loop_id={id(asyncio.get_running_loop())}"
+            )
 
         except Exception as e:
             self.logger.error(f"Stop all connections failed: {e}")
@@ -642,7 +701,13 @@ class LifecycleMixin:
     async def _message_loop(self, websocket, shop_id: str, user_id: str, username: str, queue_name: str, stop_event: Optional[asyncio.Event] = None):
         """Message receive loop."""
         try:
-            self.logger.info(f"Message loop started: {shop_id}-{username}")
+            connection_key = f"{shop_id}_{user_id}"
+            self.logger.info(
+                f"Message loop started: shop_id={shop_id}, user_id={user_id}, username={username}, "
+                f"connection_key={connection_key}, queue_name={queue_name}, "
+                f"loop_id={id(asyncio.get_running_loop())}, websocket_id={id(websocket)}, "
+                f"message_task_id={id(asyncio.current_task()) if asyncio.current_task() else 'none'}"
+            )
 
             async for message in websocket:
                 active_stop_event = stop_event or self._stop_event
@@ -653,6 +718,12 @@ class LifecycleMixin:
                     self._process_websocket_message_concurrent(
                         message, shop_id, user_id, username, queue_name
                     )
+                )
+                self.logger.debug(
+                    f"Processing task created: shop_id={shop_id}, user_id={user_id}, "
+                    f"connection_key={connection_key}, queue_name={queue_name}, "
+                    f"loop_id={id(asyncio.get_running_loop())}, task_id={id(task)}, "
+                    f"processing_tasks_count={len(self.processing_tasks) + 1}"
                 )
 
                 self.processing_tasks.add(task)

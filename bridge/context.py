@@ -40,6 +40,12 @@ class ContextType(str, Enum):
 
 class PinduoduoKwargs(BaseModel):
     """拼多多消息专用kwargs类型定义"""
+    trace_id: Optional[str] = None
+    source_message_id: Optional[str] = None
+    queue_name: Optional[str] = None
+    message_type: Optional[str] = None
+    content_length: Optional[int] = None
+    content_hash: Optional[str] = None
     msg_id: Optional[str] = None
     shop_name: Optional[str] = None
     from_user: Optional[str] = None
@@ -69,9 +75,17 @@ class Context(BaseModel):
     def create_pinduoduo_context(cls, content=None, msg_id=None, from_user=None, from_uid=None,
                                 to_user=None, to_uid=None, nickname=None, timestamp=None,
                                 user_msg_type=None, shop_id=None, user_id=None, username=None, shop_name=None,
-                                goods_id=None, raw_data=None, channel_type=None):
+                                goods_id=None, raw_data=None, channel_type=None, trace_id=None,
+                                source_message_id=None, queue_name=None, message_type=None,
+                                content_length=None, content_hash=None):
         """创建拼多多上下文实例的便捷方法"""
         kwargs = PinduoduoKwargs(
+            trace_id=trace_id,
+            source_message_id=source_message_id,
+            queue_name=queue_name,
+            message_type=message_type,
+            content_length=content_length,
+            content_hash=content_hash,
             msg_id=msg_id,
             from_user=from_user,
             from_uid=from_uid,
