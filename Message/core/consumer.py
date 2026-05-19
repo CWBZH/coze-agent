@@ -460,7 +460,7 @@ class MessageConsumerManager:
         else:
             self.logger.error(f"Consumer {queue_name} not found")
 
-    async def stop_consumer(self, queue_name: str, timeout: float = 5.0) -> bool:
+    async def stop_consumer(self, queue_name: str, timeout: float = 5.0, missing_ok: bool = False) -> bool:
         """停止消费者（安全处理跨事件循环）"""
         consumer = self.get_consumer(queue_name)
         if consumer:
@@ -513,6 +513,9 @@ class MessageConsumerManager:
                 self._consumers.pop(queue_name, None)
                 return True
         else:
+            if missing_ok:
+                self.logger.info(f"Consumer already absent: queue_name={queue_name}, missing_ok=True")
+                return True
             self.logger.error(f"Consumer {queue_name} not found")
             return True
 

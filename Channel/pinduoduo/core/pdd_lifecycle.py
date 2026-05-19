@@ -842,7 +842,7 @@ class LifecycleMixin:
             await self.resource_manager.cleanup_all()
 
             try:
-                consumer_stopped = await message_consumer_manager.stop_consumer(queue_name)
+                consumer_stopped = await message_consumer_manager.stop_consumer(queue_name, missing_ok=True)
                 self.logger.info(
                     f"Shutdown phase consumer cleanup result: connection_key={connection_key or 'all'}, "
                     f"queue_name={queue_name}, generation={generation}, result={consumer_stopped}"
