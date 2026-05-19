@@ -17,6 +17,7 @@ from __future__ import annotations
 from typing import Dict, Any, Optional, List
 import hashlib
 import time
+import uuid
 from bridge.context import Context, ContextType
 from .base import BaseHandler
 from .preprocessor import MessagePreprocessor
@@ -126,6 +127,23 @@ class AIReplyHandler(BaseHandler):
         }
         fields.update(extra)
         return " ".join(f"{key}={value}" for key, value in fields.items())
+
+    @staticmethod
+    def _pdd_result_summary(result: Any) -> str:
+        if not isinstance(result, dict):
+            return "none" if result is None else type(result).__name__
+        pdd_result = result.get("result")
+        if isinstance(pdd_result, dict):
+            if pdd_result.get("result") == "ok":
+                return "ok"
+            if pdd_result.get("error_code") is not None:
+                return f"error_code:{pdd_result.get('error_code')}"
+            if pdd_result.get("error"):
+                return "error"
+            return "dict_no_result"
+        if pdd_result is None:
+            return "missing_result"
+        return str(pdd_result)
 
     async def handle(self, context: Context, metadata: Dict[str, Any]) -> bool:
         """处理AI回复"""
@@ -574,13 +592,46 @@ class AIReplyHandler(BaseHandler):
 
     async def _send_reply(self, context: Context, reply: str, metadata: Dict[str, Any]) -> bool:
         """发送回复"""
+        trace = self._build_trace_metadata(context, metadata)
+        send_request_id = uuid.uuid4().hex[:12]
+        send_started_at = time.perf_counter()
+        reply_length, reply_hash = self._fingerprint(reply)
         try:
             # 从metadata中提取必要信息
             shop_id = metadata.get('shop_id')
             user_id = metadata.get('user_id')
             from_uid = metadata.get('from_uid')
+            trace["shop_id"] = str(shop_id or trace.get("shop_id") or "unknown")
+            trace["user_id"] = str(user_id or trace.get("user_id") or "")
+            trace["customer_uid"] = str(from_uid or trace.get("customer_uid") or "")
 
             if not all([shop_id, user_id, from_uid]):
+                duration_ms = int((time.perf_counter() - send_started_at) * 1000)
+                self.logger.warning(
+                    "event=pdd.reply.send.failed "
+                    + self._trace_fields(
+                        trace,
+                        send_request_id=send_request_id,
+                        action="missing_send_fields",
+                        duration_ms=duration_ms,
+                        pdd_result="not_called",
+                        reply_length=reply_length,
+                        reply_hash=reply_hash,
+                        error_type="MissingSendFields",
+                    )
+                )
+                self.logger.info(
+                    "event=pdd.message.completed "
+                    + self._trace_fields(
+                        trace,
+                        send_request_id=send_request_id,
+                        final_status="reply_send_failed",
+                        duration_ms=duration_ms,
+                        pdd_result="not_called",
+                        reply_length=reply_length,
+                        reply_hash=reply_hash,
+                    )
+                )
                 self.logger.warning(f"缺少发送信息: shop_id={shop_id}, user_id={user_id}, from_uid={from_uid}")
                 return False
 
@@ -588,16 +639,107 @@ class AIReplyHandler(BaseHandler):
             from Channel.pinduoduo.utils.API.send_message import SendMessage
             sender = SendMessage(shop_id, user_id)
             import asyncio
+            self.logger.debug(
+                "event=pdd.reply.send.started "
+                + self._trace_fields(
+                    trace,
+                    send_request_id=send_request_id,
+                    action="send_text",
+                    duration_ms=0,
+                    pdd_result="pending",
+                    reply_length=reply_length,
+                    reply_hash=reply_hash,
+                )
+            )
             result = await asyncio.to_thread(sender.send_text, from_uid, reply)
             pdd_result = result.get("result") if isinstance(result, dict) else None
             pdd_ok = isinstance(pdd_result, dict) and pdd_result.get("result") == "ok"
+            pdd_result_summary = self._pdd_result_summary(result)
+            duration_ms = int((time.perf_counter() - send_started_at) * 1000)
             if isinstance(result, dict) and result.get("success") and pdd_ok:
+                self.logger.info(
+                    "event=pdd.reply.send.succeeded "
+                    + self._trace_fields(
+                        trace,
+                        send_request_id=send_request_id,
+                        action="send_text",
+                        duration_ms=duration_ms,
+                        pdd_result=pdd_result_summary,
+                        reply_length=reply_length,
+                        reply_hash=reply_hash,
+                    )
+                )
+                self.logger.info(
+                    "event=pdd.message.completed "
+                    + self._trace_fields(
+                        trace,
+                        send_request_id=send_request_id,
+                        final_status="reply_sent",
+                        duration_ms=duration_ms,
+                        pdd_result=pdd_result_summary,
+                        reply_length=reply_length,
+                        reply_hash=reply_hash,
+                    )
+                )
                 self.logger.info(
                     f"[发送回执] 文本消息接口成功: shop_id={shop_id}, user_id={user_id}, "
                     f"from_uid={from_uid}, result={result.get('result')}"
                 )
                 return True
+            if isinstance(result, dict) and result.get("success") and not isinstance(pdd_result, dict):
+                self.logger.warning(
+                    "event=pdd.reply.send.call_succeeded "
+                    + self._trace_fields(
+                        trace,
+                        send_request_id=send_request_id,
+                        action="send_text",
+                        status="unknown_delivery",
+                        duration_ms=duration_ms,
+                        pdd_result=pdd_result_summary,
+                        reply_length=reply_length,
+                        reply_hash=reply_hash,
+                    )
+                )
+                self.logger.info(
+                    "event=pdd.message.completed "
+                    + self._trace_fields(
+                        trace,
+                        send_request_id=send_request_id,
+                        final_status="reply_delivery_unknown",
+                        duration_ms=duration_ms,
+                        pdd_result=pdd_result_summary,
+                        reply_length=reply_length,
+                        reply_hash=reply_hash,
+                    )
+                )
+                self._alert_manual_transfer(metadata, f"{metadata.get('shop_id')}_{from_uid}", f"PDD send failed: {result}", "high")
+                return False
             self._alert_manual_transfer(metadata, f"{metadata.get('shop_id')}_{from_uid}", f"PDD send failed: {result}", "high")
+            self.logger.warning(
+                "event=pdd.reply.send.failed "
+                + self._trace_fields(
+                    trace,
+                    send_request_id=send_request_id,
+                    action="send_text",
+                    duration_ms=duration_ms,
+                    pdd_result=pdd_result_summary,
+                    reply_length=reply_length,
+                    reply_hash=reply_hash,
+                    error_type="PddSendFailed",
+                )
+            )
+            self.logger.info(
+                "event=pdd.message.completed "
+                + self._trace_fields(
+                    trace,
+                    send_request_id=send_request_id,
+                    final_status="reply_send_failed",
+                    duration_ms=duration_ms,
+                    pdd_result=pdd_result_summary,
+                    reply_length=reply_length,
+                    reply_hash=reply_hash,
+                )
+            )
             self.logger.warning(
                 f"[发送回执] 文本消息接口未确认成功: shop_id={shop_id}, user_id={user_id}, "
                 f"from_uid={from_uid}, result={result}"
@@ -605,6 +747,32 @@ class AIReplyHandler(BaseHandler):
             return False
 
         except Exception as e:
+            duration_ms = int((time.perf_counter() - send_started_at) * 1000)
+            self.logger.warning(
+                "event=pdd.reply.send.failed "
+                + self._trace_fields(
+                    trace,
+                    send_request_id=send_request_id,
+                    action="send_text",
+                    duration_ms=duration_ms,
+                    pdd_result="exception",
+                    reply_length=reply_length,
+                    reply_hash=reply_hash,
+                    error_type=type(e).__name__,
+                )
+            )
+            self.logger.info(
+                "event=pdd.message.completed "
+                + self._trace_fields(
+                    trace,
+                    send_request_id=send_request_id,
+                    final_status="reply_send_failed",
+                    duration_ms=duration_ms,
+                    pdd_result="exception",
+                    reply_length=reply_length,
+                    reply_hash=reply_hash,
+                )
+            )
             self.logger.error(f"发送回复失败: {e}")
             self._alert_manual_transfer(metadata, f"{metadata.get('shop_id')}_{metadata.get('from_uid')}", f"Send reply exception: {e}", "high")
             return False
