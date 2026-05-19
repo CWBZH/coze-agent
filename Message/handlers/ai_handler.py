@@ -15,6 +15,7 @@ V2.0 地狱级压测修复：
 from __future__ import annotations
 
 from typing import Dict, Any, Optional, List
+import hashlib
 import time
 from bridge.context import Context, ContextType
 from .base import BaseHandler
@@ -65,8 +66,71 @@ class AIReplyHandler(BaseHandler):
         # 支持多种消息类型
         return context.type in self.auto_reply_types
 
+    @staticmethod
+    def _get_context_value(context: Context, name: str) -> Any:
+        kwargs = getattr(context, "kwargs", None)
+        if kwargs is None:
+            return None
+        if isinstance(kwargs, dict):
+            return kwargs.get(name)
+        return getattr(kwargs, name, None)
+
+    @staticmethod
+    def _fingerprint(value: Any) -> tuple[int, str]:
+        value_text = "" if value is None else str(value)
+        value_hash = hashlib.sha256(value_text.encode("utf-8")).hexdigest()[:12]
+        return len(value_text), value_hash
+
+    def _build_trace_metadata(self, context: Context, metadata: Dict[str, Any]) -> Dict[str, Any]:
+        shop_id = metadata.get("shop_id") or self._get_context_value(context, "shop_id") or "unknown"
+        user_id = metadata.get("user_id") or self._get_context_value(context, "user_id") or ""
+        from_uid = metadata.get("from_uid") or self._get_context_value(context, "from_uid") or ""
+        trace_id = metadata.get("trace_id") or self._get_context_value(context, "trace_id") or ""
+        source_message_id = (
+            metadata.get("source_message_id")
+            or self._get_context_value(context, "source_message_id")
+            or self._get_context_value(context, "msg_id")
+            or ""
+        )
+        queue_message_id = metadata.get("queue_message_id") or metadata.get("message_id") or ""
+        session_id = metadata.get("session_id") or f"{shop_id}_{from_uid}"
+        content_length = metadata.get("content_length") or self._get_context_value(context, "content_length")
+        content_hash = metadata.get("content_hash") or self._get_context_value(context, "content_hash")
+        if content_length is None or content_hash is None:
+            computed_length, computed_hash = self._fingerprint(context.content)
+            content_length = computed_length if content_length is None else content_length
+            content_hash = computed_hash if content_hash is None else content_hash
+
+        return {
+            "trace_id": str(trace_id or ""),
+            "source_message_id": str(source_message_id or ""),
+            "queue_message_id": str(queue_message_id or ""),
+            "session_id": str(session_id or ""),
+            "shop_id": str(shop_id or "unknown"),
+            "user_id": str(user_id or ""),
+            "customer_uid": str(from_uid or ""),
+            "content_length": content_length,
+            "content_hash": str(content_hash or ""),
+        }
+
+    @staticmethod
+    def _trace_fields(trace: Dict[str, Any], **extra: Any) -> str:
+        fields = {
+            "trace_id": trace.get("trace_id", ""),
+            "source_message_id": trace.get("source_message_id", ""),
+            "queue_message_id": trace.get("queue_message_id", ""),
+            "session_id": trace.get("session_id", ""),
+            "shop_id": trace.get("shop_id", ""),
+            "user_id": trace.get("user_id", ""),
+            "customer_uid": trace.get("customer_uid", ""),
+        }
+        fields.update(extra)
+        return " ".join(f"{key}={value}" for key, value in fields.items())
+
     async def handle(self, context: Context, metadata: Dict[str, Any]) -> bool:
         """处理AI回复"""
+        trace = self._build_trace_metadata(context, metadata)
+        handle_started_at = time.perf_counter()
         try:
             # =====================================================
             # Step 0: 图片消息前置硬拦截（防大模型懵逼）
@@ -74,11 +138,23 @@ class AIReplyHandler(BaseHandler):
             # 从 metadata 或 context 中提取用户标识
             from_uid = metadata.get('from_uid') or getattr(context.kwargs, 'from_uid', None)
             session_id = metadata.get('session_id') or f"{metadata.get('shop_id')}_{from_uid}"
+            trace["session_id"] = str(session_id or trace.get("session_id") or "")
 
             # 检查是否是图片消息
             if context.type == ContextType.IMAGE or (
                 context.content and ('[图片]' in str(context.content) or '[Image]' in str(context.content))
             ):
+                duration_ms = int((time.perf_counter() - handle_started_at) * 1000)
+                self.logger.warning(
+                    "event=pdd.transfer_human.triggered "
+                    + self._trace_fields(
+                        trace,
+                        action="image_intercept",
+                        duration_ms=duration_ms,
+                        content_length=trace.get("content_length", 0),
+                        content_hash=trace.get("content_hash", ""),
+                    )
+                )
                 self.logger.info(f"[图片拦截] 用户 {session_id} 发送了图片，触发人工接管")
 
                 # 1. 设置人工锁（使用集中式配置）
@@ -117,6 +193,23 @@ class AIReplyHandler(BaseHandler):
             # 检查是否被人工接管
             if redis_manager.is_human_locked(session_id):
                 ttl = redis_manager.get_lock_ttl(session_id)
+                duration_ms = int((time.perf_counter() - handle_started_at) * 1000)
+                self.logger.info(
+                    "event=pdd.human_lock.skipped "
+                    + self._trace_fields(
+                        trace,
+                        action="human_locked",
+                        duration_ms=duration_ms,
+                    )
+                )
+                self.logger.info(
+                    "event=pdd.message.skipped "
+                    + self._trace_fields(
+                        trace,
+                        action="human_locked",
+                        duration_ms=duration_ms,
+                    )
+                )
                 self.logger.info(
                     f"[人工静默] 用户 {session_id} 正由人工接管，AI 静默中... "
                     f"(剩余锁时间: {ttl}s)"
@@ -129,16 +222,48 @@ class AIReplyHandler(BaseHandler):
             # =====================================================
             static_reply = self._match_static_reply(context, metadata)
             if static_reply:
+                reply_length, reply_hash = self._fingerprint(static_reply)
+                duration_ms = int((time.perf_counter() - handle_started_at) * 1000)
+                self.logger.info(
+                    "event=pdd.static_rule.matched "
+                    + self._trace_fields(
+                        trace,
+                        action="static_reply",
+                        duration_ms=duration_ms,
+                        reply_length=reply_length,
+                        reply_hash=reply_hash,
+                    )
+                )
                 self.logger.info(
                     f"[静态规则拦截] session_id={session_id}, reply={static_reply[:40]}"
                 )
                 await self._send_reply(context, static_reply, metadata)
+                duration_ms = int((time.perf_counter() - handle_started_at) * 1000)
+                self.logger.info(
+                    "event=pdd.reply.generated "
+                    + self._trace_fields(
+                        trace,
+                        action="static_reply",
+                        duration_ms=duration_ms,
+                        reply_length=reply_length,
+                        reply_hash=reply_hash,
+                    )
+                )
                 return True
 
             # =====================================================
             # Step 2: AI 推理互斥锁检查（防止并发压垮显存）
             # =====================================================
             if not redis_manager.acquire_inference_lock(session_id, ttl=INFERENCE_LOCK_TTL):
+                duration_ms = int((time.perf_counter() - handle_started_at) * 1000)
+                self.logger.info(
+                    "event=pdd.message.skipped "
+                    + self._trace_fields(
+                        trace,
+                        action="inference_locked",
+                        duration_ms=duration_ms,
+                    )
+                )
                 self.logger.debug(
                     f"[推理互斥] 用户 {session_id} 正在推理中，并发消息被拦截"
                 )
@@ -153,11 +278,29 @@ class AIReplyHandler(BaseHandler):
                 processed_content = self.preprocessor.process(context.content, context.type)
 
                 # 调用AI生成回复
-                reply = await self._get_ai_reply(processed_content, context)
+                reply = await self._get_ai_reply(processed_content, context, metadata)
                 if reply == self.PIPELINE_SKIP:
+                    duration_ms = int((time.perf_counter() - handle_started_at) * 1000)
+                    self.logger.info(
+                        "event=pdd.message.skipped "
+                        + self._trace_fields(
+                            trace,
+                            action="pipeline_skip",
+                            duration_ms=duration_ms,
+                        )
+                    )
                     self.logger.info("Pipeline 已要求静默跳过，终止自动回复")
                     return True
                 if not reply:
+                    duration_ms = int((time.perf_counter() - handle_started_at) * 1000)
+                    self.logger.warning(
+                        "event=pdd.transfer_human.triggered "
+                        + self._trace_fields(
+                            trace,
+                            action="ai_empty_reply",
+                            duration_ms=duration_ms,
+                        )
+                    )
                     self.logger.warning("AI回复生成失败，使用备用回复")
                     self._alert_manual_transfer(metadata, session_id, "AI reply send failed", "high")
                     return await self._handle_fallback(context, metadata)
@@ -168,10 +311,33 @@ class AIReplyHandler(BaseHandler):
                 reply = self._post_process_guardrail(reply, session_id, metadata)
 
                 # 发送回复
+                reply_length, reply_hash = self._fingerprint(reply)
                 success = await self._send_reply(context, reply, metadata)
                 if success:
+                    duration_ms = int((time.perf_counter() - handle_started_at) * 1000)
+                    self.logger.info(
+                        "event=pdd.handler.completed "
+                        + self._trace_fields(
+                            trace,
+                            action="reply_sent",
+                            duration_ms=duration_ms,
+                            reply_length=reply_length,
+                            reply_hash=reply_hash,
+                        )
+                    )
                     await self.log_message(context, "AI回复发送成功", f"回复: {reply}...")
                 else:
+                    duration_ms = int((time.perf_counter() - handle_started_at) * 1000)
+                    self.logger.warning(
+                        "event=pdd.transfer_human.triggered "
+                        + self._trace_fields(
+                            trace,
+                            action="send_failed",
+                            duration_ms=duration_ms,
+                            reply_length=reply_length,
+                            reply_hash=reply_hash,
+                        )
+                    )
                     self.logger.warning("AI回复发送失败")
                     await self.log_message(context, "AI回复发送失败", "已触发转人工告警，避免重复发送备用话术")
                     return True
@@ -183,6 +349,16 @@ class AIReplyHandler(BaseHandler):
                 redis_manager.release_inference_lock(session_id)
 
         except Exception as e:
+            duration_ms = int((time.perf_counter() - handle_started_at) * 1000)
+            self.logger.error(
+                "event=pdd.message.skipped "
+                + self._trace_fields(
+                    trace,
+                    action="handler_exception",
+                    duration_ms=duration_ms,
+                    error_type=type(e).__name__,
+                )
+            )
             self.logger.error(f"AI回复处理失败: {e}")
             return await self._handle_fallback(context, metadata)
 
@@ -253,8 +429,11 @@ class AIReplyHandler(BaseHandler):
                 self.logger.error(f"V3.0 Pipeline 初始化失败: {e}")
         return self._pipeline
 
-    async def _get_ai_reply(self, query: str, context: Context) -> Optional[str]:
+    async def _get_ai_reply(self, query: str, context: Context, metadata: Optional[Dict[str, Any]] = None) -> Optional[str]:
         """获取AI回复 — V3.0: 优先 MessagePipeline，其次 bot"""
+        metadata = metadata or {}
+        trace = self._build_trace_metadata(context, metadata)
+        request_started_at = time.perf_counter()
         # 尝试 V3.0 MessagePipeline
         pipeline = self._get_pipeline()
         if pipeline:
@@ -266,14 +445,70 @@ class AIReplyHandler(BaseHandler):
                     "content": query,
                     "user_id": str(getattr(kwargs, 'user_id', '')),
                 }
-                result = await pipeline.process(message)
+                self.logger.debug(
+                    "event=pdd.pipeline.started "
+                    + self._trace_fields(
+                        trace,
+                        action="pipeline_process",
+                        duration_ms=0,
+                        content_length=trace.get("content_length", 0),
+                        content_hash=trace.get("content_hash", ""),
+                    )
+                )
+                result = await pipeline.process(
+                    message,
+                    trace_id=trace.get("trace_id") or None,
+                    source_message_id=trace.get("source_message_id") or None,
+                    queue_message_id=trace.get("queue_message_id") or None,
+                )
                 action = result.get("action", "")
+                duration_ms = int((time.perf_counter() - request_started_at) * 1000)
+                trace["session_id"] = str(result.get("session_id") or trace.get("session_id") or "")
                 if action in ("reply", "transfer_human"):
-                    return result.get("text", "")
+                    reply = result.get("text", "")
+                    reply_length, reply_hash = self._fingerprint(reply)
+                    self.logger.info(
+                        "event=pdd.pipeline.completed "
+                        + self._trace_fields(
+                            trace,
+                            action=action,
+                            duration_ms=duration_ms,
+                            reply_length=reply_length,
+                            reply_hash=reply_hash,
+                        )
+                    )
+                    if action == "transfer_human":
+                        self.logger.warning(
+                            "event=pdd.transfer_human.triggered "
+                            + self._trace_fields(
+                                trace,
+                                action=str(result.get("reason") or "pipeline_transfer_human"),
+                                duration_ms=duration_ms,
+                            )
+                        )
+                    return reply
                 if action == "skip":
+                    self.logger.info(
+                        "event=pdd.pipeline.completed "
+                        + self._trace_fields(
+                            trace,
+                            action="skip",
+                            duration_ms=duration_ms,
+                        )
+                    )
                     self.logger.info(f"Pipeline skip: {result}")
                     return self.PIPELINE_SKIP
             except Exception as e:
+                duration_ms = int((time.perf_counter() - request_started_at) * 1000)
+                self.logger.warning(
+                    "event=pdd.pipeline.failed "
+                    + self._trace_fields(
+                        trace,
+                        action="pipeline_exception",
+                        duration_ms=duration_ms,
+                        error_type=type(e).__name__,
+                    )
+                )
                 self.logger.error(f"Pipeline 调用失败: {e}")
 
         # 回退到旧 bot (V2.0 兼容)

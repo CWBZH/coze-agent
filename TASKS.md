@@ -216,17 +216,21 @@
 - `python -m py_compile ui/auto_reply/threads.py` 通过。
 - T003-C 只修改 `ui/auto_reply/threads.py`。
 
-下一步：
-
-- `T004：诊断日志增强`。
-
 ## T004：诊断日志增强
 
-状态：待执行。
+状态：已完成。
 
 目标：
 
 补齐诊断字段。
+
+修改文件：
+
+- `ui/auto_reply/threads.py`
+- `Channel/pinduoduo/core/pdd_lifecycle.py`
+- `Channel/pinduoduo/core/pdd_connection.py`
+- `Channel/pinduoduo/core/pdd_message_handler.py`
+- `Message/core/consumer.py`
 
 日志字段：
 
@@ -241,6 +245,71 @@
 - processing_tasks_count
 - worker_count
 - reconnect_attempt
+
+已完成内容：
+
+- `AutoReplyThread.run()` 增加 loop / channel / start_task / run_forever / loop close 诊断日志。
+- `AutoReplyThread.stop()` 增加 shutdown_started / future timeout / fallback loop.stop / shutdown_complete 诊断日志。
+- `LifecycleMixin.start_account()` 增加 lifecycle lock、generation、reconnect task 创建日志。
+- `LifecycleMixin.stop_account()` 和 `stop_all_connections()` 增加 shutdown 阶段、task cancel、websocket close、consumer cleanup 日志。
+- `MessageConsumer.start()` / `stop()` 增加 worker_count、loop_id、consumer_id、handler_count 日志。
+- `_setup_message_consumer()` 增加 existing consumer reused / replaced / rejected 诊断日志。
+
+验证：
+
+- `python -m py_compile ui/auto_reply/threads.py Channel/pinduoduo/core/pdd_lifecycle.py Channel/pinduoduo/core/pdd_connection.py Channel/pinduoduo/core/pdd_message_handler.py Message/core/consumer.py` 通过。
+
+## T005-A：message trace_id 生成与基础透传
+
+状态：已完成。
+
+目标：
+
+建立单条买家消息的 `trace_id`，并绑定拼多多原始 `msg_id` 与 `MessageWrapper.message_id`，用于后续排查消息是否成功回复或失败。
+
+修改文件：
+
+- `Channel/pinduoduo/core/pdd_message_handler.py`
+- `Channel/pinduoduo/pdd_message.py`
+- `bridge/context.py`
+- `Message/models/queue_models.py`
+- `Message/core/consumer.py`
+
+已完成内容：
+
+- WebSocket 原始消息解析后生成 `trace_id`。
+- 有 PDD 原始 `msg_id` 时使用 `pdd:{shop_id}:{msg_id}`。
+- 无 `msg_id` 时使用 12 位短 uuid。
+- 保留 `source_message_id`，对应 PDD 原始 `msg_id`。
+- 将 `trace_id` / `source_message_id` 写入 `Context.kwargs`。
+- `MessageWrapper` 保留 `trace_id`、`source_message_id`、`queue_message_id`、`shop_id`、`user_id`、`from_uid`、`to_uid`、`queue_name`、`message_type`、`content_length`、`content_hash`。
+- `MessageWrapper.to_metadata()` 输出上述 trace 字段。
+- `MessageConsumer._process_message()` 日志携带 `trace_id` / `source_message_id` / `queue_message_id`。
+- 新增事件日志：`pdd.message.received`、`pdd.context.created`、`pdd.message.queued`、`pdd.consumer.dequeued`、`pdd.handler.selected`、`pdd.handler.completed`、`pdd.handler.failed`、`pdd.message.skipped`。
+- 新增日志只记录 `content_length` 和截断 `content_hash`，不记录完整买家消息内容。
+
+### T005-A.1：trace_id 规范和日志级别小补丁
+
+状态：已完成。
+
+已完成内容：
+
+- `shop_id` 为空时 `trace_id` 使用 `unknown`，避免生成 `pdd:None:<id>`。
+- 所有 ID 统一转为字符串。
+- 高频 trace 事件降为 debug：`pdd.message.received`、`pdd.context.created`、`pdd.message.queued`、`pdd.consumer.dequeued`、`pdd.handler.selected`、`pdd.handler.completed`。
+- `pdd.message.skipped` 保持 info。
+- `pdd.handler.failed` 保持 warning/error。
+
+验证：
+
+- `py_compile` 通过。
+- fake trace metadata test 通过。
+- trace id rule test 通过。
+- 新增日志未记录完整 `content` / `token` / `cookie`。
+
+下一步：
+
+- `T005-B：AI / Pipeline reply outcome observability`。
 
 ---
 
@@ -360,4 +429,4 @@
 
 ## 下一步
 
-下一步建议执行：`T004：诊断日志增强`。
+下一步建议执行：`T005-B：AI / Pipeline reply outcome observability`。

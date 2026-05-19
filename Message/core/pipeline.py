@@ -1,5 +1,7 @@
 """消息处理管道 - 串联关键词、FastGPT 和回复发送。"""
 import asyncio
+import hashlib
+import time
 from datetime import datetime
 from typing import Any, Dict
 
@@ -8,6 +10,26 @@ from Message.handlers.fastgpt_handler import SYSTEM_PROMPT_TEMPLATE
 from utils.logger_loguru import get_logger
 
 logger = get_logger("MessagePipeline")
+
+
+def _fingerprint(value: Any) -> tuple[int, str]:
+    value_text = "" if value is None else str(value)
+    value_hash = hashlib.sha256(value_text.encode("utf-8")).hexdigest()[:12]
+    return len(value_text), value_hash
+
+
+def _trace_fields(trace: Dict[str, Any], **extra: Any) -> str:
+    fields = {
+        "trace_id": trace.get("trace_id", ""),
+        "source_message_id": trace.get("source_message_id", ""),
+        "queue_message_id": trace.get("queue_message_id", ""),
+        "session_id": trace.get("session_id", ""),
+        "shop_id": trace.get("shop_id", ""),
+        "user_id": trace.get("user_id", ""),
+        "customer_uid": trace.get("customer_uid", ""),
+    }
+    fields.update(extra)
+    return " ".join(f"{key}={value}" for key, value in fields.items())
 
 
 class MessagePipeline:
@@ -43,18 +65,57 @@ class MessagePipeline:
         except Exception as e:
             logger.warning(f"转人工通知触发失败: {e}")
 
-    async def process(self, message: Dict[str, Any]) -> Dict[str, Any]:
+    async def process(
+        self,
+        message: Dict[str, Any],
+        trace_id: str = None,
+        source_message_id: str = None,
+        queue_message_id: str = None,
+    ) -> Dict[str, Any]:
+        process_started_at = time.perf_counter()
         buyer_id = message.get("buyer_id")
         shop_platform_id = message.get("shop_platform_id")
         buyer_text = message.get("content", "")
         user_id = message.get("user_id", "")
+        content_length, content_hash = _fingerprint(buyer_text)
+        trace = {
+            "trace_id": str(trace_id or message.get("trace_id") or ""),
+            "source_message_id": str(source_message_id or message.get("source_message_id") or ""),
+            "queue_message_id": str(queue_message_id or message.get("queue_message_id") or ""),
+            "session_id": str(message.get("session_id") or ""),
+            "shop_id": str(shop_platform_id or "unknown"),
+            "user_id": str(user_id or ""),
+            "customer_uid": str(buyer_id or ""),
+        }
 
         if not buyer_id or not buyer_text:
+            duration_ms = int((time.perf_counter() - process_started_at) * 1000)
+            logger.info(
+                "event=pdd.message.skipped "
+                + _trace_fields(
+                    trace,
+                    action="missing_buyer_or_content",
+                    duration_ms=duration_ms,
+                    content_length=content_length,
+                    content_hash=content_hash,
+                )
+            )
             logger.warning("消息缺少 buyer_id 或 content")
             return {"action": "skip"}
 
         shop = self.db.get_shop_by_platform_id("pinduoduo", shop_platform_id)
         if not shop:
+            duration_ms = int((time.perf_counter() - process_started_at) * 1000)
+            logger.info(
+                "event=pdd.message.skipped "
+                + _trace_fields(
+                    trace,
+                    action="shop_not_found",
+                    duration_ms=duration_ms,
+                    content_length=content_length,
+                    content_hash=content_hash,
+                )
+            )
             logger.error(f"店铺未找到: {shop_platform_id}")
             return {"action": "skip"}
 
@@ -62,6 +123,8 @@ class MessagePipeline:
         try:
             conv = await self.session_mgr.get_or_create_conversation(shop["id"], buyer_id, user_id)
             session_id = conv.session_id
+            trace["session_id"] = str(session_id or "")
+            trace["shop_id"] = str(shop.get("shop_id") or shop_platform_id or "unknown")
 
             if conv.status in ("pending_human", "human_handling"):
                 fallback_state = self.session_mgr.get_fallback_state(session_id)
@@ -74,6 +137,18 @@ class MessagePipeline:
                     reminder = self.fastgpt.get_fallback(session_id, already_failed=False)
                     self.session_mgr.mark_fallback_sent(session_id, reminder_stage)
                     self.session_mgr.add_message(session_id, "assistant", reminder)
+                    reply_length, reply_hash = _fingerprint(reminder)
+                    duration_ms = int((time.perf_counter() - process_started_at) * 1000)
+                    logger.info(
+                        "event=pdd.pipeline.completed "
+                        + _trace_fields(
+                            trace,
+                            action=f"pending_human_{reminder_stage}_fallback",
+                            duration_ms=duration_ms,
+                            reply_length=reply_length,
+                            reply_hash=reply_hash,
+                        )
+                    )
                     logger.info(
                         f"会话 {session_id[:8]} 处于人工状态，发送第 {reminder_stage} 次 fallback 提醒"
                     )
@@ -83,6 +158,23 @@ class MessagePipeline:
                         "session_id": session_id,
                         "source": f"pending_human_{reminder_stage}_fallback",
                     }
+                duration_ms = int((time.perf_counter() - process_started_at) * 1000)
+                logger.info(
+                    "event=pdd.human_lock.skipped "
+                    + _trace_fields(
+                        trace,
+                        action=str(conv.status),
+                        duration_ms=duration_ms,
+                    )
+                )
+                logger.info(
+                    "event=pdd.message.skipped "
+                    + _trace_fields(
+                        trace,
+                        action=str(conv.status),
+                        duration_ms=duration_ms,
+                    )
+                )
                 logger.info(f"会话 {session_id[:8]} 处于人工状态，跳过自动回复")
                 return {"action": "skip", "session_id": session_id, "status": conv.status}
 
@@ -91,9 +183,30 @@ class MessagePipeline:
             kw_result = self.keyword_handler.check(shop["id"], buyer_text)
             if kw_result["matched"]:
                 action = kw_result["action"]
+                duration_ms = int((time.perf_counter() - process_started_at) * 1000)
+                logger.info(
+                    "event=pdd.static_rule.matched "
+                    + _trace_fields(
+                        trace,
+                        action=action,
+                        duration_ms=duration_ms,
+                    )
+                )
                 if action == "auto_reply":
                     reply = kw_result["reply_text"] or "亲，谢谢您的咨询~"
                     self.session_mgr.add_message(session_id, "assistant", reply)
+                    reply_length, reply_hash = _fingerprint(reply)
+                    duration_ms = int((time.perf_counter() - process_started_at) * 1000)
+                    logger.info(
+                        "event=pdd.reply.generated "
+                        + _trace_fields(
+                            trace,
+                            action="keyword_reply",
+                            duration_ms=duration_ms,
+                            reply_length=reply_length,
+                            reply_hash=reply_hash,
+                        )
+                    )
                     return {"action": "reply", "text": reply, "session_id": session_id, "source": "keyword"}
                 if action == "transfer_human":
                     self.session_mgr.set_status(session_id, "pending_human")
@@ -106,6 +219,28 @@ class MessagePipeline:
                         f"关键词: {kw_result['keyword']}",
                         "high",
                     )
+                    reply_length, reply_hash = _fingerprint(reply)
+                    duration_ms = int((time.perf_counter() - process_started_at) * 1000)
+                    logger.warning(
+                        "event=pdd.transfer_human.triggered "
+                        + _trace_fields(
+                            trace,
+                            action="keyword_transfer_human",
+                            duration_ms=duration_ms,
+                            reply_length=reply_length,
+                            reply_hash=reply_hash,
+                        )
+                    )
+                    logger.info(
+                        "event=pdd.pipeline.completed "
+                        + _trace_fields(
+                            trace,
+                            action="keyword_transfer_human",
+                            duration_ms=duration_ms,
+                            reply_length=reply_length,
+                            reply_hash=reply_hash,
+                        )
+                    )
                     return {
                         "action": "transfer_human",
                         "text": reply,
@@ -113,6 +248,15 @@ class MessagePipeline:
                         "reason": f"关键词: {kw_result['keyword']}",
                     }
                 if action == "block":
+                    duration_ms = int((time.perf_counter() - process_started_at) * 1000)
+                    logger.info(
+                        "event=pdd.message.skipped "
+                        + _trace_fields(
+                            trace,
+                            action="keyword_block",
+                            duration_ms=duration_ms,
+                        )
+                    )
                     return {"action": "block", "session_id": session_id}
 
             cached_products = self._product_cache.get(session_id, "")
@@ -140,6 +284,18 @@ class MessagePipeline:
                     "店铺未配置 FastGPT 知识库ID",
                     "high",
                 )
+                reply_length, reply_hash = _fingerprint(TRANSFER_HUMAN_REPLY)
+                duration_ms = int((time.perf_counter() - process_started_at) * 1000)
+                logger.warning(
+                    "event=pdd.transfer_human.triggered "
+                    + _trace_fields(
+                        trace,
+                        action="missing_fastgpt_dataset_id",
+                        duration_ms=duration_ms,
+                        reply_length=reply_length,
+                        reply_hash=reply_hash,
+                    )
+                )
                 return {
                     "action": "transfer_human",
                     "text": TRANSFER_HUMAN_REPLY,
@@ -148,6 +304,16 @@ class MessagePipeline:
                 }
 
             t0 = datetime.now()
+            logger.debug(
+                "event=pdd.ai.request.started "
+                + _trace_fields(
+                    trace,
+                    action="fastgpt_call",
+                    duration_ms=0,
+                    content_length=content_length,
+                    content_hash=content_hash,
+                )
+            )
             result = await self._call_fastgpt_async(
                 messages,
                 dataset_id,
@@ -162,16 +328,49 @@ class MessagePipeline:
                 self.session_mgr.reset_fallback_state(session_id)
                 reply = result["content"][:200]
                 self.session_mgr.add_message(session_id, "assistant", reply)
+                reply_length, reply_hash = _fingerprint(reply)
+                logger.info(
+                    "event=pdd.ai.request.succeeded "
+                    + _trace_fields(
+                        trace,
+                        action="fastgpt_reply",
+                        duration_ms=int(latency_ms),
+                        reply_length=reply_length,
+                        reply_hash=reply_hash,
+                    )
+                )
 
                 if self.fastgpt.contains_transfer_intent(reply):
                     self.session_mgr.set_status(session_id, "pending_human")
                     reply = TRANSFER_HUMAN_REPLY
+                    reply_length, reply_hash = _fingerprint(reply)
                     self._alert_transfer_human(
                         str(shop["shop_id"]),
                         buyer_id,
                         session_id,
                         "AI 判断需要转人工",
                         "high",
+                    )
+                    duration_ms = int((time.perf_counter() - process_started_at) * 1000)
+                    logger.warning(
+                        "event=pdd.transfer_human.triggered "
+                        + _trace_fields(
+                            trace,
+                            action="ai_transfer_human",
+                            duration_ms=duration_ms,
+                            reply_length=reply_length,
+                            reply_hash=reply_hash,
+                        )
+                    )
+                    logger.info(
+                        "event=pdd.pipeline.completed "
+                        + _trace_fields(
+                            trace,
+                            action="ai_transfer_human",
+                            duration_ms=duration_ms,
+                            reply_length=reply_length,
+                            reply_hash=reply_hash,
+                        )
                     )
                     return {
                         "action": "transfer_human",
@@ -182,6 +381,17 @@ class MessagePipeline:
                         "tokens": result.get("tokens", 0),
                     }
 
+                duration_ms = int((time.perf_counter() - process_started_at) * 1000)
+                logger.info(
+                    "event=pdd.pipeline.completed "
+                    + _trace_fields(
+                        trace,
+                        action="ai_reply",
+                        duration_ms=duration_ms,
+                        reply_length=reply_length,
+                        reply_hash=reply_hash,
+                    )
+                )
                 return {
                     "action": "reply",
                     "text": reply,
@@ -191,6 +401,15 @@ class MessagePipeline:
                 }
 
             failed = result["success"] is False or result["content"] is None
+            logger.warning(
+                "event=pdd.ai.request.failed "
+                + _trace_fields(
+                    trace,
+                    action="fastgpt_failed",
+                    duration_ms=int(latency_ms),
+                    error_type=str(result.get("error_type") or "EmptyContent"),
+                )
+            )
             fallback = self.fastgpt.get_fallback(session_id, already_failed=failed)
             fallback_stage = self.session_mgr.should_send_fallback(session_id)
             self.session_mgr.set_status(session_id, "pending_human")
@@ -204,6 +423,23 @@ class MessagePipeline:
                     "FastGPT 失败，fallback 已节流",
                     "high",
                 )
+                duration_ms = int((time.perf_counter() - process_started_at) * 1000)
+                logger.warning(
+                    "event=pdd.transfer_human.triggered "
+                    + _trace_fields(
+                        trace,
+                        action="fallback_throttled",
+                        duration_ms=duration_ms,
+                    )
+                )
+                logger.info(
+                    "event=pdd.message.skipped "
+                    + _trace_fields(
+                        trace,
+                        action="fallback_throttled",
+                        duration_ms=duration_ms,
+                    )
+                )
                 return {
                     "action": "skip",
                     "session_id": session_id,
@@ -213,12 +449,24 @@ class MessagePipeline:
 
             self.session_mgr.mark_fallback_sent(session_id, fallback_stage)
             self.session_mgr.add_message(session_id, "assistant", fallback)
+            fallback_length, fallback_hash = _fingerprint(fallback)
             self._alert_transfer_human(
                 str(shop["shop_id"]),
                 buyer_id,
                 session_id,
                 f"FastGPT 失败，已发送第 {fallback_stage} 次 fallback",
                 "high",
+            )
+            duration_ms = int((time.perf_counter() - process_started_at) * 1000)
+            logger.warning(
+                "event=pdd.transfer_human.triggered "
+                + _trace_fields(
+                    trace,
+                    action=f"fastgpt_failed_fallback_{fallback_stage}",
+                    duration_ms=duration_ms,
+                    reply_length=fallback_length,
+                    reply_hash=fallback_hash,
+                )
             )
 
             if self.fastgpt.should_transfer(session_id):
@@ -229,6 +477,17 @@ class MessagePipeline:
                     "FastGPT 连续失败",
                     "high",
                 )
+                duration_ms = int((time.perf_counter() - process_started_at) * 1000)
+                logger.info(
+                    "event=pdd.pipeline.completed "
+                    + _trace_fields(
+                        trace,
+                        action="fastgpt_repeated_failure_transfer",
+                        duration_ms=duration_ms,
+                        reply_length=fallback_length,
+                        reply_hash=fallback_hash,
+                    )
+                )
                 return {
                     "action": "transfer_human",
                     "text": fallback,
@@ -237,6 +496,17 @@ class MessagePipeline:
                     "latency_ms": latency_ms,
                 }
 
+            duration_ms = int((time.perf_counter() - process_started_at) * 1000)
+            logger.info(
+                "event=pdd.pipeline.completed "
+                + _trace_fields(
+                    trace,
+                    action="fallback_reply",
+                    duration_ms=duration_ms,
+                    reply_length=fallback_length,
+                    reply_hash=fallback_hash,
+                )
+            )
             return {
                 "action": "reply",
                 "text": fallback,
@@ -246,6 +516,16 @@ class MessagePipeline:
             }
 
         except Exception as e:
+            duration_ms = int((time.perf_counter() - process_started_at) * 1000)
+            logger.error(
+                "event=pdd.pipeline.failed "
+                + _trace_fields(
+                    trace,
+                    action="pipeline_exception",
+                    duration_ms=duration_ms,
+                    error_type=type(e).__name__,
+                )
+            )
             logger.error(f"消息处理异常: {e}")
             if session_id:
                 try:
@@ -259,6 +539,18 @@ class MessagePipeline:
                 str(session_id or ""),
                 f"Pipeline 异常: {e}",
                 "high",
+            )
+            reply_length, reply_hash = _fingerprint(TRANSFER_HUMAN_REPLY)
+            logger.warning(
+                "event=pdd.transfer_human.triggered "
+                + _trace_fields(
+                    trace,
+                    action="pipeline_exception",
+                    duration_ms=duration_ms,
+                    reply_length=reply_length,
+                    reply_hash=reply_hash,
+                    error_type=type(e).__name__,
+                )
             )
             return {
                 "action": "transfer_human",
