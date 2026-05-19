@@ -141,9 +141,62 @@
 - `wait_closed_called == True`。
 - 未出现 `RuntimeError: cannot reuse already awaited coroutine`。
 
+### T003-B：LifecycleMixin.stop_account / stop_all_connections 统一 await 清理
+
+状态：已完成。
+
+修改文件：
+
+- `Channel/pinduoduo/core/pdd_lifecycle.py`
+- `Channel/pinduoduo/pdd_channel.py`
+
+已完成内容：
+
+- `stop_account()` 统一为 set stop_event -> cancel reconnect / heartbeat / message / stop-wait task -> await with timeout -> close websocket -> cleanup resources -> update DISCONNECTED -> clear maps。
+- `stop_all_connections()` 统一为 set all stop_event -> cancel all task maps -> await with timeout -> close websocket -> per-connection cleanup -> clear maps -> `self.ws = None`。
+- 新增 `_connection_queue_names` 显式记录 `connection_key -> queue_name`，继续使用 `queue_name = pdd_{shop_id}`。
+- 新增 `_message_tasks`、`_stop_wait_tasks` 映射，便于 shutdown 阶段追踪和清理。
+- `cleanup_processing_tasks()` 增加 timeout，避免无限等待。
+- `_cleanup_resources()` 保留 generation guard，并记录 consumer cleanup result。
+- 未修改 UI。
+- 未修改业务逻辑。
+- 未修改 `queue_name`。
+
+验证：
+
+- `python -m py_compile Channel/pinduoduo/core/pdd_lifecycle.py Channel/pinduoduo/pdd_channel.py` 通过。
+- fake task 测试通过。
+- cancel 后正常完成的 task 会被 await 到 done。
+- `processing_tasks` 会被清空。
+- 重复 stop / cleanup 不抛异常。
+
+### T003-B 小补丁：_cancel_mapped_task timeout 后保留未完成 task 引用
+
+状态：已完成。
+
+修改文件：
+
+- `Channel/pinduoduo/core/pdd_lifecycle.py`
+
+已完成内容：
+
+- `_cancel_mapped_task()` 在 cancel timeout 后，如果 task 仍未 done，不再无条件从 task map 中 pop。
+- pop 前确认 `current is task`，避免误删已替换的新 task。
+- 使用 `asyncio.shield(task)` 等待取消完成，避免 `wait_for` 超时后二次取消并改变仍运行 task 的状态。
+- timeout 后仍未完成的 task 会保留引用，便于后续 `stop_all_connections()` 或诊断继续追踪。
+
+验证：
+
+- `python -m py_compile Channel/pinduoduo/core/pdd_lifecycle.py` 通过。
+- fake task 测试通过。
+- 已完成 task 会被 pop。
+- cancel 后正常完成的 task 会被 pop。
+- cancel 后超时且仍未 done 的 task 不会被 pop。
+- map 中已被新 task 替换时不会误删新 task。
+
 下一步：
 
-- `T003-B：LifecycleMixin.stop_account / stop_all_connections 统一 await 清理`。
+- `T003-C：AutoReplyThread.stop graceful shutdown`。
 
 ## T004：诊断日志增强
 
@@ -285,4 +338,4 @@
 
 ## 下一步
 
-下一步建议执行：`T003-B：LifecycleMixin.stop_account / stop_all_connections 统一 await 清理`。
+下一步建议执行：`T003-C：AutoReplyThread.stop graceful shutdown`。

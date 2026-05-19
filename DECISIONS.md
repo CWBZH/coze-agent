@@ -251,4 +251,43 @@
 
 后续：
 
-下一步执行 `T003-B：LifecycleMixin.stop_account / stop_all_connections 统一 await 清理`。
+下一步执行 `T003-C：AutoReplyThread.stop graceful shutdown`。
+
+## D012：shutdown task map 清理保留未退出 task 引用
+
+状态：已完成。
+
+修改文件：
+
+1. `Channel/pinduoduo/core/pdd_lifecycle.py`
+2. `Channel/pinduoduo/pdd_channel.py`
+
+决策：
+
+`LifecycleMixin.stop_account()` 和 `stop_all_connections()` 已统一 await 清理顺序，并且 `_cancel_mapped_task()` 在 cancel timeout 后会保留仍未完成的 task 引用，避免误删仍运行 task 或误删已替换的新 task。
+
+关键结果：
+
+1. `stop_account()` 会依次 set stop_event、cancel reconnect / heartbeat / message / stop-wait task、await with timeout、close websocket、cleanup resources、更新 DISCONNECTED、清理当前 key。
+2. `stop_all_connections()` 会 set 所有 stop_event，cancel 并 await 所有 task maps，close websocket，然后按 `connection_key -> queue_name` 映射逐个 cleanup。
+3. 新增 `_connection_queue_names` 显式记录 queue name，不通过 `connection_key.split()` 反推。
+4. 继续保持 `queue_name = pdd_{shop_id}`。
+5. `cleanup_processing_tasks()` 已增加 timeout，避免无限等待。
+6. `_cancel_mapped_task()` timeout 后如果 task 仍未 done，会保留 map 引用。
+7. `_cancel_mapped_task()` pop 前确认 `current is task`，避免误删新 task。
+8. 未修改 UI。
+9. 未修改业务逻辑。
+
+验证结果：
+
+1. `python -m py_compile Channel/pinduoduo/core/pdd_lifecycle.py Channel/pinduoduo/pdd_channel.py` 通过。
+2. `python -m py_compile Channel/pinduoduo/core/pdd_lifecycle.py` 通过。
+3. fake task 测试通过。
+4. 已完成 task 会被 pop。
+5. cancel 后正常完成的 task 会被 pop。
+6. cancel 后超时且仍未 done 的 task 不会被 pop。
+7. map 中已被新 task 替换时不会误删新 task。
+
+后续：
+
+下一步执行 `T003-C：AutoReplyThread.stop graceful shutdown`。
