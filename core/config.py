@@ -67,10 +67,10 @@ SHORT_SENTENCE_THRESHOLD = int(os.getenv("SHORT_SENTENCE_THRESHOLD", "5"))
 # Redis 连接配置
 # =============================================================================
 
-REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
-REDIS_PORT = int(os.getenv("REDIS_PORT", "6379"))
-REDIS_PASSWORD = os.getenv("REDIS_PASSWORD", "123456")
-REDIS_DB = int(os.getenv("REDIS_DB", "0"))
+REDIS_HOST = settings.redis_host()
+REDIS_PORT = settings.redis_port()
+REDIS_PASSWORD = settings.redis_password()
+REDIS_DB = settings.redis_db()
 
 
 # =============================================================================

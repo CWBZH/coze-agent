@@ -97,6 +97,12 @@ def _default_session_compress_base_url() -> str:
     return "http://127.0.0.1:11435"
 
 
+def _default_redis_host() -> str:
+    if _is_linux_like_env():
+        return "redis"
+    return "localhost"
+
+
 APP_ENV = _app_env()
 FASTGPT_BASE_URL = (get_str("FASTGPT_BASE_URL", _default_fastgpt_base_url()) or "").rstrip("/")
 FASTGPT_API_KEY = get_str("FASTGPT_API_KEY", "") or ""
@@ -107,6 +113,11 @@ SESSION_COMPRESS_API_KEY = get_str("SESSION_COMPRESS_API_KEY", "") or ""
 LLM_API_BASE = (get_str("LLM_API_BASE", "https://ark.cn-beijing.volces.com/api/v3") or "").rstrip("/")
 LLM_API_KEY = get_str("LLM_API_KEY", "") or ""
 LOCAL_MODEL_BASE_URL = (get_str("LOCAL_MODEL_BASE_URL", _default_local_model_base_url()) or "").rstrip("/")
+
+REDIS_HOST = get_str("REDIS_HOST", _default_redis_host()) or _default_redis_host()
+REDIS_PORT = get_int("REDIS_PORT", 6379)
+REDIS_PASSWORD = get_str("REDIS_PASSWORD", "") or ""
+REDIS_DB = get_int("REDIS_DB", 0)
 
 DATA_DIR = resolve_path(get_str("DATA_DIR", "./temp") or "./temp")
 LOG_DIR = resolve_path(get_str("LOG_DIR", "./logs") or "./logs")
@@ -141,6 +152,22 @@ def llm_api_key() -> str:
 
 def local_model_base_url() -> str:
     return LOCAL_MODEL_BASE_URL
+
+
+def redis_host() -> str:
+    return REDIS_HOST
+
+
+def redis_port() -> int:
+    return REDIS_PORT
+
+
+def redis_password() -> str:
+    return REDIS_PASSWORD
+
+
+def redis_db() -> int:
+    return REDIS_DB
 
 
 def data_dir() -> Path:

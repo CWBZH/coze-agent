@@ -210,3 +210,25 @@ Linux delivery examples:
 - `DB_PATH=/app/data/channel_shop.db`
 
 No automatic database migration is performed. Existing deployments that rely on `./temp/channel_shop.db` keep using that file unless `DATA_DIR` or `DB_PATH` is explicitly changed.
+
+## T021-D Redis settings update
+
+`customer-agent-refactor-v3` now centralizes Redis connection defaults through `core/settings.py`.
+
+Currently centralized:
+
+- `REDIS_HOST`
+- `REDIS_PORT`
+- `REDIS_PASSWORD`
+- `REDIS_DB`
+
+Default behavior:
+
+- `APP_ENV=local`: `REDIS_HOST=localhost`, `REDIS_PORT=6379`, `REDIS_DB=0`, `REDIS_PASSWORD=` empty.
+- `APP_ENV=linux` or `APP_ENV=production`: `REDIS_HOST=redis`, `REDIS_PORT=6379`, `REDIS_DB=0`, `REDIS_PASSWORD=` empty unless explicitly configured.
+
+Security policy:
+
+- No hardcoded Redis password is provided by code defaults.
+- Production deployments should set `REDIS_PASSWORD` explicitly when Redis requires authentication.
+- This task does not change Redis lock semantics, Fail-Safe behavior, or Docker Compose Redis exposure.
