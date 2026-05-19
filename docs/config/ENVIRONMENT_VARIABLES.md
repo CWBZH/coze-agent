@@ -157,3 +157,25 @@
 - `POSTGRES_*`
 - `MONGO_URL`
 - `MINIO_*`
+
+## T021-B service settings update
+
+`customer-agent-refactor-v3` now has a lightweight `core/settings.py` loader for service URL and secret-style settings.
+
+Currently centralized through `core/settings.py`:
+
+- `APP_ENV`
+- `FASTGPT_BASE_URL`
+- `FASTGPT_API_KEY`
+- `SESSION_COMPRESS_BASE_URL`
+- `SESSION_COMPRESS_API_KEY`
+- `LLM_API_BASE`
+- `LLM_API_KEY`
+- `LOCAL_MODEL_BASE_URL`
+
+Default behavior:
+
+- `APP_ENV=local`: `FASTGPT_BASE_URL=http://localhost:3000/api`, `LOCAL_MODEL_BASE_URL=http://localhost:11434`, `SESSION_COMPRESS_BASE_URL=http://127.0.0.1:11435`
+- `APP_ENV=linux` or `APP_ENV=production`: `FASTGPT_BASE_URL=http://fastgpt:3000/api`, `LOCAL_MODEL_BASE_URL=http://ollama:11434`, `SESSION_COMPRESS_BASE_URL=http://ollama-proxy:11435`
+
+Production deployments should explicitly set service URLs and keys in environment variables or local `.env` files. Do not put real keys in code, docs, JSON examples, or images.

@@ -18,6 +18,7 @@ from typing import Any, Dict, Optional
 
 from dotenv import load_dotenv, set_key, find_dotenv
 
+from core import settings
 from utils.logger_loguru import get_logger
 
 logger = get_logger("ConfigManager")
@@ -51,7 +52,7 @@ class ConfigManager:
             logger.info(f"已创建 .env 文件: {self._env_file}")
 
         # 加载环境变量
-        load_dotenv(str(self._env_file), override=True)
+        load_dotenv(str(self._env_file), override=False)
 
         self._initialized = True
         logger.info("ConfigManager 初始化完成")
@@ -129,8 +130,8 @@ class ConfigManager:
             包含 api_base, api_key, model_name 的字典
         """
         return {
-            "api_base": self.get_env("LLM_API_BASE", "https://ark.cn-beijing.volces.com/api/v3"),
-            "api_key": self.get_env("LLM_API_KEY", ""),
+            "api_base": self.get_env("LLM_API_BASE", settings.llm_api_base()),
+            "api_key": self.get_env("LLM_API_KEY", settings.llm_api_key()),
             "model_name": self.get_env("LLM_MODEL_NAME", "doubao-seed-1-6-flash-250828"),
         }
 
@@ -163,7 +164,7 @@ class ConfigManager:
         """获取本地模型配置"""
         return {
             "enabled": self.get_bool("LOCAL_MODEL_ENABLED", True),
-            "base_url": self.get_env("LOCAL_MODEL_BASE_URL", "http://localhost:11434"),
+            "base_url": self.get_env("LOCAL_MODEL_BASE_URL", settings.local_model_base_url()),
             "model_name": self.get_env("LOCAL_MODEL_NAME", "customer-service"),
             "max_tokens": self.get_int("LOCAL_MODEL_MAX_TOKENS", 50),
             "temperature": float(self.get_env("LOCAL_MODEL_TEMPERATURE", "0.3")),
@@ -548,7 +549,7 @@ class ConfigManager:
             lm = config_data["local_model"]
             success &= self.set_local_model_config(
                 enabled=lm.get("enabled", True),
-                base_url=lm.get("base_url", "http://localhost:11434"),
+                base_url=lm.get("base_url", settings.local_model_base_url()),
                 model_name=lm.get("model_name", "customer-service"),
                 max_tokens=lm.get("max_tokens", 50),
                 temperature=lm.get("temperature", 0.3),

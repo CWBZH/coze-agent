@@ -5,6 +5,7 @@ from typing import Dict, List
 
 import requests
 
+from core import settings
 from core.constants import TRANSFER_HUMAN_REPLY
 from utils.logger_loguru import get_logger
 
@@ -46,12 +47,12 @@ FALLBACK_HARD = TRANSFER_HUMAN_REPLY
 class FastGPTHandler:
     def __init__(
         self,
-        fastgpt_url: str = "http://localhost:3000/api",
+        fastgpt_url: str = "",
         api_key: str = "",
         timeout: int = 25,
         max_retries: int = 1,
     ):
-        self.fastgpt_url = fastgpt_url.rstrip("/")
+        self.fastgpt_url = (fastgpt_url or settings.fastgpt_base_url()).rstrip("/")
         self.api_key = api_key
         self.timeout = timeout
         self.max_retries = max_retries

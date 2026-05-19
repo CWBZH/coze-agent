@@ -7,15 +7,8 @@
 V2.0 战役七：上线预备重构
 """
 import os
-from pathlib import Path
 
-try:
-    from dotenv import load_dotenv
-except Exception:
-    load_dotenv = None
-
-if load_dotenv is not None:
-    load_dotenv(Path(__file__).resolve().parent.parent / ".env", override=False)
+from core import settings
 
 # =============================================================================
 # TTL 时间配置 (秒)
@@ -54,8 +47,8 @@ PUSHPLUS_TIMEOUT = int(os.getenv("PUSHPLUS_TIMEOUT", "8"))
 
 # Session compression LLM configuration.
 SESSION_COMPRESS_MODEL = os.getenv("SESSION_COMPRESS_MODEL", "doubao-seed-2-0-mini-260215")
-SESSION_COMPRESS_BASE_URL = os.getenv("SESSION_COMPRESS_BASE_URL", "http://host.docker.internal:11435").rstrip("/")
-SESSION_COMPRESS_API_KEY = os.getenv("SESSION_COMPRESS_API_KEY", "")
+SESSION_COMPRESS_BASE_URL = settings.session_compress_base_url()
+SESSION_COMPRESS_API_KEY = settings.session_compress_api_key()
 SESSION_COMPRESS_TIMEOUT = int(os.getenv("SESSION_COMPRESS_TIMEOUT", "20"))
 SESSION_COMPRESS_MAX_TOKENS = int(os.getenv("SESSION_COMPRESS_MAX_TOKENS", "80"))
 SESSION_COMPRESS_TEMPERATURE = float(os.getenv("SESSION_COMPRESS_TEMPERATURE", "0.3"))

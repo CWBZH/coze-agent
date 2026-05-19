@@ -20,10 +20,10 @@
 """
 import sys
 import ctypes
-import os
 from pathlib import Path
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtWidgets import QApplication
+from core import settings
 
 # ============================================================================
 # 全局单例预初始化（确保正确的初始化顺序）
@@ -55,14 +55,17 @@ from Message.core.pipeline import MessagePipeline
 _db_v3 = get_db_manager()
 
 # 初始化 FastGPT API Key 到 AppConfig（首次运行持久化）
-_FASTGPT_API_KEY = "fastgpt-fsFMCzs5HZ8GleWaO1p7Pk69yNU2O8H9MDqGxMatuUgOXlNT85besEXeMtGDeTYd"
+_FASTGPT_API_KEY = settings.fastgpt_api_key().strip()
 _existing_key = _db_v3.get_config("fastgpt:api_key")
-if not _existing_key:
+if _FASTGPT_API_KEY and not _existing_key:
     _db_v3.set_config("fastgpt:api_key", _FASTGPT_API_KEY)
 
 _session_mgr_v3 = SessionManager(_db_v3)
 _keyword_handler_v3 = KeywordHandler(_db_v3)
-_fastgpt_handler_v3 = FastGPTHandler(api_key=_FASTGPT_API_KEY)
+_fastgpt_handler_v3 = FastGPTHandler(
+    fastgpt_url=settings.fastgpt_base_url(),
+    api_key=_FASTGPT_API_KEY or _existing_key or "",
+)
 _pipeline_v3 = MessagePipeline(_db_v3, _session_mgr_v3, _keyword_handler_v3, _fastgpt_handler_v3, {})
 
 # 设置 Playwright 浏览器路径（支持打包后的 exe）
