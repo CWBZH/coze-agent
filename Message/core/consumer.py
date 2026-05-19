@@ -26,6 +26,7 @@ class MessageConsumer:
         self.running = False
         self.consumer_task = None
         self._tasks: set = set()
+        self._worker_tasks: set = set()
         self._loop = None
         self.logger = get_logger(f"Consumer.{queue_name}")
 
@@ -51,10 +52,8 @@ class MessageConsumer:
         """检查消费者是否正在运行"""
         if not self.running:
             return False
-        if self.consumer_task is None:
-            self.running = False
-            return False
-        if self.consumer_task.done():
+        self._worker_tasks = {task for task in self._worker_tasks if not task.done()}
+        if not self._worker_tasks:
             self.running = False
             return False
         return True
@@ -74,6 +73,12 @@ class MessageConsumer:
     def handler_count(self) -> int:
         return len(self.handlers)
 
+    def worker_count(self) -> int:
+        return len([task for task in self._worker_tasks if not task.done()])
+
+    def worker_task_ids(self) -> List[int]:
+        return [id(task) for task in self._worker_tasks if not task.done()]
+
     def diagnostic_state(self) -> Dict[str, Any]:
         return {
             "queue_name": self.queue_name,
@@ -81,6 +86,8 @@ class MessageConsumer:
             "consumer_id": id(self),
             "handler_count": len(self.handlers),
             "running": self.is_running(),
+            "worker_count": self.worker_count(),
+            "worker_task_ids": self.worker_task_ids(),
         }
 
     def _handler_key(self, handler: MessageHandler) -> str:
@@ -93,16 +100,22 @@ class MessageConsumer:
             self.logger.warning(
                 f"Consumer already running: queue_name={self.queue_name}, "
                 f"loop_id={self.loop_id()}, consumer_id={id(self)}, "
-                f"handler_count={len(self.handlers)}, running=True"
+                f"handler_count={len(self.handlers)}, running=True, "
+                f"worker_count={self.worker_count()}, max_concurrent={self.max_concurrent}"
             )
             return
 
         self._loop = asyncio.get_running_loop()
         self.running = True
-        self.consumer_task = asyncio.create_task(self._consume_loop())
+        self.consumer_task = None
+        self._worker_tasks = {
+            asyncio.create_task(self._worker_loop(worker_id))
+            for worker_id in range(self.max_concurrent)
+        }
         self.logger.info(
             f"Consumer started: queue_name={self.queue_name}, loop_id={self.loop_id()}, "
-            f"consumer_id={id(self)}, handler_count={len(self.handlers)}, running=True"
+            f"consumer_id={id(self)}, handler_count={len(self.handlers)}, running=True, "
+            f"worker_count={self.worker_count()}, max_concurrent={self.max_concurrent}"
         )
 
     async def _consume_loop(self):
@@ -115,9 +128,7 @@ class MessageConsumer:
                     wrapper = await queue.get(timeout=1.0)
                     if wrapper:
                         # 使用信号量控制并发数，跟踪任务以便优雅停止
-                        task = asyncio.create_task(self._process_message(wrapper))
-                        self._tasks.add(task)
-                        task.add_done_callback(self._tasks.discard)
+                        await self._process_message(wrapper)
                 except RuntimeError as e:
                     if "bound to a different event loop" in str(e):
                         self.logger.error(f"Consumer {self.queue_name} stopped: queue is bound to another event loop")
@@ -135,27 +146,113 @@ class MessageConsumer:
                 f"consumer_id={id(self)}, handler_count={len(self.handlers)}, running=False"
             )
 
+    async def _worker_loop(self, worker_id: int):
+        """Fixed worker loop for the worker pool."""
+        queue = queue_manager.get_or_create_queue(self.queue_name)
+
+        try:
+            while self.running:
+                try:
+                    wrapper = await queue.get(timeout=1.0)
+                    if wrapper:
+                        await self._process_message(wrapper)
+                except asyncio.CancelledError:
+                    self.logger.debug(
+                        f"Consumer worker cancelled: queue_name={self.queue_name}, "
+                        f"loop_id={self.loop_id()}, consumer_id={id(self)}, worker_id={worker_id}"
+                    )
+                    raise
+                except RuntimeError as e:
+                    if "bound to a different event loop" in str(e):
+                        self.logger.error(
+                            f"Consumer worker stopped: queue_name={self.queue_name}, "
+                            f"loop_id={self.loop_id()}, consumer_id={id(self)}, "
+                            f"worker_id={worker_id}, reason=queue_bound_to_another_event_loop"
+                        )
+                        self.running = False
+                        break
+                    self.logger.error(
+                        f"Consumer worker error: queue_name={self.queue_name}, "
+                        f"loop_id={self.loop_id()}, consumer_id={id(self)}, "
+                        f"worker_id={worker_id}, error={e}"
+                    )
+                    await asyncio.sleep(0.1)
+                except Exception as e:
+                    self.logger.error(
+                        f"Consumer worker error: queue_name={self.queue_name}, "
+                        f"loop_id={self.loop_id()}, consumer_id={id(self)}, "
+                        f"worker_id={worker_id}, error={e}"
+                    )
+                    await asyncio.sleep(0.1)
+        finally:
+            self.logger.debug(
+                f"Consumer worker exited: queue_name={self.queue_name}, loop_id={self.loop_id()}, "
+                f"consumer_id={id(self)}, worker_id={worker_id}, running={self.running}"
+            )
+
     async def stop(self):
         """停止消费者（安全处理跨事件循环）"""
         self.running = False
 
         # 取消消费任务（处理跨 loop 场景）
+        worker_tasks = [task for task in self._worker_tasks if not task.done()]
+        for task in worker_tasks:
+            task.cancel()
+
+        if worker_tasks:
+            try:
+                await asyncio.wait_for(
+                    asyncio.gather(*worker_tasks, return_exceptions=True),
+                    timeout=5.0,
+                )
+            except asyncio.TimeoutError:
+                self.logger.warning(
+                    f"Consumer worker stop timeout: queue_name={self.queue_name}, "
+                    f"loop_id={self.loop_id()}, consumer_id={id(self)}, "
+                    f"worker_count={len(worker_tasks)}"
+                )
+            except RuntimeError:
+                pass
+        self._worker_tasks.clear()
+
         if hasattr(self, 'consumer_task') and self.consumer_task:
             try:
                 self.consumer_task.cancel()
-                await self.consumer_task
+                await asyncio.wait_for(self.consumer_task, timeout=5.0)
             except (asyncio.CancelledError, RuntimeError):
                 pass
+            except asyncio.TimeoutError:
+                self.logger.warning(
+                    f"Consumer task stop timeout: queue_name={self.queue_name}, "
+                    f"loop_id={self.loop_id()}, consumer_id={id(self)}"
+                )
+            finally:
+                self.consumer_task = None
 
         # 等待所有正在处理的任务完成
         if self._tasks:
             try:
                 pending = [t for t in self._tasks if not t.done()]
                 if pending:
-                    await asyncio.gather(*pending, return_exceptions=True)
+                    await asyncio.wait_for(
+                        asyncio.gather(*pending, return_exceptions=True),
+                        timeout=5.0,
+                    )
+            except asyncio.TimeoutError:
+                self.logger.warning(
+                    f"Consumer processing task stop timeout: queue_name={self.queue_name}, "
+                    f"loop_id={self.loop_id()}, consumer_id={id(self)}, "
+                    f"task_count={len(self._tasks)}"
+                )
             except RuntimeError:
                 pass
             self._tasks.clear()
+
+        self.logger.info(
+            f"Consumer stopped: queue_name={self.queue_name}, loop_id={self.loop_id()}, "
+            f"consumer_id={id(self)}, handler_count={len(self.handlers)}, running=False, "
+            f"worker_count={self.worker_count()}"
+        )
 
     async def stop_from_any_loop(self, timeout: float = 5.0) -> bool:
         """Stop this consumer, scheduling cleanup on its owner loop when needed."""
@@ -248,7 +345,8 @@ class MessageConsumerManager:
             self.logger.warning(
                 f"Consumer already exists: queue_name={state['queue_name']}, "
                 f"loop_id={state['loop_id']}, consumer_id={state['consumer_id']}, "
-                f"handler_count={state['handler_count']}, running={state['running']}"
+                f"handler_count={state['handler_count']}, running={state['running']}, "
+                f"worker_count={state['worker_count']}"
             )
             if existing.is_running():
                 return existing
@@ -260,7 +358,7 @@ class MessageConsumerManager:
         self.logger.info(
             f"Created consumer: queue_name={state['queue_name']}, loop_id={state['loop_id']}, "
             f"consumer_id={state['consumer_id']}, handler_count={state['handler_count']}, "
-            f"running={state['running']}"
+            f"running={state['running']}, worker_count={state['worker_count']}"
         )
         return consumer
 
@@ -284,7 +382,7 @@ class MessageConsumerManager:
             self.logger.info(
                 f"Stopping consumer: queue_name={state['queue_name']}, loop_id={state['loop_id']}, "
                 f"consumer_id={state['consumer_id']}, handler_count={state['handler_count']}, "
-                f"running={state['running']}, timeout={timeout}"
+                f"running={state['running']}, worker_count={state['worker_count']}, timeout={timeout}"
             )
             try:
                 stopped = await consumer.stop_from_any_loop(timeout=timeout)

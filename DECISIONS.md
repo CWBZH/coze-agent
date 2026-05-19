@@ -66,7 +66,7 @@
 6. 诊断脚本。
 7. 备份脚本。
 
-## D005：P0 consumer 幂等化已完成
+## D005：P0 consumer setup 幂等化已完成
 
 状态：已完成。
 
@@ -101,27 +101,7 @@
 4. `handler_count() == 1`。
 5. `stop_consumer(timeout=5.0)` 正常退出。
 
-## D006：下一步计划改 MessageConsumer 固定 worker pool
-
-状态：待执行。
-
-目标：
-
-将当前“每条消息创建一个 task”的模型，改成固定 worker pool。
-
-原因：
-
-当前模型即使有 semaphore，也只能限制并发处理数量，不能限制已创建 task 的数量。消息积压时可能产生大量等待 task。
-
-目标模型：
-
-1. consumer 启动时创建固定数量 worker。
-2. worker 数量等于 `max_concurrent`。
-3. 每个 worker 循环从 queue 取消息。
-4. 不再每条消息创建无界 task。
-5. stop 时 cancel workers 并 gather with timeout。
-
-## D007：后续需要引入 reconnect generation
+## D006：后续需要引入 reconnect generation
 
 状态：待执行。
 
@@ -136,7 +116,7 @@
 3. cleanup 前检查 generation 是否仍是当前 generation。
 4. 过期 task 不能关闭新 websocket、不能停止新 consumer、不能覆盖新状态。
 
-## D008：后续需要 graceful shutdown
+## D007：后续需要 graceful shutdown
 
 状态：待执行。
 
@@ -160,3 +140,50 @@
 禁止：
 
 不要先 stop event loop，再尝试执行 async cleanup。
+
+## D008：当前下一步任务是 T002
+
+状态：已确认。
+
+说明：
+
+`T001：MessageConsumer 固定 worker pool` 完成后，下一步稳定性任务是 `T002：reconnect lifecycle lock + generation`。
+
+## D009：MessageConsumer 已改为固定 worker pool
+
+状态：已完成。
+
+修改文件：
+
+1. `Message/core/consumer.py`
+
+决策：
+
+将 `MessageConsumer` 从“每条消息创建一个 asyncio task”的模式改为“固定 worker pool”模式。
+
+原因：
+
+旧模型即使通过 semaphore 限制并发处理数量，也不能限制已创建 task 的数量。消息积压或断线重连场景下，等待中的 task 可能持续增长并推高内存占用。
+
+已完成内容：
+
+1. `MessageConsumer.start()` 按 `max_concurrent` 固定创建 worker task。
+2. 新增 `_worker_tasks` 记录 worker task 集合。
+3. 新增 `_worker_loop(worker_id)`，worker 循环从 queue 读取消息并调用原 `_process_message()`。
+4. 不再按每条消息无限 `create_task(_process_message)`。
+5. `MessageConsumer.stop()` 会 cancel worker tasks，并通过 `asyncio.gather(..., return_exceptions=True)` + timeout 等待退出。
+6. `diagnostic_state()` 增加 `worker_count` 和 `worker_task_ids`。
+7. 保持 handler 执行逻辑不变。
+8. 保持 `queue_name = pdd_{shop_id}` 不变。
+
+验证结果：
+
+1. `python -m py_compile Message/core/consumer.py Message/__init__.py` 通过。
+2. `max_concurrent=3` 时 `worker_count == 3`。
+3. 连续 put 12 条测试消息时 worker task id 保持不变。
+4. `consumer._tasks == 0`。
+5. `stop_consumer(timeout=5.0)` 后 `running=False` 且 `worker_count == 0`。
+
+后续：
+
+下一步执行 `T002：reconnect lifecycle lock + generation`。

@@ -24,29 +24,43 @@
 
 验收：
 
-- 同一个 queue_name 重复 setup 不重复创建 consumer。
+- 同一个 `queue_name` 重复 setup 不重复创建 consumer。
 - 不重复 add handler。
 - 不无条件 recreate queue。
-- `py_compile` 通过。
-- 幂等测试通过。
+- `python -m py_compile` 通过。
+- 内联异步幂等测试通过。
 
 ## T001：MessageConsumer 固定 worker pool
 
-状态：待执行。
+状态：已完成。
 
 目标：
 
 把当前每条消息创建一个 `_process_message` task 的模型，改为固定 worker pool。
 
-要求：
+修改文件：
 
-1. `max_concurrent=10` 时最多创建 10 个 worker task。
-2. worker 循环 `queue.get()`。
-3. 不再无限 create_task。
-4. `stop()` 能 cancel workers。
-5. `stop()` 使用 gather with timeout。
-6. 保留 handler 执行逻辑。
-7. 不修改业务 handler。
+- `Message/core/consumer.py`
+
+已完成内容：
+
+- `MessageConsumer.start()` 按 `max_concurrent` 固定创建 worker task。
+- 新增 `_worker_tasks` 记录 worker task 集合。
+- 新增 `_worker_loop(worker_id)`，每个 worker 循环从 queue 读取消息并调用原 `_process_message()`。
+- 不再在每条消息到来时无限 `create_task(_process_message)`。
+- `MessageConsumer.stop()` 会 cancel worker tasks，并通过 `asyncio.gather(..., return_exceptions=True)` + timeout 等待退出。
+- `diagnostic_state()` 增加 `worker_count` 和 `worker_task_ids`。
+- 保持 handler 执行逻辑不变。
+- 保持 add handler 去重逻辑不变。
+- 保持 `MessageConsumerManager.create_consumer()` / `stop_consumer(timeout=5.0)` 兼容。
+
+验证：
+
+- `python -m py_compile Message/core/consumer.py Message/__init__.py` 通过。
+- `max_concurrent=3` 时 `worker_count == 3`。
+- 连续 put 12 条测试消息时 worker task id 保持不变。
+- `consumer._tasks == 0`。
+- `stop_consumer(timeout=5.0)` 后 `running=False` 且 `worker_count == 0`。
 
 ## T002：reconnect lifecycle lock + generation
 
@@ -116,15 +130,7 @@
 
 目标：
 
-扫描两个项目中的：
-
-- Windows 路径
-- localhost
-- 127.0.0.1
-- 硬编码端口
-- 绝对路径
-- bat/ps1 依赖
-- 密钥/token/cookie 风险
+扫描两个项目中的 Windows 路径、localhost、127.0.0.1、硬编码端口、绝对路径、bat/ps1 依赖、密钥/token/cookie 风险。
 
 只输出报告，不改代码。
 
@@ -134,20 +140,7 @@
 
 目标：
 
-列出：
-
-- FastGPT
-- MongoDB
-- PostgreSQL
-- Redis
-- MinIO
-- Ollama
-- proxy
-- FastAPI
-- PyQt
-- WebSocket worker
-
-输出依赖图和启动顺序。
+列出 FastGPT、MongoDB、PostgreSQL、Redis、MinIO、Ollama、proxy、FastAPI、PyQt、WebSocket worker 的依赖图和启动顺序。
 
 ## T012：梳理配置来源
 
@@ -155,16 +148,7 @@
 
 目标：
 
-梳理当前配置来自哪里：
-
-- `config.py`
-- `config.json`
-- `.env`
-- 数据库
-- UI 输入
-- 硬编码代码
-
-输出配置迁移建议。
+梳理当前配置来自 `config.py`、`config.json`、`.env`、数据库、UI 输入或硬编码代码，并输出配置迁移建议。
 
 ---
 
@@ -249,3 +233,9 @@
 ## T052：增加回滚文档
 
 状态：待执行。
+
+---
+
+## 下一步
+
+下一步建议执行：`T002：reconnect lifecycle lock + generation`。
