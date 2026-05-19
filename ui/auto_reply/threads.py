@@ -1,5 +1,6 @@
 # 后台线程模块
 import asyncio
+from concurrent.futures import TimeoutError as FutureTimeoutError
 from PyQt6.QtCore import QThread, pyqtSignal
 from PyQt6.QtGui import QPixmap, QPainter, QPainterPath
 from PyQt6.QtCore import Qt
@@ -59,7 +60,11 @@ class AutoReplyThread(QThread):
     def __init__(self, account_data: dict):
         super().__init__()
         self.account_data = account_data
+        self.loop = None
         self.channel = None
+        self._start_task = None
+        self._shutdown_started = False
+        self._shutdown_complete = False
         self.logger = get_logger("AutoReplyThread")
 
     def run(self):
@@ -99,14 +104,57 @@ class AutoReplyThread(QThread):
             self.logger.error(f"自动回复线程启动失败: {e}")
             self.connection_failed.emit(str(e))
         finally:
-            if self.channel:
+            if self.channel and not self._shutdown_complete and self.loop and not self.loop.is_closed():
                 try:
+                    self.logger.info(
+                        f"自动回复线程兜底清理连接: shutdown_complete={self._shutdown_complete}, "
+                        f"loop_running={self.loop.is_running()}, loop_closed={self.loop.is_closed()}"
+                    )
                     self.loop.run_until_complete(self.channel.stop_all_connections())
+                    self._shutdown_complete = True
                 except Exception as cleanup_error:
                     self.logger.debug(f"自动回复线程清理连接失败: {cleanup_error}")
-            if self.loop.is_running():
+            if self.loop and self.loop.is_running():
                 self.loop.stop()
-            self.loop.close()
+            if self.loop and not self.loop.is_closed():
+                self.loop.close()
+
+    async def _shutdown_async(self):
+        """Gracefully stop channel resources before stopping the event loop."""
+        try:
+            self.logger.info("自动回复线程 graceful shutdown started")
+            if self.channel:
+                await self.channel.stop_all_connections()
+
+            current = asyncio.current_task()
+            pending = [
+                task for task in asyncio.all_tasks()
+                if task is not current and not task.done()
+            ]
+            self.logger.info(
+                f"自动回复线程 graceful shutdown pending tasks: "
+                f"pending_task_count={len(pending)}, tasks={[repr(task) for task in pending]}"
+            )
+
+            for task in pending:
+                task.cancel()
+
+            if pending:
+                try:
+                    await asyncio.wait_for(
+                        asyncio.gather(*pending, return_exceptions=True),
+                        timeout=5.0,
+                    )
+                except asyncio.TimeoutError:
+                    self.logger.warning(
+                        f"自动回复线程 graceful shutdown pending task timeout: "
+                        f"pending_task_count={len(pending)}"
+                    )
+
+            self._shutdown_complete = True
+            self.logger.info("自动回复线程 graceful shutdown complete")
+        except Exception as e:
+            self.logger.error(f"自动回复线程 graceful shutdown failed: {e}")
 
     def stop(self):
         """停止后端引擎"""
@@ -115,12 +163,41 @@ class AutoReplyThread(QThread):
                 self.channel.request_stop()
 
             # 停止事件循环（如果存在）
-            if hasattr(self, 'loop') and self.loop:
+            if not self.loop:
+                self.logger.debug("自动回复线程停止跳过: loop 不存在")
+                return
+            if self.loop.is_closed():
+                self.logger.warning("自动回复线程停止跳过: loop 已关闭")
+                return
+
+            if self._shutdown_started:
+                self.logger.warning(
+                    f"自动回复线程 shutdown 已开始，尝试停止 loop: "
+                    f"loop_running={self.loop.is_running()}, loop_closed={self.loop.is_closed()}"
+                )
                 if self.loop.is_running():
-                    for task in asyncio.all_tasks(self.loop):
-                        if not task.done():
-                            task.cancel()
                     self.loop.call_soon_threadsafe(self.loop.stop)
+                return
+
+            self._shutdown_started = True
+            self.logger.info(
+                f"自动回复线程 shutdown_started: loop_running={self.loop.is_running()}, "
+                f"loop_closed={self.loop.is_closed()}"
+            )
+
+            if self.loop.is_running():
+                future = asyncio.run_coroutine_threadsafe(self._shutdown_async(), self.loop)
+                try:
+                    future.result(timeout=5.0)
+                except FutureTimeoutError:
+                    self.logger.warning("自动回复线程 graceful shutdown future timeout")
+                except Exception as shutdown_error:
+                    self.logger.error(f"自动回复线程 graceful shutdown future failed: {shutdown_error}")
+                finally:
+                    self.logger.info("自动回复线程 fallback loop.stop")
+                    self.loop.call_soon_threadsafe(self.loop.stop)
+            else:
+                self.logger.warning("自动回复线程停止跳过: loop 未运行")
 
         except Exception as e:
             self.logger.error(f"停止自动回复线程失败: {e}")
