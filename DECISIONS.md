@@ -142,13 +142,13 @@
 
 已通过 D011、D012、D013 完成 graceful shutdown 的分阶段改造。
 
-## D008：当前下一步建议任务是 T006 或 T010
+## D008：当前下一步建议任务是 T010
 
 状态：已确认。
 
 说明：
 
-`T005` message trace 闭环已完成，下一步建议执行 `T006：历史隐私债日志清理` 或 `T010：Linux 兼容扫描`。
+`T006` 历史隐私债日志清理已完成，下一步建议执行 `T010：Windows 路径和硬编码配置扫描`。
 
 ## D009：MessageConsumer 已改为固定 worker pool
 
@@ -255,7 +255,45 @@
 
 后续：
 
-下一步建议执行 `T006：历史隐私债日志清理` 或 `T010：Linux 兼容扫描`。
+下一步建议执行 `T010：Windows 路径和硬编码配置扫描`。
+
+## D016：历史隐私债日志清理已完成
+
+状态：已完成。
+
+修改范围：
+
+1. Message handlers。
+2. PDD API request / response logs。
+3. FastGPT handler logs。
+4. `Reply.__str__()`。
+
+决策：
+
+将旧日志中可能输出完整用户消息、完整 AI 回复、回复预览、消息预览、原始 API 响应的位置，统一改为摘要字段。
+
+清理原则：
+
+1. 不记录完整用户消息。
+2. 不记录完整 AI 回复。
+3. 不记录 token / cookie / access_token / authorization。
+4. 不记录完整 `response.text` / `resp.text` / `result`。
+5. 统一使用 `length` / `hash` / `type` / `status_code` / `error_type` / `request_id` / `trace_id`。
+
+已知取舍：
+
+1. 调试日志可读性下降。
+2. 需要通过 `trace_id` 和数据库 / PDD 后台定位完整会话。
+
+验证结果：
+
+1. `python -m py_compile` 本轮修改文件通过。
+2. grep 检查新增 diff 中未发现完整 `content` / `reply` / `response.text` / `resp.text` / `result` 输出。
+3. grep 检查未发现 token / cookie / access_token / authorization 值输出。
+
+后续：
+
+下一步建议执行 `T010：Windows 路径和硬编码配置扫描`。
 
 ## D015：message trace 闭环已完成
 
@@ -301,6 +339,20 @@ final_status 语义：
 3. `pdd.ai.request.started` / `pdd.ai.request.succeeded` / `pdd.ai.request.failed` 只用于真实 FastGPT 调用边界。
 4. `pdd.reply.send.succeeded` 只在 PDD 明确返回 ok 时记录。
 5. unknown delivery 使用 `pdd.reply.send.call_succeeded status=unknown_delivery`。
+
+主要事件：
+
+1. `pdd.message.received`
+2. `pdd.message.queued`
+3. `pdd.consumer.dequeued`
+4. `pdd.pipeline.started`
+5. `pdd.ai.request.started`
+6. `pdd.ai.request.succeeded`
+7. `pdd.reply.send.started`
+8. `pdd.reply.send.succeeded`
+9. `pdd.reply.send.failed`
+10. `pdd.reply.send.call_succeeded status=unknown_delivery`
+11. `pdd.message.completed final_status=...`
 
 隐私原则：
 
@@ -460,3 +512,64 @@ T005-A.1 小补丁：
 后续：
 
 下一步建议执行 `T006：历史隐私债日志清理` 或 `T010：Linux 兼容扫描`。
+
+## D017: T021-A/B 统一配置加载进展
+
+状态：已完成。
+
+相关任务：
+
+- `T021-A`: 统一配置加载前置审计已完成。
+- `T021-B`: 服务 URL 和密钥统一读取已完成。
+
+修改文件：
+
+- `core/settings.py`
+- `app.py`
+- `Message/handlers/fastgpt_handler.py`
+- `core/config.py`
+- `core/config_manager.py`
+- `docs/config/ENVIRONMENT_VARIABLES.md`
+- `docs/config/T021_CONFIG_LOADING_AUDIT.md`
+
+决策：
+
+- 新增轻量 `core/settings.py` 作为服务 URL 和密钥类配置的集中读取层。
+- `core/settings.py` 统一加载 `.env`，使用 `override=False`，保持外部环境变量优先。
+- `core/settings.py` 提供 `get_str()`、`get_int()`、`get_bool()`。
+- 当前统一读取 `FASTGPT_BASE_URL`、`FASTGPT_API_KEY`、`SESSION_COMPRESS_BASE_URL`、`SESSION_COMPRESS_API_KEY`、`LLM_API_BASE`、`LLM_API_KEY`、`LOCAL_MODEL_BASE_URL`。
+
+默认值策略：
+
+- `APP_ENV=local` 时使用 Windows/local 友好的 `localhost` / `127.0.0.1` 默认值。
+- `APP_ENV=linux` 或 `APP_ENV=production` 时使用 Docker service name 默认值，例如 `fastgpt`、`ollama`、`ollama-proxy`。
+- 生产环境仍建议显式配置服务 URL 和密钥，不依赖推断默认值。
+
+已知限制：
+
+- `core/settings.py` 是 import-time / startup 配置。
+- UI 修改 `.env` 后，不承诺当前进程热更新已导入的 settings 常量。
+- `ConfigManager` 使用 `override=False` 后，外部环境变量优先于 `.env`。
+
+未改范围：
+
+- Redis。
+- `DATA_DIR` / `LOG_DIR` / `DB_PATH`。
+- Playwright。
+- Docker。
+- customer-agent-coze。
+- 业务逻辑。
+
+验证结果：
+
+- `python -m py_compile core/settings.py app.py Message/handlers/fastgpt_handler.py core/config.py core/config_manager.py` 通过。
+- `APP_ENV=local` 默认 FastGPT 为 `http://localhost:3000/api`。
+- `APP_ENV=linux` 默认 FastGPT 为 `http://fastgpt:3000/api`。
+- 显式 `FASTGPT_BASE_URL` 优先生效。
+- 显式 `LOCAL_MODEL_BASE_URL` 优先生效。
+- 未修改 `.env`。
+- 未修改 customer-agent-coze。
+
+后续：
+
+- 下一步任务为 `T021-C`: 统一 `DATA_DIR` / `LOG_DIR` / `CACHE_DIR` / `DB_PATH`。

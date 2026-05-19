@@ -391,6 +391,30 @@ final_status 语义：
 - unknown delivery 分支的 `event=pdd.message.completed final_status` 改为 `reply_delivery_unknown`。
 - `_send_reply()` 返回值仍保持 `False`，业务行为不变。
 
+完整 message trace 链路：
+
+- WebSocket -> Context -> Queue -> Consumer -> Handler -> Pipeline -> AI -> SendMessage。
+
+主要事件：
+
+- `pdd.message.received`
+- `pdd.message.queued`
+- `pdd.consumer.dequeued`
+- `pdd.pipeline.started`
+- `pdd.ai.request.started`
+- `pdd.ai.request.succeeded`
+- `pdd.reply.send.started`
+- `pdd.reply.send.succeeded`
+- `pdd.reply.send.failed`
+- `pdd.reply.send.call_succeeded status=unknown_delivery`
+- `pdd.message.completed final_status=...`
+
+隐私原则：
+
+- 不记录完整用户消息。
+- 不记录完整 AI 回复。
+- 只记录 `content_length` / `content_hash` / `reply_length` / `reply_hash`。
+
 验证：
 
 - `python -m py_compile Message/handlers/ai_handler.py Channel/pinduoduo/utils/API/send_message.py` 通过。
@@ -402,11 +426,37 @@ final_status 语义：
 
 ## T006：历史隐私债日志清理
 
-状态：待执行。
+状态：已完成。
 
 目标：
 
 清理历史日志中的完整或截断正文输出，例如旧的 `log_message(... 回复: ...)`、静态规则命中正文、SendMessage 原始 result 直出等，统一改为 length/hash 和安全摘要。
+
+修改范围：
+
+- Message handlers。
+- PDD API request / response logs。
+- FastGPT handler logs。
+- `Reply.__str__()`。
+
+清理原则：
+
+- 不记录完整用户消息。
+- 不记录完整 AI 回复。
+- 不记录 token / cookie / access_token / authorization。
+- 不记录完整 `response.text` / `resp.text` / `result`。
+- 统一使用 `length` / `hash` / `type` / `status_code` / `error_type` / `request_id` / `trace_id`。
+
+已知取舍：
+
+- 调试日志可读性下降。
+- 需要通过 `trace_id` 和数据库 / PDD 后台定位完整会话。
+
+验证：
+
+- `python -m py_compile` 本轮修改文件通过。
+- grep 检查新增 diff 中未发现完整 `content` / `reply` / `response.text` / `resp.text` / `result` 输出。
+- grep 检查未发现 token / cookie / access_token / authorization 值输出。
 
 ---
 
@@ -526,4 +576,74 @@ final_status 语义：
 
 ## 下一步
 
-下一步建议执行：`T006：历史隐私债日志清理` 或 `T010：Linux 兼容扫描`。
+下一步建议执行：`T010：Windows 路径和硬编码配置扫描`。
+
+---
+
+## T021-A: 统一配置加载前置审计
+
+状态：已完成。
+
+输出文件：
+
+- `docs/config/T021_CONFIG_LOADING_AUDIT.md`
+
+完成内容：
+
+- 梳理当前配置来源：环境变量、`.env`、`core/config.py`、`core/config_manager.py`、旧 `config.py/config.json`、数据库 `AppConfig`、UI 输入、脚本参数、硬编码默认值。
+- 扫描 customer-agent-refactor-v3 与可访问的 customer-agent-coze。
+- 识别服务 URL、密钥、路径、Redis、Playwright、日志、DB 路径等配置分散点。
+- 拆分后续最小改造任务：T021-B 到 T021-F。
+
+## T021-B: 服务 URL 和密钥统一读取
+
+状态：已完成。
+
+修改文件：
+
+- `core/settings.py`
+- `app.py`
+- `Message/handlers/fastgpt_handler.py`
+- `core/config.py`
+- `core/config_manager.py`
+- `docs/config/ENVIRONMENT_VARIABLES.md`
+
+完成内容：
+
+- 新增轻量 `core/settings.py`，统一加载 `.env`，`override=False`。
+- 提供 `get_str()`、`get_int()`、`get_bool()`。
+- 统一读取 `FASTGPT_BASE_URL`、`FASTGPT_API_KEY`、`SESSION_COMPRESS_BASE_URL`、`SESSION_COMPRESS_API_KEY`、`LLM_API_BASE`、`LLM_API_KEY`、`LOCAL_MODEL_BASE_URL`。
+- `APP_ENV=local` 时默认使用 `localhost` / `127.0.0.1`。
+- `APP_ENV=linux` 或 `APP_ENV=production` 时默认使用 Docker service name。
+- `app.py` 的 FastGPT API key / base URL 改为从 settings 获取，并保留 DB 历史兼容 fallback。
+- `FastGPTHandler` 默认 URL 不再写死在构造函数参数中，显式传入 URL 仍优先生效。
+- `SESSION_COMPRESS_BASE_URL` / `SESSION_COMPRESS_API_KEY` 改为从 settings helper 获取。
+- `ConfigManager` 的 LLM / local model 默认 URL 复用 settings。
+
+验证：
+
+- `python -m py_compile core/settings.py app.py Message/handlers/fastgpt_handler.py core/config.py core/config_manager.py` 通过。
+- `APP_ENV=local` 默认 FastGPT 为 `http://localhost:3000/api`。
+- `APP_ENV=linux` 默认 FastGPT 为 `http://fastgpt:3000/api`。
+- 显式 `FASTGPT_BASE_URL` 优先生效。
+- 显式 `LOCAL_MODEL_BASE_URL` 优先生效。
+- 未修改 `.env`。
+- 未修改 customer-agent-coze。
+
+已知限制：
+
+- `core/settings.py` 是 import-time / startup 配置，UI 修改 `.env` 后不承诺当前进程热更新。
+- `ConfigManager` 使用 `override=False` 后，外部环境变量优先于 `.env`。
+
+未改范围：
+
+- Redis。
+- `DATA_DIR` / `LOG_DIR` / `DB_PATH`。
+- Playwright。
+- Docker。
+- customer-agent-coze。
+- 业务逻辑。
+
+下一步任务：
+
+- `T021-C`: 统一 `DATA_DIR` / `LOG_DIR` / `CACHE_DIR` / `DB_PATH`。
