@@ -8,6 +8,7 @@
 import os
 import sys
 from typing import Dict, Any
+from core import settings
 from loguru import logger
 
 class SimpleLoggerConfig:
@@ -65,6 +66,7 @@ class SimpleLoggerConfig:
         """根据环境配置loguru"""
         # 移除现有处理器
         logger.remove()
+        settings.ensure_log_dir()
 
         # 根据环境配置不同日志
         if self.environment == "development":
@@ -76,7 +78,7 @@ class SimpleLoggerConfig:
                 colorize=True
             )
             logger.add(
-                "logs/dev.log",
+                settings.log_file_path("dev.log"),
                 format="{time:YYYY-MM-DD HH:mm:ss.SSS} | {level: <8} | {name}:{function}:{line} - {message}",
                 level="DEBUG",
                 rotation="5 MB",
@@ -85,7 +87,7 @@ class SimpleLoggerConfig:
         elif self.environment == "testing":
             # 测试环境：仅文件日志
             logger.add(
-                "logs/test.log",
+                settings.log_file_path("test.log"),
                 format="{time:YYYY-MM-DD HH:mm:ss.SSS} | {level: <8} | {name}:{function}:{line} - {message}",
                 level=self.log_level,
                 rotation="10 MB",
@@ -100,7 +102,7 @@ class SimpleLoggerConfig:
                 filter=lambda record: record["level"].name in ["WARNING", "ERROR", "CRITICAL"]
             )
             logger.add(
-                "logs/app.log",
+                settings.log_file_path("app.log"),
                 format="{time:YYYY-MM-DD HH:mm:ss.SSS} | {level: <8} | {name}:{function}:{line} - {message}",
                 level=self.log_level,
                 rotation=self.get_log_rotation_size(),

@@ -347,6 +347,7 @@ def configure_standard_services(config_instance: Any = None) -> 'DIContainer':
     """
     # 提前导入，避免 Python 局部变量作用域问题
     from core.connection_status import ConnectionStatusManager
+    from core import settings
     from database.db_manager import DatabaseManager
 
     # 1. ConnectionStatusManager（最独立，先注册）
@@ -358,7 +359,7 @@ def configure_standard_services(config_instance: Any = None) -> 'DIContainer':
 
     # 2. DatabaseManager
     if not container.is_registered(DatabaseManager):
-        db_path = "./temp/channel_shop.db"
+        db_path = str(settings.db_path())
         if config_instance is not None:
             db_path = config_instance.get("db_path", db_path)
         container.register_singleton(

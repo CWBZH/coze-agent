@@ -179,3 +179,34 @@ Default behavior:
 - `APP_ENV=linux` or `APP_ENV=production`: `FASTGPT_BASE_URL=http://fastgpt:3000/api`, `LOCAL_MODEL_BASE_URL=http://ollama:11434`, `SESSION_COMPRESS_BASE_URL=http://ollama-proxy:11435`
 
 Production deployments should explicitly set service URLs and keys in environment variables or local `.env` files. Do not put real keys in code, docs, JSON examples, or images.
+
+## T021-C path settings update
+
+`customer-agent-refactor-v3` now centralizes runtime path settings through `core/settings.py`.
+
+Currently centralized:
+
+- `DATA_DIR`
+- `LOG_DIR`
+- `CACHE_DIR`
+- `EXPORT_DIR`
+- `DB_PATH`
+
+Path priority:
+
+- Explicit `DB_PATH` wins.
+- If `DB_PATH` is not set, database defaults to `DATA_DIR/channel_shop.db`.
+- `DATA_DIR` defaults to `./temp` to preserve the legacy Windows local database location.
+- `LOG_DIR` defaults to `./logs`.
+- `CACHE_DIR` defaults to `DATA_DIR/cache`.
+- `EXPORT_DIR` defaults to `DATA_DIR/exports`.
+
+Linux delivery examples:
+
+- `DATA_DIR=/app/data`
+- `LOG_DIR=/app/logs`
+- `CACHE_DIR=/app/cache`
+- `EXPORT_DIR=/app/export`
+- `DB_PATH=/app/data/channel_shop.db`
+
+No automatic database migration is performed. Existing deployments that rely on `./temp/channel_shop.db` keep using that file unless `DATA_DIR` or `DB_PATH` is explicitly changed.

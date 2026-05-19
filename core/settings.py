@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Union
 
 try:
     from dotenv import load_dotenv
@@ -54,6 +54,23 @@ def get_bool(name: str, default: bool = False) -> bool:
     return default
 
 
+PathValue = Union[str, Path]
+
+
+def resolve_path(value: PathValue) -> Path:
+    """Resolve project-relative paths without creating directories."""
+    path = Path(value).expanduser()
+    if not path.is_absolute():
+        path = BASE_DIR / path
+    return path
+
+
+def ensure_dir(path: PathValue) -> Path:
+    resolved = resolve_path(path)
+    resolved.mkdir(parents=True, exist_ok=True)
+    return resolved
+
+
 def _app_env() -> str:
     return (get_str("APP_ENV", "local") or "local").strip().lower()
 
@@ -91,6 +108,12 @@ LLM_API_BASE = (get_str("LLM_API_BASE", "https://ark.cn-beijing.volces.com/api/v
 LLM_API_KEY = get_str("LLM_API_KEY", "") or ""
 LOCAL_MODEL_BASE_URL = (get_str("LOCAL_MODEL_BASE_URL", _default_local_model_base_url()) or "").rstrip("/")
 
+DATA_DIR = resolve_path(get_str("DATA_DIR", "./temp") or "./temp")
+LOG_DIR = resolve_path(get_str("LOG_DIR", "./logs") or "./logs")
+CACHE_DIR = resolve_path(get_str("CACHE_DIR", str(DATA_DIR / "cache")) or str(DATA_DIR / "cache"))
+EXPORT_DIR = resolve_path(get_str("EXPORT_DIR", str(DATA_DIR / "exports")) or str(DATA_DIR / "exports"))
+DB_PATH = resolve_path(get_str("DB_PATH", str(DATA_DIR / "channel_shop.db")) or str(DATA_DIR / "channel_shop.db"))
+
 
 def fastgpt_base_url() -> str:
     return FASTGPT_BASE_URL
@@ -118,3 +141,47 @@ def llm_api_key() -> str:
 
 def local_model_base_url() -> str:
     return LOCAL_MODEL_BASE_URL
+
+
+def data_dir() -> Path:
+    return DATA_DIR
+
+
+def log_dir() -> Path:
+    return LOG_DIR
+
+
+def cache_dir() -> Path:
+    return CACHE_DIR
+
+
+def export_dir() -> Path:
+    return EXPORT_DIR
+
+
+def db_path() -> Path:
+    return DB_PATH
+
+
+def ensure_data_dir() -> Path:
+    return ensure_dir(DATA_DIR)
+
+
+def ensure_log_dir() -> Path:
+    return ensure_dir(LOG_DIR)
+
+
+def ensure_cache_dir() -> Path:
+    return ensure_dir(CACHE_DIR)
+
+
+def ensure_export_dir() -> Path:
+    return ensure_dir(EXPORT_DIR)
+
+
+def ensure_db_parent() -> Path:
+    return ensure_dir(DB_PATH.parent)
+
+
+def log_file_path(filename: str = "app.log") -> Path:
+    return LOG_DIR / filename

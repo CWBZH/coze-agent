@@ -13,6 +13,7 @@ from datetime import datetime
 from typing import Any, Dict, Optional, Union
 from pathlib import Path
 
+from core import settings
 from loguru import logger
 
 # 修复 Windows 控制台中文乱码
@@ -45,12 +46,12 @@ except ImportError:
 
 # 默认配置
 DEFAULT_LOG_LEVEL = "info"
-DEFAULT_LOG_FILE = "logs/app.log"
+DEFAULT_LOG_FILE = settings.log_file_path("app.log")
 MAX_LOG_SIZE = "10 MB"
 BACKUP_COUNT = 5
 
 # 确保日志目录存在
-os.makedirs(os.path.dirname(DEFAULT_LOG_FILE), exist_ok=True)
+settings.ensure_log_dir()
 
 # 配置loguru
 log_level = os.environ.get("LOG_LEVEL", DEFAULT_LOG_LEVEL).lower()

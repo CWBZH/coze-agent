@@ -7,6 +7,8 @@ import json
 import os
 from datetime import datetime
 
+from core import settings
+
 
 MANUAL_FIELD_KEYS = [
     "category",
@@ -29,7 +31,8 @@ def export_fastgpt_csv(db_manager, shop_db_id: int, output_path: str = None) -> 
     from database.models import ProductKnowledge, Shop
 
     if output_path is None:
-        output_path = f"./temp/fastgpt_export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+        output_path = settings.ensure_export_dir() / f"fastgpt_export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+    output_path = str(output_path)
     os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
 
     with db_manager.session_scope() as session:

@@ -10,15 +10,17 @@ from database.models import (Base, Channel, Shop, Account, ProductKnowledge, Key
                               CustomerServiceKnowledge, AppConfig,
                               Conversation, AgentMessage)
 from typing import Any, Dict, List, Optional
+from core import settings
 from utils.logger_loguru import get_logger
 
 
 class DatabaseManager:
     """Database manager — 方法签名与 V2.0 完全兼容，返回 dict 而非 ORM 对象。"""
 
-    def __init__(self, db_path: str = './temp/channel_shop.db'):
-        os.makedirs(os.path.dirname(db_path), exist_ok=True)
-        self.engine = create_engine(f'sqlite:///{db_path}')
+    def __init__(self, db_path: str = None):
+        db_file = settings.resolve_path(db_path) if db_path else settings.db_path()
+        settings.ensure_dir(db_file.parent)
+        self.engine = create_engine(f'sqlite:///{db_file}')
         self.Session = sessionmaker(bind=self.engine, expire_on_commit=False)
         Base.metadata.create_all(self.engine)
         self.logger = get_logger()
