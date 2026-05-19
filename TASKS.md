@@ -647,3 +647,273 @@ final_status 语义：
 下一步任务：
 
 - `T021-C`: 统一 `DATA_DIR` / `LOG_DIR` / `CACHE_DIR` / `DB_PATH`。
+
+## T021-C: 统一 DATA_DIR / LOG_DIR / CACHE_DIR / DB_PATH 路径配置
+
+状态：已完成。
+
+修改文件：
+
+- `core/settings.py`
+- `database/db_manager.py`
+- `core/di_container.py`
+- `utils/runtime_path.py`
+- `utils/logger_loguru.py`
+- `utils/logger_config.py`
+- `Knowledge/csv_exporter.py`
+- `docs/config/ENVIRONMENT_VARIABLES.md`
+
+完成内容：
+
+- `core/settings.py` 增加 `DATA_DIR`、`LOG_DIR`、`CACHE_DIR`、`EXPORT_DIR`、`DB_PATH` 路径配置读取。
+- 增加 `data_dir()`、`log_dir()`、`cache_dir()`、`export_dir()`、`db_path()` 等 helper，返回 `pathlib.Path`。
+- `DatabaseManager` 默认路径改为来自 `settings.db_path()`，显式传入 `db_path` 仍优先生效。
+- `core/di_container.py` 默认 `DatabaseManager` 路径改为来自 `settings.db_path()`，保留 `config_instance` 覆盖逻辑。
+- `utils/runtime_path.py` 保留公开函数名，并接入 `settings` 路径配置。
+- `logger_loguru.py` / `logger_config.py` 使用 `LOG_DIR` 生成日志文件路径。
+- `Knowledge/csv_exporter.py` 默认导出目录改为 `EXPORT_DIR`。
+
+路径优先级：
+
+- `DB_PATH` 显式配置优先。
+- 未配置 `DB_PATH` 时使用 `DATA_DIR/channel_shop.db`。
+- `DATA_DIR` 默认 `./temp`，兼容旧 Windows 本地 DB。
+- `LOG_DIR` 默认 `./logs`。
+- `CACHE_DIR` 默认 `DATA_DIR/cache`。
+- `EXPORT_DIR` 默认 `DATA_DIR/exports`。
+
+未做事项：
+
+- 不迁移 DB 文件。
+- 不改 DB schema。
+- 不改 Redis。
+- 不改 Playwright。
+- 不改 Docker。
+- 不改 customer-agent-coze。
+- 不改业务逻辑。
+
+已知风险：
+
+- CSV 默认导出目录从 `./temp` 调整为 `DATA_DIR/exports`。
+- `utils/runtime_path.py` diff 较大，但公开函数名应保持兼容。
+
+验证：
+
+- `python -m py_compile core/settings.py database/db_manager.py core/di_container.py utils/runtime_path.py utils/logger_loguru.py utils/logger_config.py Knowledge/csv_exporter.py` 通过。
+- fake env path 测试通过：`DATA_DIR=/tmp/agent-data` 时默认 DB 指向 `/tmp/agent-data/channel_shop.db`。
+- fake env path 测试通过：`DB_PATH=/tmp/custom.db` 时显式 DB_PATH 优先生效。
+- fake env path 测试通过：`LOG_DIR=/tmp/agent-logs` 时日志目录使用该值。
+- 未设置路径变量时仍默认 `./temp/channel_shop.db`。
+- `git diff --check` 通过。
+- 未修改 `.env`。
+- 未发现真实 key。
+
+下一步任务：
+
+- `T021-D`: 统一 Redis 配置。
+
+---
+
+## T021-D: Redis Settings Centralization
+
+Status: completed.
+
+Changed files:
+- `core/settings.py`
+- `core/config.py`
+- `docs/config/ENVIRONMENT_VARIABLES.md`
+
+Summary:
+- Added centralized `REDIS_HOST`, `REDIS_PORT`, `REDIS_PASSWORD`, and `REDIS_DB` loading in `core/settings.py`.
+- `APP_ENV=local` defaults Redis host to `localhost`.
+- `APP_ENV=linux` / `production` defaults Redis host to `redis`.
+- Removed the hardcoded `REDIS_PASSWORD=123456` default; empty password remains the safe code default unless explicitly configured.
+- Redis lock and Fail-Safe business semantics were not changed.
+
+Verification:
+- `python -m py_compile core/settings.py core/config.py` passed.
+- Fake env tests passed for local/linux Redis defaults and explicit env override.
+- `.env` was not modified.
+
+## T021-E: Playwright Browser Path Centralization
+
+Status: completed.
+
+Changed files:
+- `core/settings.py`
+- `utils/playwright_path.py`
+- `Channel/pinduoduo/pdd_login.py`
+- `docs/config/ENVIRONMENT_VARIABLES.md`
+
+Summary:
+- Added `PLAYWRIGHT_BROWSERS_PATH` and `BROWSER_CACHE_DIR` loading in `core/settings.py`.
+- Browser path priority is `PLAYWRIGHT_BROWSERS_PATH` > `BROWSER_CACHE_DIR` > project `.browsers` > Windows `LOCALAPPDATA/ms-playwright` fallback.
+- `utils/playwright_path.py` now reads browser paths from settings while preserving public function names.
+- Browser detection supports Windows and Linux Chromium/headless_shell layouts.
+- `pdd_login.py` no longer unconditionally overwrites `PLAYWRIGHT_BROWSERS_PATH` during import.
+- Windows local fallback and login behavior were preserved.
+
+Verification:
+- `python -m py_compile core/settings.py utils/playwright_path.py Channel/pinduoduo/pdd_login.py app.py` passed.
+- Fake env tests passed for explicit `PLAYWRIGHT_BROWSERS_PATH`, explicit `BROWSER_CACHE_DIR`, project `.browsers`, and Windows fallback candidates.
+- `.env` was not modified.
+
+## T021-F: customer-agent-coze Proxy / Ollama / FastGPT Tool Config
+
+Status: completed.
+
+Changed files:
+- `E:\develop\customer-agent-coze\ollama_proxy.py`
+- `E:\develop\customer-agent-coze\projects\src\tools\knowledge_tool.py`
+- `E:\develop\customer-agent-coze\projects\src\tools\llm_tool.py`
+- `E:\develop\customer-agent-coze\projects\src\agents\agent.py`
+- `E:\develop\customer-agent-coze\projects\config\agent_llm_config.json`
+- `E:\develop\customer-agent-coze\projects\.env.example`
+- `docs/config/ENVIRONMENT_VARIABLES.md`
+
+Summary:
+- `ollama_proxy.py` uses `OLLAMA_BASE_URL` > `OLLAMA_URL` > `APP_ENV` default priority.
+- `PROXY_BIND_HOST` and `PROXY_PORT` are supported; CLI port argument still has the highest priority.
+- `DOUBAO_AUTH` takes precedence over `Bearer <LLM_API_KEY>`.
+- `knowledge_tool.py` uses explicit `KNOWLEDGE_BASE_URL` first, with local default `http://localhost:3000` and linux/production default `http://fastgpt:3000`.
+- `llm_tool.py` and `agent.py` use `LLM_BASE_URL` > `LLM_API_BASE` > non-sensitive JSON fallback for base URL.
+- `LLM_API_KEY` is read only from environment variables and is no longer read from JSON.
+- `agent_llm_config.json` keeps `api_key` empty and does not store real keys.
+- `projects/.env.example` documents proxy, Ollama, LLM, and Knowledge Base placeholders.
+
+Verification:
+- `python -m py_compile ollama_proxy.py projects/src/tools/knowledge_tool.py projects/src/tools/llm_tool.py projects/src/agents/agent.py` passed.
+- `python -m json.tool projects/config/agent_llm_config.json` passed.
+- Fake env tests passed for Ollama URL priority, Knowledge Base defaults, LLM base URL priority, and rejecting JSON `api_key` fallback.
+- grep found no real `ark-` or `Bearer ark-` secrets.
+
+## T021 Summary: Config Loading Centralization
+
+Status: completed.
+
+Key decisions:
+- Added `core/settings.py` as the lightweight config entrypoint for `customer-agent-refactor-v3`.
+- `APP_ENV=local` uses `localhost` / `127.0.0.1` defaults.
+- `APP_ENV=linux` / `production` uses Docker service-name defaults.
+- `DATA_DIR` defaults to `./temp` to preserve the legacy Windows local database location.
+- Explicit `DB_PATH` wins; no database file migration is performed automatically.
+- `REDIS_PASSWORD` no longer defaults to hardcoded `123456`.
+- `PLAYWRIGHT_BROWSERS_PATH` / `BROWSER_CACHE_DIR` are configurable while preserving Windows fallback.
+- In `customer-agent-coze`, `LLM_API_KEY` is environment-only and `agent_llm_config.json` must not store real keys.
+
+Known limitations:
+- `settings.py` is startup/import-time configuration and does not promise runtime hot reload.
+- `customer-agent-coze` is currently not a Git repository, so version governance must be handled separately.
+- Docker Compose is not completed.
+- Headless worker is not completed.
+- Health/status API is not completed.
+
+Next task:
+- `T060`: headless WebSocket worker pre-design.
+
+---
+
+## T060-A: headless WebSocket worker pre-design
+
+Status: completed.
+
+Output:
+- Read-only design for a Linux headless worker that reuses `PDDChannel`, `MessageConsumer`, existing DB/config/status services, and does not start PyQt.
+- Confirmed first production-safe model is one account per `PDDChannel` instance because `PDDChannel` still owns a single `self.ws`.
+
+## T060-B: headless worker skeleton
+
+Status: completed.
+
+Changed files:
+- `runtime/__init__.py`
+- `runtime/worker.py`
+- `runtime/account_loader.py`
+- `runtime/health.py`
+
+Summary:
+- Added `python -m runtime.worker` entrypoint.
+- Added `--dry-run`, `--status`, `--shop-id`, and `--user-id` skeleton behavior.
+- Sets `HEADLESS_MODE=1` before DI setup.
+- Does not import `app.py`, PyQt, or `QApplication`.
+- Does not start a real WebSocket in dry-run/status mode.
+
+## T060-C: headless worker single-account start
+
+Status: completed.
+
+Summary:
+- `python -m runtime.worker --shop-id <shop_id> --user-id <user_id>` can create one independent `PDDChannel` and call `start_account()`.
+- `--shop-id ... --user-id ... --dry-run` only validates/list accounts and does not connect WebSocket.
+- Shutdown calls `channel.stop_all_connections()` instead of cancelling all tasks directly.
+
+## T060-D: headless worker all-enabled orchestration
+
+Status: completed.
+
+Summary:
+- `--all-enabled` supports real multi-account orchestration.
+- Every account gets its own `PDDChannel` instance and its own asyncio task.
+- Worker maintains `account_key -> channel/task` mappings.
+- `--all-enabled --dry-run` still only lists candidate accounts.
+- Candidate rule remains `channel_name == "pinduoduo" and status == 1`; this is not a durable auto-reply-enabled flag.
+
+## T060-E: headless worker graceful shutdown diagnostics
+
+Status: completed.
+
+Summary:
+- Added `WorkerState` fields for started/shutdown timestamps, running/failed/stopped accounts, channel ids, task ids, errors, and exit reason.
+- Added account task lifecycle logs.
+- Added worker shutdown status snapshot fields.
+- Account start failure is isolated and does not kill the whole worker.
+
+## T060-G: deterministic shutdown control
+
+Status: completed.
+
+Summary:
+- Added deterministic shutdown triggers: `--run-seconds`, `--stop-file`, and `--shutdown-timeout`.
+- SIGINT/SIGTERM/Ctrl+C/run-seconds/stop-file all route through `request_shutdown()`.
+- Request shutdown is idempotent.
+- No HTTP service or Docker changes were added.
+
+## T060-G.1: Ctrl+C traceback cleanup
+
+Status: completed.
+
+Changed files:
+- `runtime/worker.py`
+
+Summary:
+- `signal.signal` fallback no longer calls the previous default interrupt handler after requesting shutdown.
+- `KeyboardInterrupt` routes through `request_shutdown(reason="keyboard_interrupt")`.
+- `CancelledError` during requested shutdown is treated as part of normal shutdown and does not leak traceback.
+- Outer `run()` catches `KeyboardInterrupt` / `CancelledError` and returns exit code `130`.
+- `run-seconds` / `stop-file` normal shutdown exits with code `0`.
+
+Verification:
+- `python -m py_compile runtime\worker.py runtime\health.py runtime\account_loader.py runtime\__init__.py` passed.
+- fake KeyboardInterrupt test stopped the channel and returned `130`.
+- fake CancelledError shutdown test did not print traceback.
+- `python -m runtime.worker --all-enabled --dry-run` passed.
+- `python -m runtime.worker --status` passed.
+
+## T060-G.2: consumer missing shutdown log noise cleanup
+
+Status: completed.
+
+Changed files:
+- `Message/core/consumer.py`
+- `Channel/pinduoduo/core/pdd_lifecycle.py`
+
+Summary:
+- `MessageConsumerManager.stop_consumer()` now accepts `missing_ok=False`.
+- Default behavior is unchanged: missing consumer still logs ERROR for non-idempotent paths.
+- Lifecycle shutdown cleanup passes `missing_ok=True`.
+- Missing consumer during repeated shutdown cleanup is logged as already absent and returns `True`.
+
+Verification:
+- `python -m py_compile Message\core\consumer.py Channel\pinduoduo\core\pdd_lifecycle.py` passed.
+- fake shutdown test confirmed first stop succeeds, second missing-ok stop returns `True` without ERROR.
+- default `missing_ok=False` behavior still logs an error for missing consumers.

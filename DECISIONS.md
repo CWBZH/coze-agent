@@ -573,3 +573,209 @@ T005-A.1 小补丁：
 后续：
 
 - 下一步任务为 `T021-C`: 统一 `DATA_DIR` / `LOG_DIR` / `CACHE_DIR` / `DB_PATH`。
+
+## D018: T021-C 路径配置集中化已完成
+
+状态：已完成。
+
+相关任务：
+
+- `T021-C`: 统一 `DATA_DIR` / `LOG_DIR` / `CACHE_DIR` / `DB_PATH` 路径配置已完成。
+
+修改文件：
+
+- `core/settings.py`
+- `database/db_manager.py`
+- `core/di_container.py`
+- `utils/runtime_path.py`
+- `utils/logger_loguru.py`
+- `utils/logger_config.py`
+- `Knowledge/csv_exporter.py`
+- `docs/config/ENVIRONMENT_VARIABLES.md`
+
+决策：
+
+- `core/settings.py` 统一读取 `DATA_DIR`、`LOG_DIR`、`CACHE_DIR`、`EXPORT_DIR`、`DB_PATH`。
+- 路径 helper 使用 `pathlib.Path`。
+- 使用点按需创建目录，避免在 import 阶段创建过多无关目录。
+- `DatabaseManager` 显式传入 `db_path` 时继续优先生效。
+- `core/di_container.py` 保留 `config_instance` 覆盖逻辑。
+- `utils/runtime_path.py` 保留原公开函数名，并接入集中路径配置。
+
+路径优先级：
+
+- `DB_PATH` 显式配置优先。
+- 未配置 `DB_PATH` 时使用 `DATA_DIR/channel_shop.db`。
+- `DATA_DIR` 默认 `./temp`，兼容旧 Windows 本地 DB。
+- `LOG_DIR` 默认 `./logs`。
+- `CACHE_DIR` 默认 `DATA_DIR/cache`。
+- `EXPORT_DIR` 默认 `DATA_DIR/exports`。
+
+未做事项：
+
+- 不迁移 DB 文件。
+- 不改 DB schema。
+- 不改 Redis。
+- 不改 Playwright。
+- 不改 Docker。
+- 不改 customer-agent-coze。
+- 不改业务逻辑。
+
+已知风险：
+
+- CSV 默认导出目录从 `./temp` 调整为 `DATA_DIR/exports`。
+- `utils/runtime_path.py` diff 较大，但公开函数应保持兼容。
+
+验证结果：
+
+- `python -m py_compile core/settings.py database/db_manager.py core/di_container.py utils/runtime_path.py utils/logger_loguru.py utils/logger_config.py Knowledge/csv_exporter.py` 通过。
+- fake env path 测试通过：`DATA_DIR=/tmp/agent-data` 时默认 DB 指向 `/tmp/agent-data/channel_shop.db`。
+- fake env path 测试通过：`DB_PATH=/tmp/custom.db` 时显式 DB_PATH 优先生效。
+- fake env path 测试通过：`LOG_DIR=/tmp/agent-logs` 时日志目录使用该值。
+- 未设置路径变量时仍默认 `./temp/channel_shop.db`。
+- `git diff --check` 通过。
+- 未修改 `.env`。
+- 未发现真实 key。
+
+后续：
+
+- 下一步任务为 `T021-D`: 统一 Redis 配置。
+
+---
+
+## D019: T021 Config Loading Centralization Completed
+
+Status: completed.
+
+Related tasks:
+- `T021-A`: config loading audit completed.
+- `T021-B`: service URL / key centralization completed.
+- `T021-C`: `DATA_DIR` / `LOG_DIR` / `CACHE_DIR` / `DB_PATH` path centralization completed.
+- `T021-D`: Redis settings completed.
+- `T021-E`: Playwright browser path settings completed.
+- `T021-F`: `customer-agent-coze` / proxy / Ollama / FastGPT tool config completed.
+
+Key decisions:
+1. Added `core/settings.py` as the lightweight config entrypoint for `customer-agent-refactor-v3`.
+2. `core/settings.py` loads `.env` with `override=False`, keeping external environment variables first.
+3. `APP_ENV=local` uses `localhost` / `127.0.0.1` defaults.
+4. `APP_ENV=linux` / `production` uses Docker service-name defaults.
+5. `DATA_DIR` defaults to `./temp` to preserve legacy Windows local DB compatibility.
+6. Explicit `DB_PATH` wins; without it, DB path is `DATA_DIR/channel_shop.db`.
+7. No automatic database migration is performed and DB schema is not changed.
+8. `REDIS_PASSWORD` no longer defaults to hardcoded `123456`; production must configure it explicitly when needed.
+9. `PLAYWRIGHT_BROWSERS_PATH` / `BROWSER_CACHE_DIR` are configurable while preserving Windows `.browsers` / `LOCALAPPDATA/ms-playwright` fallback.
+10. In `customer-agent-coze`, `LLM_API_KEY` is environment-only and `agent_llm_config.json` no longer stores real keys.
+11. `OLLAMA_BASE_URL` takes precedence over legacy `OLLAMA_URL`; CLI proxy port still takes precedence over `PROXY_PORT`.
+12. `KNOWLEDGE_BASE_URL` defaults to `http://localhost:3000` locally and `http://fastgpt:3000` for linux/production.
+
+Not changed:
+- Docker Compose is not implemented.
+- Headless worker is not implemented.
+- Health/status API is not implemented.
+- PDDChannel / MessagePipeline / SendMessage business logic is not changed.
+- Windows local startup capability is not removed.
+
+Known limitations:
+1. `settings.py` is startup/import-time configuration and does not promise runtime hot reload.
+2. UI updates to `.env` do not guarantee automatic refresh for modules already imported in the current process.
+3. `customer-agent-coze` is currently not a Git repository, so version governance must be handled separately.
+4. Config centralization now covers the main local and Linux delivery defaults, but deployment orchestration is still pending.
+
+Verification summary:
+- T021-B/C/D/E `py_compile` and fake env tests passed.
+- T021-F `py_compile`, `json.tool`, and fake env tests passed.
+- grep found no real `ark-` / `Bearer ark-` secrets in the updated config surfaces.
+- `.env` was not modified or reintroduced to Git tracking.
+
+Next task:
+- `T060`: headless WebSocket worker pre-design.
+
+---
+
+## D020: Headless WebSocket worker baseline completed
+
+Status: completed.
+
+Related tasks:
+- `T060-A`: headless worker pre-design completed.
+- `T060-B`: headless worker skeleton completed.
+- `T060-C`: single-account real start completed.
+- `T060-D`: all-enabled multi-account orchestration completed.
+- `T060-E`: worker graceful shutdown diagnostics completed.
+- `T060-G`: deterministic shutdown control completed.
+
+Changed files:
+- `runtime/__init__.py`
+- `runtime/worker.py`
+- `runtime/account_loader.py`
+- `runtime/health.py`
+
+Key decisions:
+1. The headless worker does not import `app.py`, PyQt, PySide, or `QApplication`.
+2. `HEADLESS_MODE=1` is set before DI service initialization.
+3. The worker reuses existing `PDDChannel`, queue, consumer, handler, DB, and config components.
+4. Because `PDDChannel` still owns a single `self.ws`, multi-account headless mode uses one independent `PDDChannel` instance per account.
+5. `--all-enabled` uses candidate rule `channel_name == "pinduoduo" and status == 1`; this is not yet a durable auto-reply-enabled flag.
+6. Shutdown should call `channel.stop_all_connections()` and should not use global `asyncio.all_tasks()` cancellation.
+7. `--run-seconds`, `--stop-file`, SIGINT, and SIGTERM all route through the same idempotent `request_shutdown()` path.
+
+Verification summary:
+- runtime py_compile passed.
+- dry-run and status commands passed.
+- fake multi-account tests covered success, partial failure, shutdown, and timeout behavior.
+- runtime source has no PyQt/QApplication imports.
+- runtime source has no cookie/password/token/access_token/authorization log strings.
+
+Known limitations:
+1. No HTTP health/status API yet.
+2. No Docker service wrapper yet.
+3. Real long-duration multi-account soak test is still pending.
+4. Durable auto-reply-enabled account selection is still pending.
+
+## D021: Headless worker Ctrl+C shutdown exits cleanly
+
+Status: completed.
+
+Related task:
+- `T060-G.1`: Ctrl+C traceback cleanup.
+
+Changed files:
+- `runtime/worker.py`
+
+Decision:
+- Ctrl+C / SIGINT must trigger graceful shutdown through `request_shutdown()` and must not skip `channel.stop_all_connections()`.
+- The Windows `signal.signal` fallback does not call the previous default interrupt handler after requesting shutdown, preventing a second default `KeyboardInterrupt` traceback.
+- `asyncio.CancelledError` during an already requested shutdown is treated as a normal shutdown path.
+
+Exit code rules:
+- `SIGINT` / `KeyboardInterrupt` / `keyboard_interrupt`: `130`.
+- `run_seconds_elapsed` / `stop_file_detected`: `0`.
+
+Verification:
+- fake KeyboardInterrupt test called `channel.stop_all_connections()` and returned `130`.
+- outer `run()` KeyboardInterrupt test returned `130` without traceback.
+- fake CancelledError test returned `130` without traceback.
+- `--all-enabled --dry-run` and `--status` still passed.
+
+## D022: shutdown consumer missing is idempotent when requested by lifecycle cleanup
+
+Status: completed.
+
+Related task:
+- `T060-G.2`: consumer missing shutdown log noise cleanup.
+
+Changed files:
+- `Message/core/consumer.py`
+- `Channel/pinduoduo/core/pdd_lifecycle.py`
+
+Decision:
+- `MessageConsumerManager.stop_consumer()` now supports `missing_ok=False` by default.
+- Non-shutdown callers keep the original missing-consumer ERROR behavior.
+- Lifecycle resource cleanup calls `stop_consumer(..., missing_ok=True)` because repeated shutdown cleanup can legitimately observe an already removed consumer.
+- `missing_ok=True` returns `True` and logs that the consumer is already absent instead of emitting ERROR noise.
+
+Verification:
+- `python -m py_compile Message\core\consumer.py Channel\pinduoduo\core\pdd_lifecycle.py` passed.
+- fake shutdown test confirmed repeated `stop_consumer(..., missing_ok=True)` returns `True` without ERROR.
+- default `missing_ok=False` still logs an error for missing consumers.
