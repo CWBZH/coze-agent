@@ -103,18 +103,15 @@
 
 ## D006：后续需要引入 reconnect generation
 
-状态：待执行。
+状态：已完成。
 
 目标：
 
 防止旧 reconnect task / cleanup task 误清理新连接。
 
-语义：
+结果：
 
-1. 每次连接启动生成一个 generation。
-2. task 记录自己的 generation。
-3. cleanup 前检查 generation 是否仍是当前 generation。
-4. 过期 task 不能关闭新 websocket、不能停止新 consumer、不能覆盖新状态。
+已通过 D010 引入 reconnect lifecycle lock + generation。
 
 ## D007：后续需要 graceful shutdown
 
@@ -141,13 +138,13 @@
 
 不要先 stop event loop，再尝试执行 async cleanup。
 
-## D008：当前下一步任务是 T002
+## D008：当前下一步任务是 T003
 
 状态：已确认。
 
 说明：
 
-`T001：MessageConsumer 固定 worker pool` 完成后，下一步稳定性任务是 `T002：reconnect lifecycle lock + generation`。
+`T002：reconnect lifecycle lock + generation` 完成后，下一步稳定性任务是 `T003：graceful shutdown`。
 
 ## D009：MessageConsumer 已改为固定 worker pool
 
@@ -184,6 +181,40 @@
 4. `consumer._tasks == 0`。
 5. `stop_consumer(timeout=5.0)` 后 `running=False` 且 `worker_count == 0`。
 
+## D010：已引入 reconnect lifecycle lock + generation
+
+状态：已完成。
+
+修改文件：
+
+1. `Channel/pinduoduo/core/pdd_lifecycle.py`
+2. `Channel/pinduoduo/core/pdd_connection.py`
+3. `Channel/pinduoduo/pdd_channel.py`
+
+决策：
+
+为拼多多 WebSocket 连接生命周期引入 per-connection lifecycle lock 和 generation 机制，防止同一个 `connection_key` 重复 start/reconnect 时旧任务误清理新连接。
+
+关键结果：
+
+1. `start_account()` 使用 per-connection lifecycle lock。
+2. 旧 reconnect task cancel 后会 await，避免 cancel 后直接删除再创建新 task。
+3. generation 每次新连接流程自增。
+4. generation 已传递到 connect / init / cleanup / heartbeat。
+5. stale generation 不会执行 `_cleanup_resources()`。
+6. stale generation 不会清理当前 `ws`。
+7. 最大重试失败分支的 `stop_event.set()` 已加 generation guard。
+8. 保持 `queue_name = pdd_{shop_id}` 不变。
+9. 未修改业务消息处理逻辑。
+
+验证结果：
+
+1. `python -m py_compile Channel/pinduoduo/core/pdd_lifecycle.py Channel/pinduoduo/core/pdd_connection.py Channel/pinduoduo/pdd_channel.py` 通过。
+2. `python -m py_compile Channel/pinduoduo/core/pdd_connection.py` 通过。
+3. 连续两次 `start_account()` 时 generation 从 1 到 2。
+4. 旧 reconnect task 被 cancel，并 await 到 done。
+5. stale generation 调用 cleanup 不清理当前 `ws`。
+
 后续：
 
-下一步执行 `T002：reconnect lifecycle lock + generation`。
+下一步执行 `T003：graceful shutdown`。

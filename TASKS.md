@@ -64,20 +64,37 @@
 
 ## T002：reconnect lifecycle lock + generation
 
-状态：待执行。
+状态：已完成。
 
 目标：
 
 防止重复 reconnect task 和旧 task 误伤新连接。
 
-要求：
+修改文件：
 
-1. 每个 `connection_key` 有 lifecycle lock。
-2. 已有 reconnect task 时，cancel 后必须 await timeout。
-3. 引入 generation。
-4. cleanup 前检查 generation。
-5. stale task 不允许清理新 session。
-6. 不修改业务逻辑。
+- `Channel/pinduoduo/core/pdd_lifecycle.py`
+- `Channel/pinduoduo/core/pdd_connection.py`
+- `Channel/pinduoduo/pdd_channel.py`
+
+已完成内容：
+
+- `start_account()` 使用 per-connection lifecycle lock，按 `connection_key` 串行化启动/替换流程。
+- 已有 reconnect task 在替换前会先 `cancel()`，再 `await asyncio.wait_for(old_task, timeout=5.0)`。
+- 每次新连接流程都会让 generation 自增。
+- generation 已传递到 connect / init / cleanup / heartbeat 相关路径。
+- stale generation 不会执行 `_cleanup_resources()`。
+- stale generation 不会清理当前 `ws`。
+- 最大重试失败分支的 `stop_event.set()` 已增加 generation guard。
+- 保持 `queue_name = pdd_{shop_id}` 不变。
+- 未修改业务消息处理逻辑。
+
+验证：
+
+- `python -m py_compile Channel/pinduoduo/core/pdd_lifecycle.py Channel/pinduoduo/core/pdd_connection.py Channel/pinduoduo/pdd_channel.py` 通过。
+- `python -m py_compile Channel/pinduoduo/core/pdd_connection.py` 通过。
+- 连续两次 `start_account()` 时 generation 从 1 到 2。
+- 旧 reconnect task 被 cancel，并 await 到 done。
+- stale generation 调用 cleanup 不清理当前 `ws`。
 
 ## T003：graceful shutdown
 
@@ -238,4 +255,4 @@
 
 ## 下一步
 
-下一步建议执行：`T002：reconnect lifecycle lock + generation`。
+下一步建议执行：`T003：graceful shutdown`。

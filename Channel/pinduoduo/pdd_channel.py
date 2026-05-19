@@ -82,6 +82,8 @@ class PDDChannel(ConnectionMixin, MessageHandlerMixin, LifecycleMixin, StatusMix
         self.heartbeat_config = HeartbeatConfig()
         self._reconnect_tasks: Dict[str, asyncio.Task] = {}
         self._heartbeat_tasks: Dict[str, asyncio.Task] = {}
+        self._lifecycle_locks: Dict[str, asyncio.Lock] = {}
+        self._connection_generations: Dict[str, int] = {}
 
         # 性能优化：并发控制和任务管理
         self.max_concurrent_messages = max_concurrent_messages
