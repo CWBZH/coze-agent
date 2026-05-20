@@ -124,6 +124,10 @@ LOG_DIR = resolve_path(get_str("LOG_DIR", "./logs") or "./logs")
 CACHE_DIR = resolve_path(get_str("CACHE_DIR", str(DATA_DIR / "cache")) or str(DATA_DIR / "cache"))
 EXPORT_DIR = resolve_path(get_str("EXPORT_DIR", str(DATA_DIR / "exports")) or str(DATA_DIR / "exports"))
 DB_PATH = resolve_path(get_str("DB_PATH", str(DATA_DIR / "channel_shop.db")) or str(DATA_DIR / "channel_shop.db"))
+WORKER_STATUS_PATH = resolve_path(
+    get_str("WORKER_STATUS_PATH", str(DATA_DIR / "runtime" / "worker_status.json"))
+    or str(DATA_DIR / "runtime" / "worker_status.json")
+)
 BROWSER_CACHE_DIR = resolve_path(get_str("BROWSER_CACHE_DIR", str(BASE_DIR / ".browsers")) or str(BASE_DIR / ".browsers"))
 _PLAYWRIGHT_BROWSERS_PATH_VALUE = get_str("PLAYWRIGHT_BROWSERS_PATH")
 PLAYWRIGHT_BROWSERS_PATH = (
@@ -195,6 +199,10 @@ def export_dir() -> Path:
 
 def db_path() -> Path:
     return DB_PATH
+
+
+def worker_status_path() -> Path:
+    return WORKER_STATUS_PATH
 
 
 def ensure_data_dir() -> Path:

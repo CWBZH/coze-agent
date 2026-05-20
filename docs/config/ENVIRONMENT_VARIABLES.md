@@ -51,6 +51,7 @@
 | `SESSION_COMPRESS_TEMPERATURE` | 会话压缩温度 | 是，`core/config.py` | `0.3` | `0.3` | 否 | `0.3` |
 | `PLAYWRIGHT_BROWSERS_PATH` | Playwright browser directory | Yes, `core/settings.py` and `utils/playwright_path.py` | `./.browsers` | `/ms-playwright` | No | project `.browsers` |
 | `BROWSER_CACHE_DIR` | Browser cache directory | Yes, `core/settings.py` and `utils/playwright_path.py` | `./.browsers` | `/ms-playwright` | No | `./.browsers` |
+| `WORKER_STATUS_PATH` | Headless worker status JSON file | Yes, `core/settings.py` and `runtime/worker.py` | `./temp/runtime/worker_status.json` | `/app/data/runtime/worker_status.json` | No | `DATA_DIR/runtime/worker_status.json` |
 | `WORKER_CONCURRENCY` | consumer worker 数量 | 否，reserved for T021 配置加载 | `10` | `10` | 否 | `10` |
 | `MESSAGE_QUEUE_MAX_SIZE` | 消息队列最大长度 | 否，reserved for Linux delivery | `1000` | `1000` | 否 | `1000` |
 | `RECONNECT_MAX_ATTEMPTS` | 重连最大次数 | 否，reserved for T021 配置加载 | `10` | `10` | 否 | `10` |
@@ -111,6 +112,7 @@
 - `AUTO_REPLY_RECONNECT_SUSPEND_TTL`
 - `SHORT_SENTENCE_THRESHOLD`
 - `PLAYWRIGHT_BROWSERS_PATH`
+- `WORKER_STATUS_PATH`
 
 `customer-agent-coze` 当前已使用：
 
@@ -255,3 +257,31 @@ Compatibility policy:
 - Windows local `.browsers` and `LOCALAPPDATA/ms-playwright` fallback are preserved.
 - Browser detection now checks Windows and Linux Chromium/headless-shell layouts.
 - This task does not change Pinduoduo login flow, account storage, cookie storage, Docker, or headless worker behavior.
+
+## T021-F customer-agent-coze service settings update
+
+`customer-agent-coze` now centralizes proxy, Ollama, FastGPT knowledge, and LLM tool configuration through environment variables while keeping JSON as non-sensitive fallback.
+
+Currently centralized:
+
+- `OLLAMA_BASE_URL`
+- `OLLAMA_URL`
+- `PROXY_BIND_HOST`
+- `PROXY_PORT`
+- `DOUBAO_URL`
+- `DOUBAO_AUTH`
+- `LLM_BASE_URL`
+- `LLM_API_BASE`
+- `LLM_API_KEY`
+- `KNOWLEDGE_BASE_URL`
+- `KNOWLEDGE_BASE_API_KEY`
+- `KNOWLEDGE_BASE_DATASET_ID`
+
+Priority and compatibility:
+
+- `OLLAMA_BASE_URL` takes precedence over legacy `OLLAMA_URL`.
+- CLI proxy port argument still takes precedence over `PROXY_PORT`.
+- `DOUBAO_AUTH` takes precedence over building `Bearer <LLM_API_KEY>`.
+- `LLM_BASE_URL` takes precedence over `LLM_API_BASE`, then non-sensitive JSON fallback.
+- `KNOWLEDGE_BASE_URL` defaults to `http://localhost:3000` for local and `http://fastgpt:3000` for Linux/production.
+- `agent_llm_config.json` must not contain real API keys.
