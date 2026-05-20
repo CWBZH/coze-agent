@@ -26,6 +26,45 @@ sudo chown -R customer-agent:customer-agent /opt/customer-agent-refactor-v3
 
 Copy the project into `/opt/customer-agent-refactor-v3`, then install dependencies using the project's normal Python environment process.
 
+## Playwright Browser Pinning
+
+Linux deployments must keep the Python Playwright package and browser cache in sync. The project pins:
+
+```text
+playwright==1.55.0
+```
+
+For this version, install browsers into the configured cache path instead of relying on a user home cache:
+
+```bash
+cd /opt/customer-agent-refactor-v3
+source .venv/bin/activate
+
+export PLAYWRIGHT_BROWSERS_PATH=/opt/customer-agent-refactor-v3/.browsers
+python -m playwright install chromium
+sudo .venv/bin/python -m playwright install-deps chromium
+```
+
+On Tencent Cloud or other domestic servers, use the mirror only with the pinned package version:
+
+```bash
+cd /opt/customer-agent-refactor-v3
+source .venv/bin/activate
+
+export PLAYWRIGHT_BROWSERS_PATH=/opt/customer-agent-refactor-v3/.browsers
+export PLAYWRIGHT_DOWNLOAD_HOST=https://npmmirror.com/mirrors/playwright
+python -m playwright install chromium
+sudo .venv/bin/python -m playwright install-deps chromium
+```
+
+Set the same browser cache in `.env`:
+
+```env
+PLAYWRIGHT_BROWSERS_PATH=/opt/customer-agent-refactor-v3/.browsers
+```
+
+Do not keep compatibility symlinks such as `chromium-1187` masquerading as `chromium-1223`; if the browser cache and Playwright package disagree, fix the package version or install the matching browser revision. The first Linux delivery line uses `playwright==1.55.0` and Chromium revision `1187`. A later Playwright upgrade must first prove that the matching browser revision can be downloaded or manually supplied.
+
 Copy and edit the service file:
 
 ```bash
@@ -120,9 +159,9 @@ ExecStart=/usr/bin/python3 -m runtime.worker --all-enabled --status-interval 5 -
 ExecStop=/usr/bin/touch /opt/customer-agent-refactor-v3/runtime.stop
 ```
 
-The worker detects the stop file and enters graceful shutdown. The worker must be started with the same `--stop-file` path that `ExecStop` touches. `ExecStartPre` removes an old stop file before startup, otherwise a stale file would cause immediate shutdown.
+The worker can shut down gracefully through either SIGTERM or stop-file detection. In real systemd validation, `systemctl stop` produced `exit_reason=SIGTERM` and completed graceful shutdown successfully. The stop-file path remains useful for helper scripts and manual shutdown. The worker must be started with the same `--stop-file` path that helper scripts touch. `ExecStartPre` removes an old stop file before startup, otherwise a stale file would cause immediate shutdown.
 
-If `--stop-file` is omitted from `ExecStart`, `ExecStop` will only create a file and will not trigger graceful shutdown.
+If `--stop-file` is omitted from `ExecStart`, helper-script stop-file shutdown will not work. systemd SIGTERM shutdown can still be graceful, but the stop-file fallback will not be available.
 
 The helper touches the same `runtime.stop` path used by `deploy/linux/start.sh`. This requests graceful worker shutdown; it is not a direct kill.
 

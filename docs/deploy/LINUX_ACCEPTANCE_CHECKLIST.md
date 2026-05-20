@@ -37,15 +37,46 @@ which python
 
 ### Playwright browser path
 
+- [ ] Confirm the active Playwright package is pinned to the accepted Linux delivery version:
+
+```bash
+python -m pip show playwright
+```
+
+Expected:
+
+```text
+Version: 1.55.0
+```
+
 - [ ] Confirm browser path variables are set when needed:
 
 ```env
-PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
-BROWSER_CACHE_DIR=/var/lib/customer-agent/browser-cache
+PLAYWRIGHT_BROWSERS_PATH=/opt/customer-agent-refactor-v3/.browsers
+BROWSER_CACHE_DIR=/opt/customer-agent-refactor-v3/.browsers
 ```
 
 - [ ] Confirm the browser directory is readable by the service user.
 - [ ] Confirm Linux browser dependencies are installed on the host.
+- [ ] On Tencent Cloud or domestic servers, install the matching browser revision with the mirror:
+
+```bash
+cd /opt/customer-agent-refactor-v3
+source .venv/bin/activate
+
+export PLAYWRIGHT_BROWSERS_PATH=/opt/customer-agent-refactor-v3/.browsers
+export PLAYWRIGHT_DOWNLOAD_HOST=https://npmmirror.com/mirrors/playwright
+python -m playwright install chromium
+sudo .venv/bin/python -m playwright install-deps chromium
+```
+
+- [ ] Confirm the accepted Chromium revision exists and no temporary `chromium-1223` symlink workaround remains:
+
+```bash
+find /opt/customer-agent-refactor-v3/.browsers -maxdepth 2 -type d | sort
+test -d /opt/customer-agent-refactor-v3/.browsers/chromium-1187
+test ! -e /opt/customer-agent-refactor-v3/.browsers/chromium-1223
+```
 
 ### Runtime configuration
 
@@ -287,11 +318,16 @@ sudo systemctl status customer-agent-worker --no-pager
 
 Acceptance checks:
 
-- [ ] `ExecStop` touched the same stop-file path passed to `ExecStart`.
+- [ ] Worker receives a graceful stop request from systemd.
 - [ ] Worker logs show graceful shutdown.
 - [ ] Final status has `connected_count=0`.
+- [ ] Final status may show `exit_reason=SIGTERM`; this is accepted for systemd stop.
+- [ ] `exit_reason=stop_file_detected` is only required when explicitly testing the stop-file helper path.
+- [ ] systemd reports deactivation successfully.
 - [ ] No `pending task destroyed`.
 - [ ] No `Event loop is closed`.
+- [ ] No `BaseSubprocessTransport` cleanup noise.
+- [ ] No `Executable doesn't exist` or `chromium-1223` browser revision mismatch.
 
 ### Logs
 
@@ -408,7 +444,8 @@ Deployment can be accepted when all required checks pass:
 
 - [ ] Worker starts from CLI.
 - [ ] Worker starts from systemd.
-- [ ] Worker stops through stop-file graceful shutdown.
+- [ ] Worker stops through systemd SIGTERM graceful shutdown.
+- [ ] Stop-file graceful shutdown works as a manual/helper-script path.
 - [ ] `python -m runtime.worker --status` reports correct state.
 - [ ] `python -m runtime.worker --healthcheck` exit codes match documented semantics.
 - [ ] `worker_status.json` is written and final snapshot has `connected_count=0`.
@@ -416,7 +453,9 @@ Deployment can be accepted when all required checks pass:
 - [ ] Diagnose package does not contain `.env`, database files, browser caches, cookies, tokens, passwords, access tokens, authorization headers, or full message history.
 - [ ] Logs do not show `pending task destroyed`.
 - [ ] Logs do not show `Event loop is closed`.
+- [ ] Logs do not show `BaseSubprocessTransport`.
 - [ ] Logs do not show `attached to a different loop`.
+- [ ] Logs do not show `Executable doesn't exist` or `chromium-1223` after Playwright browser pinning.
 - [ ] Logs do not show repeated consumer creation for the same queue during normal start/stop.
 - [ ] FastGPT business workflow has been separately verified before production handoff.
 
