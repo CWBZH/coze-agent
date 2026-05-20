@@ -917,3 +917,176 @@ Verification:
 - `python -m py_compile Message\core\consumer.py Channel\pinduoduo\core\pdd_lifecycle.py` passed.
 - fake shutdown test confirmed first stop succeeds, second missing-ok stop returns `True` without ERROR.
 - default `missing_ok=False` behavior still logs an error for missing consumers.
+
+## T060-H: headless worker real shutdown acceptance
+
+Status: completed.
+
+Summary:
+- Single-account real WebSocket startup was verified through the headless worker.
+- `--run-seconds` graceful shutdown was accepted.
+- `--stop-file` graceful shutdown was accepted.
+- Ctrl+C / SIGINT graceful shutdown was accepted after `T060-G.1`.
+- Shutdown path calls `PDDChannel.stop_all_connections()` and does not rely on global task cancellation.
+
+Key decision:
+- Headless worker must keep one `PDDChannel` instance per account.
+- `PDDChannel` still owns a single `self.ws`; multi-account shared instances are forbidden.
+
+---
+
+## T061-A: worker status snapshot file
+
+Status: completed.
+
+Changed files:
+- `runtime/worker.py`
+- `runtime/health.py`
+- `core/settings.py`
+- `docs/config/ENVIRONMENT_VARIABLES.md`
+
+Summary:
+- Running worker writes `worker_status.json`.
+- Default status file path is `DATA_DIR/runtime/worker_status.json`.
+- Status writer uses atomic temp-file replace.
+- Snapshot includes worker id, pid, app env, timestamps, account states, channel ids, task ids, connected count, and exit reason.
+
+## T061-A.1: final snapshot semantics fix
+
+Status: completed.
+
+Summary:
+- Final snapshot normalizes stopped workers so `connected_count=0`.
+- Final snapshot uses `snapshot_phase=final` and `worker_state=stopped`.
+- Stopped account connections are no longer reported as connected in final status.
+
+## T061-B: CLI status reads worker status file
+
+Status: completed.
+
+Summary:
+- `python -m runtime.worker --status` reads `WORKER_STATUS_PATH` / `DATA_DIR/runtime/worker_status.json`.
+- Added `--status-file`, `--status-stale-seconds`, and `--json` support.
+- Exit codes: missing `2`, invalid `3`, stale `4`, valid running/stopped `0`.
+
+## T061-C: CLI healthcheck
+
+Status: completed.
+
+Summary:
+- Added `python -m runtime.worker --healthcheck`.
+- Designed for Docker healthcheck, systemd checks, and diagnose scripts.
+- Health exit codes: healthy `0`, degraded `1`, missing `2`, invalid `3`, stale `4`, stopped `5`.
+- `stopped=5` means the worker is not running; it is expected after bounded smoke tests but unhealthy for service liveness.
+
+## T061-D: healthcheck / smoke scripts and runbook
+
+Status: completed.
+
+Changed files:
+- `scripts/runtime/healthcheck.ps1`
+- `scripts/runtime/healthcheck.sh`
+- `scripts/runtime/smoke_worker.ps1`
+- `scripts/runtime/smoke_worker.sh`
+- `docs/runtime/HEADLESS_WORKER_RUNBOOK.md`
+
+Summary:
+- Added PowerShell and shell healthcheck wrappers.
+- Added PowerShell and shell smoke test wrappers.
+- Smoke scripts treat healthcheck exit code `5` (`stopped`) as expected after `--run-seconds`.
+- Runbook documents single-account start, all-enabled start, run-seconds, stop-file, status, healthcheck, and exit codes.
+
+---
+
+## T062: headless worker diagnose package export
+
+Status: completed.
+
+Changed files:
+- `scripts/runtime/diagnose.ps1`
+- `scripts/runtime/diagnose.sh`
+- `docs/runtime/DIAGNOSE_PACKAGE.md`
+- `docs/runtime/HEADLESS_WORKER_RUNBOOK.md`
+
+Summary:
+- Added one-command diagnose package export for private deployment troubleshooting.
+- Package includes redacted worker status, `--status --json`, `--healthcheck --json`, recent log tails, `.env.example`, config/runtime docs, Python and OS metadata, and optional Git status.
+- Package does not include `.env`, databases, browser caches, full runtime directories, or message history.
+- Redaction masks common credential/session fields and token-like values before files are written into the package.
+
+## T062-A: diagnose artifact Git protection
+
+Status: completed.
+
+Changed files:
+- `.gitignore`
+
+Summary:
+- Added explicit ignore rules for `runtime.stop`, `worker_status.json`, `diagnostics/`, and `**/diagnostics/`.
+- Existing ignore rules already covered `.env`, `.env.*`, `.browsers/`, `logs/`, `*.log`, and `temp/`.
+- Verified runtime artifacts are ignored and are not shown as untracked source changes.
+
+Next task:
+- `T063`: Linux/systemd service draft and start/stop/status/diagnose scripts.
+
+---
+
+## T063: Linux/systemd deployment skeleton
+
+Status: completed.
+
+Changed files:
+- `deploy/linux/customer-agent-worker.service.example`
+- `deploy/linux/start.sh`
+- `deploy/linux/stop.sh`
+- `deploy/linux/status.sh`
+- `deploy/linux/healthcheck.sh`
+- `deploy/linux/diagnose.sh`
+- `deploy/linux/README_SYSTEMD.md`
+
+Summary:
+- Added Linux/systemd service skeleton for the headless worker.
+- Added start / stop / status / healthcheck / diagnose helper scripts.
+- Service skeleton runs `python -m runtime.worker --all-enabled --status-interval 5`.
+- Helper scripts reuse existing runtime status, healthcheck, and diagnose commands.
+- No Docker Compose and no Python business code changes were made.
+
+## T063-A: systemd stop-file closure
+
+Status: completed.
+
+Summary:
+- `ExecStart` now passes `--stop-file /opt/customer-agent-refactor-v3/runtime.stop`.
+- `ExecStop` touches the same stop-file path.
+- `ExecStartPre` removes stale `runtime.stop` before startup.
+- `start.sh` removes the stop file before foreground startup and passes the same `--stop-file`.
+- `stop.sh` touches the same stop file and requests graceful shutdown instead of killing the worker directly.
+
+## T064: Linux/systemd deployment skeleton static acceptance
+
+Status: completed.
+
+Summary:
+- Static acceptance completed for `deploy/linux`.
+- Service example includes `WorkingDirectory`, `EnvironmentFile`, `ExecStartPre`, `ExecStart`, `ExecStop`, `TimeoutStopSec=30`, `Restart=on-failure`, and `RestartSec=5`.
+- `start.sh` supports `REPO_ROOT`, `STOP_FILE`, and `STATUS_INTERVAL` overrides.
+- `stop.sh`, `status.sh`, `healthcheck.sh`, and `diagnose.sh` support `REPO_ROOT` override.
+- README documents `.env`, stop-file lifecycle, status file, healthcheck exit codes, logs, diagnose, and common failures.
+
+Verification:
+- `git diff --check -- deploy/linux` passed.
+- grep confirmed service contains `ExecStartPre`, `ExecStart`, `ExecStop`, `--stop-file`, and `TimeoutStopSec`.
+- grep confirmed `start.sh` and `stop.sh` share `STOP_FILE="${STOP_FILE:-$REPO_ROOT/runtime.stop}"`.
+- grep found no real keys, `ark-`, `Bearer`, or `fastgpt-` values in `deploy/linux`.
+- No Python files were modified.
+- `shellcheck` was not available; `bash -n` could not run because the Windows WSL bash shim had no `/bin/bash`.
+
+Known limitations:
+- `deploy/linux` has only static validation so far.
+- It has not yet been executed on a real Linux/systemd host.
+- Docker Compose is still not completed.
+- FastGPT business workflow has not yet been accepted in the Linux deployment shape.
+
+Next tasks:
+- `T065`: Linux real-machine deployment acceptance checklist.
+- `T066`: systemd real-machine verification.

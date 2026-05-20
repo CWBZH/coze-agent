@@ -779,3 +779,137 @@ Verification:
 - `python -m py_compile Message\core\consumer.py Channel\pinduoduo\core\pdd_lifecycle.py` passed.
 - fake shutdown test confirmed repeated `stop_consumer(..., missing_ok=True)` returns `True` without ERROR.
 - default `missing_ok=False` still logs an error for missing consumers.
+
+---
+
+## D023: Headless worker runtime acceptance completed
+
+Status: completed.
+
+Related tasks:
+- `T060-B`: headless worker skeleton completed.
+- `T060-C`: single-account real start completed.
+- `T060-D`: all-enabled multi-account orchestration completed.
+- `T060-E`: worker graceful shutdown diagnostics completed.
+- `T060-G`: deterministic shutdown control completed.
+- `T060-H`: run-seconds / stop-file / Ctrl+C acceptance completed.
+
+Key decisions:
+1. Headless worker uses one independent `PDDChannel` instance per account.
+2. `PDDChannel` still owns a single `self.ws`; multi-account shared `PDDChannel` instances are forbidden.
+3. `--run-seconds`, `--stop-file`, Ctrl+C, SIGINT, and SIGTERM use the same idempotent shutdown request path.
+4. Shutdown must call `PDDChannel.stop_all_connections()` before process exit.
+5. `--all-enabled` remains candidate-based with `channel_name == "pinduoduo" and status == 1`; it is not yet a durable auto-reply-enabled selection model.
+
+Verification:
+- Headless skeleton and dry-run commands passed.
+- Single-account real startup path was exercised.
+- Multi-account orchestration uses per-account channel/task mappings.
+- run-seconds, stop-file, and Ctrl+C graceful shutdown paths were accepted.
+
+## D024: Worker status and healthcheck file contract completed
+
+Status: completed.
+
+Related tasks:
+- `T061-A`: `worker_status.json` writer completed.
+- `T061-A.1`: final snapshot semantics fixed.
+- `T061-B`: `--status` reads status file.
+- `T061-C`: `--healthcheck` completed.
+- `T061-D`: smoke / healthcheck scripts and runbook completed.
+
+Key decisions:
+1. Worker status file path is `DATA_DIR/runtime/worker_status.json` unless `WORKER_STATUS_PATH` overrides it.
+2. Status writes use atomic temp-file replace.
+3. Final snapshots use `snapshot_phase=final`, `worker_state=stopped`, and `connected_count=0`.
+4. `python -m runtime.worker --status` is the human/operator status command.
+5. `python -m runtime.worker --healthcheck` is the preferred Docker/systemd healthcheck command.
+6. Healthcheck exit code `5` means `stopped`: the worker is not running. This is expected after smoke tests but unhealthy for service liveness.
+
+Healthcheck exit codes:
+- `0`: healthy.
+- `1`: degraded.
+- `2`: missing status file.
+- `3`: invalid status JSON.
+- `4`: stale running snapshot.
+- `5`: stopped final snapshot.
+
+## D025: Headless worker diagnose package completed
+
+Status: completed.
+
+Related tasks:
+- `T062`: diagnose package export completed.
+- `T062-A`: diagnose artifact Git protection completed.
+
+Changed files:
+- `scripts/runtime/diagnose.ps1`
+- `scripts/runtime/diagnose.sh`
+- `docs/runtime/DIAGNOSE_PACKAGE.md`
+- `docs/runtime/HEADLESS_WORKER_RUNBOOK.md`
+- `.gitignore`
+
+Key decisions:
+1. Diagnose scripts export a redacted package for private deployment troubleshooting.
+2. Packages may include worker status, status/healthcheck JSON output, recent log tails, `.env.example`, config/runtime docs, Python/OS metadata, and optional Git status.
+3. Packages must not include `.env`, databases, browser caches, full runtime directories, or message history.
+4. Redaction is best-effort and masks common credential/session fields before files are written into the package.
+5. Runtime artifacts are protected by `.gitignore`: `runtime.stop`, `worker_status.json`, `diagnostics/`, `**/diagnostics/`, `temp/`, `logs/`, `*.log`, and `.browsers/`.
+
+Known limits:
+- Redaction must be updated if new log formats contain sensitive values under unrecognized field names.
+- Diagnose package export is not a backup mechanism.
+
+Next task:
+- `T063`: Linux/systemd service draft and start/stop/status/diagnose scripts.
+
+---
+
+## D026: Linux/systemd deployment skeleton accepted statically
+
+Status: completed.
+
+Related tasks:
+- `T063`: Linux/systemd service skeleton completed.
+- `T063-A`: stop-file closure fixed.
+- `T064`: static acceptance completed.
+
+Changed files:
+- `deploy/linux/customer-agent-worker.service.example`
+- `deploy/linux/start.sh`
+- `deploy/linux/stop.sh`
+- `deploy/linux/status.sh`
+- `deploy/linux/healthcheck.sh`
+- `deploy/linux/diagnose.sh`
+- `deploy/linux/README_SYSTEMD.md`
+
+Key decisions:
+1. The systemd skeleton starts the headless worker with `python -m runtime.worker --all-enabled --status-interval 5`.
+2. `ExecStart` must include `--stop-file /opt/customer-agent-refactor-v3/runtime.stop`.
+3. `ExecStartPre` must remove the old stop file before startup.
+4. `ExecStop` triggers graceful shutdown by touching the same stop file.
+5. `systemd stop` should request graceful shutdown through stop-file, not bypass runtime cleanup.
+6. `python -m runtime.worker --healthcheck` is suitable for systemd/Docker probes.
+7. Healthcheck exit code `5` means the worker is stopped and not running.
+8. `DATA_DIR/runtime/worker_status.json` remains the default status file path unless overridden by `WORKER_STATUS_PATH`.
+9. Each account still requires its own `PDDChannel` instance because `PDDChannel` owns a single `self.ws`; shared multi-account channel instances remain forbidden.
+
+Static acceptance:
+- Service file contains `WorkingDirectory=/opt/customer-agent-refactor-v3`.
+- Service file contains `EnvironmentFile=/opt/customer-agent-refactor-v3/.env`.
+- Service file contains `ExecStartPre`, `ExecStart`, `ExecStop`, `--stop-file`, `TimeoutStopSec=30`, `Restart=on-failure`, and `RestartSec=5`.
+- `start.sh` removes stale stop-file and passes `--stop-file`.
+- `stop.sh` touches the same stop-file and does not kill the worker directly.
+- `status.sh` calls `python -m runtime.worker --status`.
+- `healthcheck.sh` calls `python -m runtime.worker --healthcheck`.
+- `diagnose.sh` delegates to `scripts/runtime/diagnose.sh`.
+
+Known limitations:
+- `deploy/linux` has only been statically validated.
+- It has not yet been run on a real Linux/systemd host.
+- Docker Compose is not completed.
+- FastGPT business workflow has not yet been accepted end-to-end in the Linux deployment shape.
+
+Next tasks:
+- `T065`: Linux real-machine deployment acceptance checklist.
+- `T066`: systemd real-machine verification.
