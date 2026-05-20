@@ -252,11 +252,12 @@ class MessageHandlerMixin:
                     )
                 else:
                     self.logger.debug(f"忽略消息: {context.type}, ID: {pdd_message.msg_id}")
+                    message_type = context.type.value if hasattr(context.type, "value") else str(context.type)
                     self.logger.info(
                         f"event=pdd.message.skipped trace_id={context.kwargs.trace_id} "
                         f"source_message_id={context.kwargs.source_message_id or ''} queue_message_id= "
                         f"shop_id={shop_id} user_id={user_id} customer_uid={context.kwargs.from_uid or ''} "
-                        f"queue_name={queue_name} message_type={context.kwargs.message_type} reason=unsupported_type"
+                        f"queue_name={queue_name} message_type={message_type} action=unsupported_message_type"
                     )
             else:
                 self.logger.warning("消息转换失败，跳过处理")

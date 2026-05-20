@@ -35,6 +35,9 @@ class AIReplyHandler(BaseHandler):
     """V3.0 AI回复处理器 — 移除 Agent 依赖，通过 MessagePipeline 调用 FastGPT"""
 
     PIPELINE_SKIP = "__PIPELINE_SKIP__"
+    PIPELINE_BLOCK = "__PIPELINE_BLOCK__"
+    VIDEO_INTERCEPT_REPLY = "亲亲，视频已收到，稍后由人工客服为您查看处理哦~"
+    EMOTION_DEFAULT_REPLY = "亲亲，在的，请问有什么可以帮您~"
     _fallback_state: Dict[str, Dict[str, float]] = {}
 
     # 危险词汇黑名单（医疗/安全相关）
@@ -128,6 +131,53 @@ class AIReplyHandler(BaseHandler):
         fields.update(extra)
         return " ".join(f"{key}={value}" for key, value in fields.items())
 
+    def _build_notification_metadata(
+        self,
+        metadata: Dict[str, Any],
+        context: Optional[Context] = None,
+        action: str = "",
+        reason: str = "",
+        reply: Optional[str] = None,
+        final_status: str = "",
+    ) -> Dict[str, Any]:
+        trace = self._build_trace_metadata(context, metadata) if context is not None else {
+            "trace_id": str(metadata.get("trace_id") or ""),
+            "source_message_id": str(metadata.get("source_message_id") or ""),
+            "queue_message_id": str(metadata.get("queue_message_id") or metadata.get("message_id") or ""),
+            "session_id": str(metadata.get("session_id") or f"{metadata.get('shop_id', 'unknown')}_{metadata.get('from_uid', '')}"),
+            "shop_id": str(metadata.get("shop_id") or "unknown"),
+            "user_id": str(metadata.get("user_id") or ""),
+            "customer_uid": str(metadata.get("from_uid") or ""),
+            "content_length": metadata.get("content_length", ""),
+            "content_hash": str(metadata.get("content_hash") or ""),
+        }
+        trace["action"] = action
+        trace["reason"] = reason
+        if final_status:
+            trace["final_status"] = final_status
+        if context is not None:
+            message_type = context.type.value if hasattr(context.type, "value") else str(context.type)
+            trace["message_type"] = message_type
+            if context.content is not None:
+                trace["buyer_message_preview"] = context.content
+                content_length, content_hash = self._fingerprint(context.content)
+                trace["content_length"] = content_length
+                trace["content_hash"] = content_hash
+        if reply is not None:
+            trace["seller_or_ai_reply_preview"] = reply
+            reply_length, reply_hash = self._fingerprint(reply)
+            trace["reply_length"] = reply_length
+            trace["reply_hash"] = reply_hash
+        return trace
+
+    @staticmethod
+    def _call_notification_service(notification_service: Any, **kwargs: Any) -> None:
+        try:
+            notification_service.alert_human_fallback(**kwargs)
+        except TypeError:
+            kwargs.pop("metadata", None)
+            notification_service.alert_human_fallback(**kwargs)
+
     @staticmethod
     def _pdd_result_summary(result: Any) -> str:
         if not isinstance(result, dict):
@@ -158,10 +208,25 @@ class AIReplyHandler(BaseHandler):
             from_uid = metadata.get('from_uid') or getattr(context.kwargs, 'from_uid', None)
             session_id = metadata.get('session_id') or f"{metadata.get('shop_id')}_{from_uid}"
             trace["session_id"] = str(session_id or trace.get("session_id") or "")
+            content_text = "" if context.content is None else str(context.content)
+
+            if context.type not in self.auto_reply_types:
+                duration_ms = int((time.perf_counter() - handle_started_at) * 1000)
+                message_type = context.type.value if hasattr(context.type, "value") else str(context.type)
+                self.logger.info(
+                    "event=pdd.message.skipped "
+                    + self._trace_fields(
+                        trace,
+                        action="unsupported_message_type",
+                        duration_ms=duration_ms,
+                        message_type=message_type,
+                    )
+                )
+                return True
 
             # 检查是否是图片消息
             if context.type == ContextType.IMAGE or (
-                context.content and ('[图片]' in str(context.content) or '[Image]' in str(context.content))
+                content_text and ('[图片]' in content_text or '[Image]' in content_text)
             ):
                 duration_ms = int((time.perf_counter() - handle_started_at) * 1000)
                 self.logger.warning(
@@ -192,11 +257,19 @@ class AIReplyHandler(BaseHandler):
                         self.logger.info(
                             f"[图片拦截] 触发 UI 转人工提醒: shop_id={metadata.get('shop_id')}, from_uid={from_uid}"
                         )
-                        notification_service.alert_human_fallback(
+                        self._call_notification_service(
+                            notification_service,
                             shop_id=str(metadata.get('shop_id') or 'unknown'),
                             user_id=str(from_uid or 'unknown'),
                             reason="用户发送图片",
                             alert_level="low",
+                            metadata=self._build_notification_metadata(
+                                metadata,
+                                context=context,
+                                action="image_intercept",
+                                reason="用户发送图片",
+                                reply=fixed_reply,
+                            ),
                         )
                     else:
                         self.logger.warning("[图片拦截] NotificationService 未注册，无法触发 UI 提醒")
@@ -204,6 +277,78 @@ class AIReplyHandler(BaseHandler):
                     self.logger.warning(f"[图片拦截] 触发警报失败: {e}")
 
                 # 4. 终止后续流程，不让图片进入 LangGraph
+                return True
+
+            if context.type == ContextType.VIDEO or (
+                content_text and ('[视频]' in content_text or '[Video]' in content_text)
+            ):
+                duration_ms = int((time.perf_counter() - handle_started_at) * 1000)
+                self.logger.warning(
+                    "event=pdd.transfer_human.triggered "
+                    + self._trace_fields(
+                        trace,
+                        action="video_intercept",
+                        duration_ms=duration_ms,
+                        content_length=trace.get("content_length", 0),
+                        content_hash=trace.get("content_hash", ""),
+                    )
+                )
+                redis_manager.set_human_lock(session_id, ttl=HUMAN_LOCK_TTL)
+                fixed_reply = self.VIDEO_INTERCEPT_REPLY
+                await self._send_reply(context, fixed_reply, metadata)
+                try:
+                    self._alert_manual_transfer(
+                        metadata,
+                        session_id,
+                        "用户发送视频",
+                        "low",
+                        context=context,
+                        action="video_intercept",
+                        reply=fixed_reply,
+                    )
+                except TypeError:
+                    self._alert_manual_transfer(metadata, session_id, "用户发送视频", "low")
+                reply_length, reply_hash = self._fingerprint(fixed_reply)
+                duration_ms = int((time.perf_counter() - handle_started_at) * 1000)
+                self.logger.info(
+                    "event=pdd.reply.generated "
+                    + self._trace_fields(
+                        trace,
+                        action="video_intercept",
+                        duration_ms=duration_ms,
+                        reply_length=reply_length,
+                        reply_hash=reply_hash,
+                    )
+                )
+                return True
+
+            if context.type == ContextType.EMOTION:
+                fixed_reply = self.EMOTION_DEFAULT_REPLY
+                reply_length, reply_hash = self._fingerprint(fixed_reply)
+                duration_ms = int((time.perf_counter() - handle_started_at) * 1000)
+                self.logger.info(
+                    "event=pdd.reply.generated "
+                    + self._trace_fields(
+                        trace,
+                        action="emotion_default_reply",
+                        duration_ms=duration_ms,
+                        reply_length=reply_length,
+                        reply_hash=reply_hash,
+                    )
+                )
+                await self._send_reply(context, fixed_reply, metadata)
+                return True
+
+            if not content_text.strip():
+                duration_ms = int((time.perf_counter() - handle_started_at) * 1000)
+                self.logger.info(
+                    "event=pdd.message.skipped "
+                    + self._trace_fields(
+                        trace,
+                        action="empty_content",
+                        duration_ms=duration_ms,
+                    )
+                )
                 return True
 
             # =====================================================
@@ -310,6 +455,18 @@ class AIReplyHandler(BaseHandler):
                     )
                     self.logger.info("Pipeline 已要求静默跳过，终止自动回复")
                     return True
+                if reply == self.PIPELINE_BLOCK:
+                    duration_ms = int((time.perf_counter() - handle_started_at) * 1000)
+                    self.logger.info(
+                        "event=pdd.message.skipped "
+                        + self._trace_fields(
+                            trace,
+                            action="keyword_block",
+                            duration_ms=duration_ms,
+                        )
+                    )
+                    self.logger.info("Pipeline 已按关键词 block 规则拦截，终止自动回复")
+                    return True
                 if not reply:
                     duration_ms = int((time.perf_counter() - handle_started_at) * 1000)
                     self.logger.warning(
@@ -321,7 +478,14 @@ class AIReplyHandler(BaseHandler):
                         )
                     )
                     self.logger.warning("AI回复生成失败，使用备用回复")
-                    self._alert_manual_transfer(metadata, session_id, "AI reply send failed", "high")
+                    self._alert_manual_transfer(
+                        metadata,
+                        session_id,
+                        "AI reply send failed",
+                        "high",
+                        context=context,
+                        action="ai_empty_reply",
+                    )
                     return await self._handle_fallback(context, metadata)
 
                 # =====================================================
@@ -524,6 +688,20 @@ class AIReplyHandler(BaseHandler):
                         + self._trace_fields(trace, action="skip", duration_ms=duration_ms)
                     )
                     return self.PIPELINE_SKIP
+                if action == "block":
+                    self.logger.info(
+                        "event=pdd.pipeline.completed "
+                        + self._trace_fields(
+                            trace,
+                            action="block",
+                            duration_ms=duration_ms,
+                        )
+                    )
+                    self.logger.info(
+                        "Pipeline block: "
+                        + self._trace_fields(trace, action="keyword_block", duration_ms=duration_ms)
+                    )
+                    return self.PIPELINE_BLOCK
             except Exception as e:
                 duration_ms = int((time.perf_counter() - request_started_at) * 1000)
                 self.logger.warning(
@@ -583,11 +761,18 @@ class AIReplyHandler(BaseHandler):
                 from core.notification import NotificationService
                 notification_service = container.get(NotificationService)
                 if notification_service:
-                    notification_service.alert_human_fallback(
+                    self._call_notification_service(
+                        notification_service,
                         shop_id=str(metadata.get('shop_id') or 'unknown'),
                         user_id=str(metadata.get('from_uid') or 'unknown'),
                         reason=f"LLM回复包含危险词汇: {detected_dangers}",
                         alert_level="high",
+                        metadata=self._build_notification_metadata(
+                            metadata,
+                            action="unsafe_reply",
+                            reason="LLM reply contains dangerous keywords",
+                            reply=response_text,
+                        ),
                     )
             except Exception as e:
                 self.logger.warning(f"[后置护栏] 触发警报失败: {e}")
@@ -725,6 +910,10 @@ class AIReplyHandler(BaseHandler):
                     f"{metadata.get('shop_id')}_{from_uid}",
                     f"PDD send failed: pdd_result={pdd_result_summary}",
                     "high",
+                    context=context,
+                    action="reply_delivery_unknown",
+                    reply=reply,
+                    final_status="reply_delivery_unknown",
                 )
                 return False
             self._alert_manual_transfer(
@@ -732,6 +921,10 @@ class AIReplyHandler(BaseHandler):
                 f"{metadata.get('shop_id')}_{from_uid}",
                 f"PDD send failed: pdd_result={pdd_result_summary}",
                 "high",
+                context=context,
+                action="reply_send_failed",
+                reply=reply,
+                final_status="reply_send_failed",
             )
             self.logger.warning(
                 "event=pdd.reply.send.failed "
@@ -792,23 +985,43 @@ class AIReplyHandler(BaseHandler):
                 )
             )
             self.logger.error(f"发送回复失败: {e}")
-            self._alert_manual_transfer(metadata, f"{metadata.get('shop_id')}_{metadata.get('from_uid')}", f"Send reply exception: {e}", "high")
+            self._alert_manual_transfer(
+                metadata,
+                f"{metadata.get('shop_id')}_{metadata.get('from_uid')}",
+                f"Send reply exception: {type(e).__name__}",
+                "high",
+                context=context,
+                action="reply_send_exception",
+                reply=reply,
+                final_status="reply_send_failed",
+            )
             return False
 
 
     def _alert_manual_transfer(self, metadata: Dict[str, Any], session_id: str, reason: str,
-                               alert_level: str = "high") -> None:
+                               alert_level: str = "high", context: Optional[Context] = None,
+                               action: str = "manual_transfer", reply: Optional[str] = None,
+                               final_status: str = "") -> None:
         """Notify UI that manual intervention is required."""
         try:
             from core.di_container import container
             from core.notification import NotificationService
             notification_service = container.get(NotificationService)
             if notification_service:
-                notification_service.alert_human_fallback(
+                self._call_notification_service(
+                    notification_service,
                     shop_id=str(metadata.get('shop_id') or 'unknown'),
                     user_id=str(metadata.get('from_uid') or 'unknown'),
                     reason=reason,
                     alert_level=alert_level,
+                    metadata=self._build_notification_metadata(
+                        metadata,
+                        context=context,
+                        action=action,
+                        reason=reason,
+                        reply=reply,
+                        final_status=final_status,
+                    ),
                 )
         except Exception as alert_error:
             self.logger.warning(f"Manual transfer alert failed: {alert_error}")

@@ -3,6 +3,7 @@ import time
 from types import SimpleNamespace
 
 import Session.session_manager as session_module
+from bridge.context import ContextType
 from Message.core.pipeline import MessagePipeline
 from Message.core.queue import queue_manager
 from Message.handlers.ai_handler import AIReplyHandler
@@ -14,15 +15,16 @@ class FakeNotificationService:
     def __init__(self):
         self.alerts = []
 
-    def alert_human_fallback(self, shop_id, user_id, reason, alert_level="low"):
-        self.alerts.append(
-            {
-                "shop_id": shop_id,
-                "user_id": user_id,
-                "reason": reason,
-                "alert_level": alert_level,
-            }
-        )
+    def alert_human_fallback(self, shop_id, user_id, reason, alert_level="low", metadata=None):
+        alert = {
+            "shop_id": shop_id,
+            "user_id": user_id,
+            "reason": reason,
+            "alert_level": alert_level,
+        }
+        if metadata is not None:
+            alert["metadata"] = metadata
+        self.alerts.append(alert)
 
 
 class BlockingFastGPT:
@@ -32,8 +34,52 @@ class BlockingFastGPT:
 
 
 class SkipPipeline:
-    async def process(self, message):
+    async def process(self, message, **kwargs):
         return {"action": "skip", "session_id": "s1", "status": "pending_human"}
+
+
+class BlockPipeline:
+    def __init__(self):
+        self.calls = 0
+
+    async def process(self, message, **kwargs):
+        self.calls += 1
+        return {"action": "block", "session_id": "s1"}
+
+
+class CountingPipeline:
+    def __init__(self):
+        self.calls = 0
+
+    async def process(self, message, **kwargs):
+        self.calls += 1
+        return {"action": "reply", "text": "pipeline-reply", "session_id": "s1"}
+
+
+class OutcomePipeline:
+    def __init__(self, action, text="ok"):
+        self.action = action
+        self.text = text
+
+    async def process(self, message, **kwargs):
+        return {"action": self.action, "text": self.text, "session_id": "s1"}
+
+
+class FakeLogger:
+    def __init__(self):
+        self.messages = []
+
+    def info(self, message):
+        self.messages.append(("info", message))
+
+    def warning(self, message):
+        self.messages.append(("warning", message))
+
+    def error(self, message):
+        self.messages.append(("error", message))
+
+    def debug(self, message):
+        self.messages.append(("debug", message))
 
 
 class FakeConfigDb:
@@ -53,6 +99,52 @@ class FakeConfigDb:
     def delete_config(self, key):
         self.values.pop(key, None)
         return True
+
+
+def _base_context(message_type=ContextType.TEXT, content="hello"):
+    return SimpleNamespace(
+        type=message_type,
+        content=content,
+        kwargs=SimpleNamespace(
+            from_uid="buyer-1",
+            shop_id="shop-1",
+            user_id="user-1",
+            trace_id="trace-1",
+            source_message_id="source-1",
+            content_length=len(str(content or "")),
+            content_hash="content-hash-1",
+        ),
+    )
+
+
+def _base_metadata():
+    return {
+        "shop_id": "shop-1",
+        "user_id": "user-1",
+        "from_uid": "buyer-1",
+        "trace_id": "trace-1",
+        "source_message_id": "source-1",
+        "queue_message_id": "queue-1",
+    }
+
+
+def _install_notification_service(service):
+    from core.di_container import container
+    from core.notification import NotificationService
+
+    container._services.clear()
+    container._singletons.clear()
+    container._scoped_instances.clear()
+    container.register_singleton(NotificationService, instance=service)
+    return container
+
+
+def _clear_container():
+    from core.di_container import container
+
+    container._services.clear()
+    container._singletons.clear()
+    container._scoped_instances.clear()
 
 
 def test_fastgpt_call_does_not_block_event_loop():
@@ -88,11 +180,405 @@ def test_pipeline_skip_is_silent_not_fallback():
         handler = AIReplyHandler()
         handler._pipeline = SkipPipeline()
 
-        result = await handler._get_ai_reply("退款", SimpleNamespace(kwargs=SimpleNamespace()))
+        result = await handler._get_ai_reply(
+            "退款",
+            SimpleNamespace(content="退款", kwargs=SimpleNamespace()),
+        )
 
         assert result == handler.PIPELINE_SKIP
 
     asyncio.run(scenario())
+
+
+def test_pipeline_block_is_processed_without_reply_or_transfer():
+    async def scenario():
+        handler = AIReplyHandler()
+        pipeline = BlockPipeline()
+        handler._pipeline = pipeline
+        calls = {"send": 0, "transfer": 0, "fallback": 0}
+        logger = FakeLogger()
+
+        async def fake_send_reply(context, reply, metadata):
+            calls["send"] += 1
+            return True
+
+        def fake_alert_manual_transfer(metadata, session_id, reason, alert_level="low"):
+            calls["transfer"] += 1
+
+        async def fake_handle_fallback(context, metadata):
+            calls["fallback"] += 1
+            return False
+
+        handler.logger = logger
+        handler._send_reply = fake_send_reply
+        handler._alert_manual_transfer = fake_alert_manual_transfer
+        handler._handle_fallback = fake_handle_fallback
+
+        context = SimpleNamespace(
+            type=ContextType.TEXT,
+            content="屏蔽词",
+            kwargs=SimpleNamespace(
+                from_uid="buyer-1",
+                shop_id="shop-1",
+                user_id="user-1",
+                trace_id="trace-1",
+                source_message_id="source-1",
+                content_length=3,
+                content_hash="hash-1",
+            ),
+        )
+        metadata = {
+            "shop_id": "shop-1",
+            "user_id": "user-1",
+            "from_uid": "buyer-1",
+            "trace_id": "trace-1",
+            "source_message_id": "source-1",
+            "queue_message_id": "queue-1",
+        }
+
+        result = await handler.handle(context, metadata)
+
+        assert result is True
+        assert pipeline.calls == 1
+        assert calls == {"send": 0, "transfer": 0, "fallback": 0}
+        assert any(
+            "event=pdd.message.skipped" in message and "action=keyword_block" in message
+            for _, message in logger.messages
+        )
+
+    asyncio.run(scenario())
+
+
+def test_media_and_empty_messages_have_deterministic_handler_paths():
+    async def scenario(message_type, content, expected):
+        handler = AIReplyHandler()
+        pipeline = CountingPipeline()
+        logger = FakeLogger()
+        handler._pipeline = pipeline
+        handler.logger = logger
+        calls = {"send": 0, "transfer": 0, "fallback": 0}
+        sent_replies = []
+
+        async def fake_send_reply(context, reply, metadata):
+            calls["send"] += 1
+            sent_replies.append(reply)
+            return True
+
+        def fake_alert_manual_transfer(metadata, session_id, reason, alert_level="low"):
+            calls["transfer"] += 1
+
+        async def fake_handle_fallback(context, metadata):
+            calls["fallback"] += 1
+            return False
+
+        handler._send_reply = fake_send_reply
+        handler._alert_manual_transfer = fake_alert_manual_transfer
+        handler._handle_fallback = fake_handle_fallback
+
+        context = SimpleNamespace(
+            type=message_type,
+            content=content,
+            kwargs=SimpleNamespace(
+                from_uid="buyer-1",
+                shop_id="shop-1",
+                user_id="user-1",
+                trace_id=f"trace-{message_type.value}",
+                source_message_id="source-1",
+                content_length=len(str(content or "")),
+                content_hash="hash-1",
+            ),
+        )
+        metadata = {
+            "shop_id": "shop-1",
+            "user_id": "user-1",
+            "from_uid": "buyer-1",
+            "trace_id": f"trace-{message_type.value}",
+            "source_message_id": "source-1",
+            "queue_message_id": "queue-1",
+        }
+
+        result = await handler.handle(context, metadata)
+
+        assert result is True
+        assert pipeline.calls == 0
+        assert calls == expected["calls"]
+        assert any(expected["action"] in message for _, message in logger.messages)
+        if expected["send"]:
+            assert sent_replies
+        else:
+            assert sent_replies == []
+
+    asyncio.run(
+        scenario(
+            ContextType.IMAGE,
+            "[图片]",
+            {
+                "calls": {"send": 1, "transfer": 0, "fallback": 0},
+                "action": "action=image_intercept",
+                "send": True,
+            },
+        )
+    )
+    asyncio.run(
+        scenario(
+            ContextType.VIDEO,
+            "[视频]",
+            {
+                "calls": {"send": 1, "transfer": 1, "fallback": 0},
+                "action": "action=video_intercept",
+                "send": True,
+            },
+        )
+    )
+    asyncio.run(
+        scenario(
+            ContextType.EMOTION,
+            "[表情]",
+            {
+                "calls": {"send": 1, "transfer": 0, "fallback": 0},
+                "action": "action=emotion_default_reply",
+                "send": True,
+            },
+        )
+    )
+    asyncio.run(
+        scenario(
+            ContextType.TEXT,
+            "",
+            {
+                "calls": {"send": 0, "transfer": 0, "fallback": 0},
+                "action": "action=empty_content",
+                "send": False,
+            },
+        )
+    )
+    asyncio.run(
+        scenario(
+            ContextType.SYSTEM_BIZ,
+            "system event",
+            {
+                "calls": {"send": 0, "transfer": 0, "fallback": 0},
+                "action": "action=unsupported_message_type",
+                "send": False,
+            },
+        )
+    )
+
+
+def test_video_intercept_notification_metadata_includes_trace_action():
+    async def scenario():
+        notifier = FakeNotificationService()
+        _install_notification_service(notifier)
+        handler = AIReplyHandler()
+        handler._pipeline = CountingPipeline()
+
+        async def fake_send_reply(context, reply, metadata):
+            return True
+
+        handler._send_reply = fake_send_reply
+        try:
+            result = await handler.handle(_base_context(ContextType.VIDEO, "[视频]"), _base_metadata())
+        finally:
+            _clear_container()
+
+        assert result is True
+        assert len(notifier.alerts) == 1
+        metadata = notifier.alerts[0]["metadata"]
+        assert metadata["trace_id"] == "trace-1"
+        assert metadata["source_message_id"] == "source-1"
+        assert metadata["queue_message_id"] == "queue-1"
+        assert metadata["shop_id"] == "shop-1"
+        assert metadata["user_id"] == "user-1"
+        assert metadata["customer_uid"] == "buyer-1"
+        assert metadata["action"] == "video_intercept"
+        assert metadata["message_type"] == "video"
+        assert metadata["reply_length"] > 0
+        assert metadata["reply_hash"]
+
+    asyncio.run(scenario())
+
+
+def test_send_reply_failure_notification_metadata_has_final_status(monkeypatch):
+    async def scenario():
+        notifier = FakeNotificationService()
+        _install_notification_service(notifier)
+        handler = AIReplyHandler()
+
+        class FakeSender:
+            def __init__(self, shop_id, user_id):
+                pass
+
+            def send_text(self, from_uid, reply):
+                return {"success": False, "result": {"error_code": 500}}
+
+        monkeypatch.setattr("Channel.pinduoduo.utils.API.send_message.SendMessage", FakeSender)
+        try:
+            result = await handler._send_reply(_base_context(ContextType.TEXT, "buyer text"), "reply text", _base_metadata())
+        finally:
+            _clear_container()
+
+        assert result is False
+        assert len(notifier.alerts) == 1
+        metadata = notifier.alerts[0]["metadata"]
+        assert metadata["trace_id"] == "trace-1"
+        assert metadata["action"] == "reply_send_failed"
+        assert metadata["final_status"] == "reply_send_failed"
+        assert metadata["reply_length"] == len("reply text")
+        assert metadata["reply_hash"]
+        assert metadata["content_length"] == len("buyer text")
+        assert metadata["content_hash"]
+
+    asyncio.run(scenario())
+
+
+def test_send_reply_unknown_delivery_notification_metadata_has_final_status(monkeypatch):
+    async def scenario():
+        notifier = FakeNotificationService()
+        _install_notification_service(notifier)
+        handler = AIReplyHandler()
+
+        class FakeSender:
+            def __init__(self, shop_id, user_id):
+                pass
+
+            def send_text(self, from_uid, reply):
+                return {"success": True, "result": "accepted"}
+
+        monkeypatch.setattr("Channel.pinduoduo.utils.API.send_message.SendMessage", FakeSender)
+        try:
+            result = await handler._send_reply(_base_context(ContextType.TEXT, "buyer text"), "reply text", _base_metadata())
+        finally:
+            _clear_container()
+
+        assert result is False
+        assert len(notifier.alerts) == 1
+        metadata = notifier.alerts[0]["metadata"]
+        assert metadata["trace_id"] == "trace-1"
+        assert metadata["action"] == "reply_delivery_unknown"
+        assert metadata["final_status"] == "reply_delivery_unknown"
+        assert metadata["reply_length"] == len("reply text")
+        assert metadata["reply_hash"]
+
+    asyncio.run(scenario())
+
+
+def test_ai_empty_reply_notification_metadata_includes_action():
+    async def scenario():
+        notifier = FakeNotificationService()
+        _install_notification_service(notifier)
+        handler = AIReplyHandler()
+        handler._pipeline = OutcomePipeline("reply", text="")
+
+        async def fake_handle_fallback(context, metadata):
+            return True
+
+        handler._handle_fallback = fake_handle_fallback
+        try:
+            result = await handler.handle(_base_context(ContextType.TEXT, "buyer text"), _base_metadata())
+        finally:
+            _clear_container()
+
+        assert result is True
+        assert len(notifier.alerts) == 1
+        metadata = notifier.alerts[0]["metadata"]
+        assert metadata["trace_id"] == "trace-1"
+        assert metadata["source_message_id"] == "source-1"
+        assert metadata["queue_message_id"] == "queue-1"
+        assert metadata["action"] == "ai_empty_reply"
+        assert metadata["message_type"] == "text"
+        assert metadata["content_length"] == len("buyer text")
+        assert metadata["content_hash"]
+
+    asyncio.run(scenario())
+
+
+def test_pipeline_missing_dataset_notification_metadata_includes_action():
+    class FakeDb:
+        def get_shop_by_platform_id(self, platform, shop_platform_id):
+            return {
+                "id": "db-shop-1",
+                "shop_id": shop_platform_id,
+                "shop_name": "shop",
+                "fastgpt_dataset_id": "",
+            }
+
+    class FakeSessionManager:
+        async def get_or_create_conversation(self, shop_id, buyer_id, user_id):
+            return SimpleNamespace(session_id="session-1", status="active")
+
+        def add_message(self, *args, **kwargs):
+            pass
+
+        def set_status(self, *args, **kwargs):
+            pass
+
+        def build_context_messages(self, *args, **kwargs):
+            return []
+
+        async def check_and_compress(self, *args, **kwargs):
+            return None
+
+    class FakeKeywordHandler:
+        def check(self, shop_id, text):
+            return {"matched": False}
+
+    class FakeFastGpt:
+        pass
+
+    async def scenario():
+        notifier = FakeNotificationService()
+        _install_notification_service(notifier)
+        pipeline = MessagePipeline(FakeDb(), FakeSessionManager(), FakeKeywordHandler(), FakeFastGpt(), None)
+        try:
+            result = await pipeline.process(
+                {
+                    "buyer_id": "buyer-1",
+                    "shop_platform_id": "shop-1",
+                    "content": "buyer question",
+                    "user_id": "user-1",
+                    "trace_id": "trace-1",
+                    "source_message_id": "source-1",
+                    "queue_message_id": "queue-1",
+                    "message_type": "text",
+                }
+            )
+        finally:
+            _clear_container()
+
+        assert result["action"] == "transfer_human"
+        assert len(notifier.alerts) == 1
+        metadata = notifier.alerts[0]["metadata"]
+        assert metadata["trace_id"] == "trace-1"
+        assert metadata["source_message_id"] == "source-1"
+        assert metadata["queue_message_id"] == "queue-1"
+        assert metadata["session_id"] == "session-1"
+        assert metadata["shop_id"] == "shop-1"
+        assert metadata["user_id"] == "user-1"
+        assert metadata["customer_uid"] == "buyer-1"
+        assert metadata["action"] == "missing_fastgpt_dataset_id"
+        assert metadata["message_type"] == "text"
+        assert metadata["content_length"] == len("buyer question")
+        assert metadata["content_hash"]
+        assert metadata["reply_length"] > 0
+        assert metadata["reply_hash"]
+
+    asyncio.run(scenario())
+
+
+def test_pipeline_reply_and_transfer_actions_still_return_reply_text():
+    async def scenario(action):
+        handler = AIReplyHandler()
+        handler._pipeline = OutcomePipeline(action, text=f"{action}-reply")
+
+        result = await handler._get_ai_reply(
+            "你好",
+            SimpleNamespace(content="你好", kwargs=SimpleNamespace()),
+        )
+
+        assert result == f"{action}-reply"
+
+    asyncio.run(scenario("reply"))
+    asyncio.run(scenario("transfer_human"))
 
 
 def test_session_fallback_throttle_allows_first_then_near_expiry_second():

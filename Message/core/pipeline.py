@@ -48,6 +48,7 @@ class MessagePipeline:
         session_id: str,
         reason: str,
         alert_level: str = "high",
+        metadata: Dict[str, Any] = None,
     ) -> None:
         """触发转人工 UI 告警和提示音。"""
         try:
@@ -56,12 +57,26 @@ class MessagePipeline:
 
             notification_service = container.get(NotificationService)
             if notification_service:
-                notification_service.alert_human_fallback(
-                    shop_id=shop_id,
-                    user_id=buyer_id,
-                    reason=reason,
-                    alert_level=alert_level,
-                )
+                alert_metadata = dict(metadata or {})
+                alert_metadata.setdefault("session_id", session_id)
+                alert_metadata.setdefault("shop_id", shop_id)
+                alert_metadata.setdefault("customer_uid", buyer_id)
+                alert_metadata.setdefault("action", "transfer_human")
+                try:
+                    notification_service.alert_human_fallback(
+                        shop_id=shop_id,
+                        user_id=buyer_id,
+                        reason=reason,
+                        alert_level=alert_level,
+                        metadata=alert_metadata,
+                    )
+                except TypeError:
+                    notification_service.alert_human_fallback(
+                        shop_id=shop_id,
+                        user_id=buyer_id,
+                        reason=reason,
+                        alert_level=alert_level,
+                    )
         except Exception as e:
             logger.warning(f"转人工通知触发失败: {e}")
 
@@ -87,6 +102,26 @@ class MessagePipeline:
             "user_id": str(user_id or ""),
             "customer_uid": str(buyer_id or ""),
         }
+
+        def alert_metadata(action: str, reply: Any = None, final_status: str = "") -> Dict[str, Any]:
+            metadata = dict(trace)
+            metadata.update(
+                {
+                    "action": action,
+                    "message_type": str(message.get("message_type") or "text"),
+                    "content_length": content_length,
+                    "content_hash": content_hash,
+                    "buyer_message_preview": buyer_text,
+                }
+            )
+            if final_status:
+                metadata["final_status"] = final_status
+            if reply is not None:
+                reply_length, reply_hash = _fingerprint(reply)
+                metadata["seller_or_ai_reply_preview"] = reply
+                metadata["reply_length"] = reply_length
+                metadata["reply_hash"] = reply_hash
+            return metadata
 
         if not buyer_id or not buyer_text:
             duration_ms = int((time.perf_counter() - process_started_at) * 1000)
@@ -218,6 +253,7 @@ class MessagePipeline:
                         session_id,
                         f"关键词: {kw_result['keyword']}",
                         "high",
+                        metadata=alert_metadata("keyword_transfer_human", reply),
                     )
                     reply_length, reply_hash = _fingerprint(reply)
                     duration_ms = int((time.perf_counter() - process_started_at) * 1000)
@@ -283,6 +319,7 @@ class MessagePipeline:
                     session_id,
                     "店铺未配置 FastGPT 知识库ID",
                     "high",
+                    metadata=alert_metadata("missing_fastgpt_dataset_id", TRANSFER_HUMAN_REPLY),
                 )
                 reply_length, reply_hash = _fingerprint(TRANSFER_HUMAN_REPLY)
                 duration_ms = int((time.perf_counter() - process_started_at) * 1000)
@@ -350,6 +387,7 @@ class MessagePipeline:
                         session_id,
                         "AI 判断需要转人工",
                         "high",
+                        metadata=alert_metadata("ai_transfer_human", reply),
                     )
                     duration_ms = int((time.perf_counter() - process_started_at) * 1000)
                     logger.warning(
@@ -422,6 +460,7 @@ class MessagePipeline:
                     session_id,
                     "FastGPT 失败，fallback 已节流",
                     "high",
+                    metadata=alert_metadata("fallback_throttled"),
                 )
                 duration_ms = int((time.perf_counter() - process_started_at) * 1000)
                 logger.warning(
@@ -456,6 +495,7 @@ class MessagePipeline:
                 session_id,
                 f"FastGPT 失败，已发送第 {fallback_stage} 次 fallback",
                 "high",
+                metadata=alert_metadata(f"fastgpt_failed_fallback_{fallback_stage}", fallback),
             )
             duration_ms = int((time.perf_counter() - process_started_at) * 1000)
             logger.warning(
@@ -476,6 +516,7 @@ class MessagePipeline:
                     session_id,
                     "FastGPT 连续失败",
                     "high",
+                    metadata=alert_metadata("fastgpt_repeated_failure_transfer", fallback),
                 )
                 duration_ms = int((time.perf_counter() - process_started_at) * 1000)
                 logger.info(
@@ -539,6 +580,7 @@ class MessagePipeline:
                 str(session_id or ""),
                 f"Pipeline 异常: {e}",
                 "high",
+                metadata=alert_metadata("pipeline_exception", TRANSFER_HUMAN_REPLY),
             )
             reply_length, reply_hash = _fingerprint(TRANSFER_HUMAN_REPLY)
             logger.warning(

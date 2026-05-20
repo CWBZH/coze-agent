@@ -368,17 +368,27 @@ def configure_standard_services(config_instance: Any = None) -> 'DIContainer':
         )
 
     # 3. NotificationService（UI 通知服务）- 环境隔离注入
-    from core.notification import NotificationService, DummyNotificationService
+    from core.notification import NotificationService, DummyNotificationService, HeadlessNotificationService
+    from core.config import PUSHPLUS_ENABLED, PUSHPLUS_TOKEN
     import os
 
     if not container.is_registered(NotificationService):
         if os.getenv("HEADLESS_MODE") == "1":
-            # Linux/Docker 无头模式：注入空壳服务，绝对不加载 PyQt6
-            container.logger.info("[环境隔离] HEADLESS_MODE=1，注入 DummyNotificationService")
-            container.register_singleton(
-                NotificationService,
-                factory=lambda: DummyNotificationService()
-            )
+            if PUSHPLUS_ENABLED and PUSHPLUS_TOKEN:
+                container.logger.info("[环境隔离] HEADLESS_MODE=1，注入 HeadlessNotificationService")
+                container.register_singleton(
+                    NotificationService,
+                    factory=lambda: HeadlessNotificationService()
+                )
+            else:
+                container.logger.warning(
+                    "[环境隔离] HEADLESS_MODE=1 但 PushPlus 未启用或 token 缺失，"
+                    "注入 DummyNotificationService"
+                )
+                container.register_singleton(
+                    NotificationService,
+                    factory=lambda: DummyNotificationService()
+                )
         else:
             # Windows 桌面模式：局部按需加载 UI 组件
             container.logger.info("[环境隔离] 桌面模式，注入 UINotificationService")
