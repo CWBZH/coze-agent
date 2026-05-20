@@ -6,6 +6,10 @@ logs/
 *.log
 app_crash*.log
 temp/
+runtime.stop
+worker_status.json
+diagnostics/
+**/diagnostics/
 __pycache__/
 
 __pycache__
