@@ -19,12 +19,36 @@ import requests
 import json
 import hashlib
 import asyncio
+import inspect
 from typing import Optional, Dict, Any, Tuple
 import sys
 from database import db_manager
 from playwright.async_api import async_playwright
 from Channel.pinduoduo.utils.API.get_shop_info import GetShopInfo
 from Channel.pinduoduo.utils.API.get_user_info import GetUserInfo
+
+async def _safe_close_playwright_resource(resource, label: str, logger, timeout: float = 5.0):
+    """Close a Playwright page/context/driver before the event loop is closed."""
+    if not resource:
+        return
+
+    try:
+        close_fn = getattr(resource, "close", None)
+        stop_fn = getattr(resource, "stop", None)
+        action = close_fn or stop_fn
+        if not action:
+            return
+
+        result = action()
+        if inspect.isawaitable(result):
+            await asyncio.wait_for(result, timeout=timeout)
+    except asyncio.CancelledError:
+        raise
+    except asyncio.TimeoutError:
+        logger.warning(f"Playwright resource close timeout: resource={label}, timeout={timeout}")
+    except Exception as e:
+        logger.debug(f"Playwright resource close failed: resource={label}, error_type={type(e).__name__}")
+
 
 class PDDLogin():
     def __init__(self,name,password):
@@ -41,6 +65,9 @@ class PDDLogin():
             password: 账号密码
 
         """
+        playwright = None
+        context = None
+        page = None
         try:
             # 启动Playwright
             playwright = await async_playwright().start()
@@ -92,15 +119,17 @@ class PDDLogin():
             # 将playwright格式的cookies列表转换为字典格式，使用安全的get方法
             cookies_dict = {cookie.get('name', ''): cookie.get('value', '') for cookie in cookies_list if cookie.get('name')}
             cookies_json = json.dumps(cookies_dict)
-            # 关闭浏览器上下文
-            await context.close()
-            await playwright.stop()
                 
             return cookies_json
             
         except Exception as e:
             self.logger.error(f"登录失败: {str(e)}")
             return False
+        finally:
+            await _safe_close_playwright_resource(page, "page", self.logger)
+            await _safe_close_playwright_resource(context, "context", self.logger)
+            await _safe_close_playwright_resource(playwright, "playwright", self.logger)
+            await asyncio.sleep(0)
         
     async def refresh_cookies(self):
         """重新获取cookies，使用已保存的用户数据，无需再次登录
@@ -110,6 +139,7 @@ class PDDLogin():
         """
         playwright = None
         context = None
+        page = None
         try:
             # 启动Playwright
             playwright = await async_playwright().start()
@@ -165,13 +195,10 @@ class PDDLogin():
             self.logger.error(f"刷新cookies失败: {str(e)}")
             return False
         finally:
-            if context:
-                await context.close()
-            if playwright:
-                try:
-                    await playwright.stop()
-                except Exception:
-                    pass
+            await _safe_close_playwright_resource(page, "page", self.logger)
+            await _safe_close_playwright_resource(context, "context", self.logger)
+            await _safe_close_playwright_resource(playwright, "playwright", self.logger)
+            await asyncio.sleep(0)
 
     def Set_user_info(self,cookies_json):
         user_info = GetUserInfo(cookies_json)
