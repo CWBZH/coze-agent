@@ -1,0 +1,21 @@
+[Unit]
+Description=Customer Agent Headless Worker
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=customer-agent
+Group=customer-agent
+WorkingDirectory=/opt/customer-agent-refactor-v3
+EnvironmentFile=/opt/customer-agent-refactor-v3/.env
+ExecStartPre=/usr/bin/rm -f /opt/customer-agent-refactor-v3/runtime.stop
+ExecStart=/usr/bin/python3 -m runtime.worker --all-enabled --status-interval 5 --stop-file /opt/customer-agent-refactor-v3/runtime.stop
+ExecStop=/usr/bin/touch /opt/customer-agent-refactor-v3/runtime.stop
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+KillSignal=SIGTERM
+
+[Install]
+WantedBy=multi-user.target
