@@ -22,9 +22,10 @@ class SyncProgress:
 
 
 class ProductSyncService:
-    def __init__(self, db_manager, request_delay: float = 1.0):
+    def __init__(self, db_manager, request_delay: float = 1.0, auth_resolver=None):
         self.db = db_manager
         self.request_delay = request_delay
+        self.auth_resolver = auth_resolver
 
     async def sync_shop(self, shop_id: str, shop_db_id: int, user_id: str,
                         progress_callback: Optional[Callable] = None) -> SyncProgress:
@@ -106,6 +107,12 @@ class ProductSyncService:
         return resolved_user_id
 
     def _resolve_account(self, shop_id: str, user_id: str) -> tuple[str, dict]:
+        resolver = self.auth_resolver or self._build_default_auth_resolver()
+        if resolver is not None:
+            resolved = resolver.get_cookies(str(shop_id), platform="pdd", user_id=str(user_id) if user_id else None)
+            if getattr(resolved, "status", None) == "ok" and getattr(resolved, "cookies", None):
+                return str(getattr(resolved, "user_id", None) or user_id or ""), dict(resolved.cookies)
+
         if user_id:
             account = self._find_account(shop_id, str(user_id))
             return str(user_id), self._parse_cookies(account.get("cookies") if account else None)
@@ -125,6 +132,15 @@ class ProductSyncService:
             f"cookie_keys={len(cookies)}"
         )
         return resolved_user_id, cookies
+
+    @staticmethod
+    def _build_default_auth_resolver():
+        try:
+            from web_api.services.shop_auth_resolver import ShopAuthResolver
+
+            return ShopAuthResolver()
+        except Exception:
+            return None
 
     def _find_account(self, shop_id: str, user_id: str) -> Optional[Dict[str, Any]]:
         for account in self.db.get_accounts_by_shop("pinduoduo", str(shop_id)):

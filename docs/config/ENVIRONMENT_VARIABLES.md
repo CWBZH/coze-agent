@@ -27,8 +27,18 @@
 | `REDIS_PASSWORD` | Redis 密码 | 是，`core/config.py` | `change-me` | `change-me` | 是 | 不建议提供弱默认 |
 | `REDIS_DB` | Redis DB index | 是，`core/config.py` | `0` | `0` | 否 | `0` |
 | `FASTGPT_BASE_URL` | FastGPT API 基础地址 | 否，reserved for T021 配置加载 | `http://localhost:3000/api` | `http://fastgpt:3000/api` | 否 | 无 |
-| `FASTGPT_API_KEY` | FastGPT API key | 是，`app.py` | `your-fastgpt-api-key` | secret 注入 | 是 | 空 |
-| `FASTGPT_APP_ID` | FastGPT 应用 ID | 否，reserved for Linux delivery | `your-fastgpt-app-id` | `your-fastgpt-app-id` | 可能 | 空 |
+| `FASTGPT_API_KEY` | FastGPT API key | 是，`app.py` | `your_fastgpt_api_key` | secret 注入 | 是 | 空 |
+| `FASTGPT_APP_ID` | FastGPT application id, reserved only. Current auto-reply runtime does not read it. | 否，reserved / 当前运行链路暂未使用 | `your_fastgpt_app_id` | `your_fastgpt_app_id` | 可能 | 空 |
+| `AI_WORKFLOW_BACKEND` | AI workflow backend router. `fastgpt` is the default and production default; `internal` is experimental and must be explicitly enabled. | 是，`Message/workflow/router.py` | `fastgpt` | `fastgpt` | 否 | `fastgpt` |
+| `AI_WORKFLOW_INTENT_CLASSIFIER` | Intent classifier selector for the `internal` backend only. Allowed values: `null`, `fake`, `openai_compatible`; invalid values fall back to `null`. Real LLM classifier wiring is not the production default in this round. | 是，`Message/workflow/classifier_factory.py` | `null` | `null` | 否 | `null` |
+| `AI_WORKFLOW_PRODUCT_CACHE_TTL_SECONDS` | Product cache TTL in seconds for the `internal` backend only. `0` disables cache; invalid values fall back to `300`. | 是，internal workflow backend | `300` | `300` | 否 | `300` |
+| `AI_WORKFLOW_RAG_ENABLED` | Internal RAG feature switch. Default is disabled; fake RAG smoke can run without enabling production RAG. | 预留，internal RAG | `false` | `false` | 否 | `false` |
+| `AI_WORKFLOW_VECTOR_STORE` | Internal RAG vector store selector. Target production value is `pgvector`; tests default to in-memory fake store. | 预留，internal RAG | `pgvector` | `pgvector` | 否 | `pgvector` |
+| `AI_WORKFLOW_PGVECTOR_DSN` | PostgreSQL/pgvector DSN for internal RAG. Empty by default; real connection must be explicitly configured. | 预留，internal RAG | 空 | secret 注入 | 是 | 空 |
+| `AI_WORKFLOW_EMBEDDING_PROVIDER` | Internal RAG embedding provider. Target production value is local `ollama`; tests use `fake`. | 预留，internal RAG | `ollama` | `ollama` | 否 | `ollama` |
+| `AI_WORKFLOW_EMBEDDING_MODEL` | Internal RAG embedding model name. Target local model is `bge-m3`. | 预留，internal RAG | `bge-m3` | `bge-m3` | 否 | `bge-m3` |
+| `AI_WORKFLOW_OLLAMA_BASE_URL` | Local Ollama base URL for internal RAG embeddings. Real calls are opt-in and not used by default tests. | 预留，internal RAG | `http://localhost:11434` | `http://ollama:11434` | 否 | `http://localhost:11434` |
+| `AI_WORKFLOW_EMBEDDING_DIMENSION` | Expected embedding dimension for internal RAG. Default target for bge-m3 is `1024`. | 预留，internal RAG | `1024` | `1024` | 否 | `1024` |
 | `KNOWLEDGE_BASE_URL` | coze 远程知识库 URL | 是，`knowledge_tool.py` | `http://localhost:3000` | `http://fastgpt:3000` | 否 | `http://localhost:3000` |
 | `KNOWLEDGE_BASE_API_KEY` | coze 知识库 API key | 是，`knowledge_tool.py` | `your-knowledge-base-api-key` | secret 注入 | 是 | 空 |
 | `KNOWLEDGE_BASE_DATASET_ID` | coze 知识库 dataset id | 是，`knowledge_tool.py` | `your-knowledge-base-dataset-id` | `your-knowledge-base-dataset-id` | 否 | 空 |
@@ -41,7 +51,7 @@
 | `LLM_API_BASE` | refactor-v3 LLM API URL | 是，`core/config_manager.py` | `https://ark.cn-beijing.volces.com/api/v3` | provider URL | 否 | 无 |
 | `LLM_API_KEY` | LLM API key | 是，两项目均使用 | `your-llm-api-key` | secret 注入 | 是 | 空 |
 | `LLM_MODEL_NAME` | LLM 模型名 | 是，`core/config_manager.py` | `doubao-seed-2-0-mini-260215` | `doubao-seed-2-0-mini-260215` | 否 | 项目默认模型 |
-| `DOUBAO_AUTH` | Doubao Authorization header | 是，`ollama_proxy.py` | `Bearer your-doubao-token` | secret 注入 | 是 | 可由 `LLM_API_KEY` 生成 |
+| `DOUBAO_AUTH` | Doubao authorization header | 是，`ollama_proxy.py` | `your_doubao_auth_header` | secret 注入 | 是 | 可由 `LLM_API_KEY` 生成 |
 | `AGENT_CONFIG_PATH` | coze agent config JSON 路径 | 是，`agent.py` | `./config/agent_llm_config.json` | `/app/config/agent_llm_config.json` | 否 | 默认 config 路径 |
 | `SESSION_COMPRESS_MODEL` | 会话压缩模型 | 是，`core/config.py` | `doubao-seed-2-0-mini-260215` | `doubao-seed-2-0-mini-260215` | 否 | 当前默认 |
 | `SESSION_COMPRESS_BASE_URL` | 会话压缩 API 地址 | 是，`core/config.py` | `http://host.docker.internal:11435` | `http://ollama-proxy:11435` | 否 | 当前默认 |
@@ -92,6 +102,16 @@
 `customer-agent-refactor-v3` 当前已使用：
 
 - `FASTGPT_API_KEY`
+- `AI_WORKFLOW_BACKEND`
+- `AI_WORKFLOW_INTENT_CLASSIFIER`
+- `AI_WORKFLOW_PRODUCT_CACHE_TTL_SECONDS`
+- `AI_WORKFLOW_RAG_ENABLED`
+- `AI_WORKFLOW_VECTOR_STORE`
+- `AI_WORKFLOW_PGVECTOR_DSN`
+- `AI_WORKFLOW_EMBEDDING_PROVIDER`
+- `AI_WORKFLOW_EMBEDDING_MODEL`
+- `AI_WORKFLOW_OLLAMA_BASE_URL`
+- `AI_WORKFLOW_EMBEDDING_DIMENSION`
 - `HEADLESS_MODE`
 - `REDIS_HOST`
 - `REDIS_PORT`
@@ -141,7 +161,7 @@
 - `EXPORT_DIR`
 - `DB_PATH`
 - `FASTGPT_BASE_URL`
-- `FASTGPT_APP_ID`
+- `FASTGPT_APP_ID` (reserved only; current auto-reply runtime does not read it)
 - `OLLAMA_BASE_URL`
 - `PROXY_BASE_URL`
 - `PROXY_BIND_HOST`
@@ -174,6 +194,18 @@ Currently centralized through `core/settings.py`:
 - `LLM_API_BASE`
 - `LLM_API_KEY`
 - `LOCAL_MODEL_BASE_URL`
+
+FastGPT runtime note:
+
+- Current auto-reply traffic uses `FASTGPT_BASE_URL` and `FASTGPT_API_KEY`, or DB `AppConfig` key `fastgpt:api_key`, for authentication.
+- Current auto-reply traffic uses per-shop `shops.fastgpt_dataset_id` as the knowledge dataset selector.
+- Every shop expected to auto-reply through FastGPT must have `fastgpt_dataset_id` configured; otherwise the pipeline transfers to human.
+- `FASTGPT_APP_ID` is retained as reserved configuration and is not read by the current auto-reply runtime path.
+- `AI_WORKFLOW_BACKEND` defaults to `fastgpt`; `internal` is an experimental backend for future self-hosted workflow development and must be explicitly enabled.
+- The `internal` backend does not call FastGPT, does not send PDD messages, and is not the production default.
+- `AI_WORKFLOW_INTENT_CLASSIFIER` affects only the `internal` backend. It defaults to `null`; `null` never calls an LLM, `fake` is for tests only, and `openai_compatible` is constructed only when explicitly selected and wired with an injected transport. This round does not make a real LLM classifier the production default.
+- `AI_WORKFLOW_PRODUCT_CACHE_TTL_SECONDS` affects only the `internal` backend. The default is `300` seconds, `0` disables product caching, and invalid values fall back to `300`.
+- Internal RAG is disabled by default through `AI_WORKFLOW_RAG_ENABLED=false`. Real pgvector / Ollama usage requires explicit DSN/provider configuration and explicit real-smoke flags such as `--rag-smoke-real`; local tests and default no-send gate use fake embeddings and in-memory vector store.
 
 Default behavior:
 
@@ -281,7 +313,19 @@ Priority and compatibility:
 
 - `OLLAMA_BASE_URL` takes precedence over legacy `OLLAMA_URL`.
 - CLI proxy port argument still takes precedence over `PROXY_PORT`.
-- `DOUBAO_AUTH` takes precedence over building `Bearer <LLM_API_KEY>`.
+- `DOUBAO_AUTH` takes precedence over building the provider auth header from `LLM_API_KEY`.
 - `LLM_BASE_URL` takes precedence over `LLM_API_BASE`, then non-sensitive JSON fallback.
 - `KNOWLEDGE_BASE_URL` defaults to `http://localhost:3000` for local and `http://fastgpt:3000` for Linux/production.
 - `agent_llm_config.json` must not contain real API keys.
+
+## T104-A internal workflow offline LLM answer settings
+
+Real LLM answer generation is disabled by default and is only used by explicit no-send acceptance flags.
+
+- `AI_WORKFLOW_ANSWER_GENERATOR=null`
+- `AI_WORKFLOW_LLM_BASE_URL=`
+- `AI_WORKFLOW_LLM_MODEL=`
+- `AI_WORKFLOW_LLM_API_KEY=`
+- `AI_WORKFLOW_LLM_TIMEOUT_SECONDS=20`
+
+These settings do not change the default `fastgpt` backend, do not enable PDD sending, and do not affect the FastGPT backend path.

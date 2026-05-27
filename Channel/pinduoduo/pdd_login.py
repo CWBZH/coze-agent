@@ -112,7 +112,7 @@ class PDDLogin():
             await page.click("button:has-text('登录')")
             
             # 等待页面 title等于 拼多多 商家后台，首页或者订单查询
-            await page.wait_for_function("() => document.title === '拼多多 商家后台' || document.title === '首页' || document.title === '订单查询'", timeout=30000)
+            await page.wait_for_function("() => document.title === '拼多多 商家后台' || document.title === '首页' || document.title === '订单查询'", timeout=60000)
             
             # 获取cookies并转换为字典格式
             cookies_list = await context.cookies()

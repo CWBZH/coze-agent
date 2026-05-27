@@ -134,6 +134,7 @@ class MessageHandlerMixin:
     async def _process_websocket_message(self, message: str, shop_id: str, user_id: str, username: str, queue_name: str):
         """处理单条WebSocket消息"""
         from Message import put_message
+        from Message.core.session_debounce import pdd_text_debouncer
 
         try:
             if not message or not message.strip():
@@ -232,17 +233,21 @@ class MessageHandlerMixin:
                         f"queue_name={queue_name} message_type={context.kwargs.message_type} reason=immediate_message"
                     )
                 elif self._should_queue_message(context):
-                    msg_id = await put_message(queue_name, context)
+                    if context.type == ContextType.TEXT:
+                        msg_id = await pdd_text_debouncer.submit(queue_name, context, put_message)
+                    else:
+                        msg_id = await put_message(queue_name, context)
                     from Message import queue_manager
                     queue = queue_manager.get_queue(queue_name)
                     queue_size = queue.size() if queue and hasattr(queue, 'size') else 'unknown'
+                    queue_state = "pending_debounce" if msg_id is None else "queued"
                     self.logger.debug(
                         f"消息已入队: queue_name={queue_name}, ID={msg_id}, 类型={context.type}, "
                         f"shop_id={shop_id}, user_id={user_id}, "
                         f"queue_size={queue_size}"
                     )
                     self.logger.debug(
-                        f"event=pdd.message.queued trace_id={context.kwargs.trace_id} "
+                        f"event=pdd.message.{queue_state} trace_id={context.kwargs.trace_id} "
                         f"source_message_id={context.kwargs.source_message_id or ''} queue_message_id={msg_id} "
                         f"shop_id={shop_id} user_id={user_id} customer_uid={context.kwargs.from_uid or ''} "
                         f"from_uid={context.kwargs.from_uid or ''} to_uid={context.kwargs.to_uid or ''} "

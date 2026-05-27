@@ -28,6 +28,7 @@ class MessageWrapper:
     message_type: Optional[str] = None
     content_length: Optional[int] = None
     content_hash: Optional[str] = None
+    reliable_record_id: Optional[str] = None
 
     def __post_init__(self):
         if not self.message_id:
@@ -73,7 +74,8 @@ class MessageWrapper:
             'content_length': self.content_length,
             'content_hash': self.content_hash,
             'timestamp': self.timestamp,
-            'retry_count': self.retry_count
+            'retry_count': self.retry_count,
+            'reliable_record_id': self.reliable_record_id,
         }
 
     @staticmethod

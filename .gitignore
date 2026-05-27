@@ -10,6 +10,10 @@ runtime.stop
 worker_status.json
 diagnostics/
 **/diagnostics/
+docs/.obsidian/
+project.tar
+*.tar
+*.zip
 __pycache__/
 
 __pycache__
@@ -28,6 +32,8 @@ examples/
 logs/
 dist
 build
+node_modules/
+*.tsbuildinfo
 .venv
 user_data/
 *.db
@@ -35,6 +41,10 @@ user_data/
 config.json
 temp/
 .claude/
+.claude-flow/
+.mcp.json
+.superpowers/
+.swarm/
 
 # Backup directories
 backup/

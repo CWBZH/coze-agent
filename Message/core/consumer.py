@@ -9,6 +9,7 @@ from utils.logger_loguru import get_logger
 from bridge.context import Context
 from .queue import queue_manager
 from .handlers import MessageHandler
+from .session_debounce import session_key_from_metadata
 from ..models.queue_models import MessageWrapper
 
 
@@ -27,6 +28,7 @@ class MessageConsumer:
         self.consumer_task = None
         self._tasks: set = set()
         self._worker_tasks: set = set()
+        self._session_locks: Dict[str, asyncio.Lock] = {}
         self._loop = None
         self.logger = get_logger(f"Consumer.{queue_name}")
 
@@ -317,6 +319,8 @@ class MessageConsumer:
                     pass
                 # 保留用于日志的用户键
                 metadata['user_key'] = self._extract_user_id(wrapper.context)
+                session_key = session_key_from_metadata(metadata, wrapper.context, queue_name=self.queue_name)
+                session_lock = self._session_locks.setdefault(session_key, asyncio.Lock())
 
                 for handler in self.handlers:
                     try:
@@ -331,8 +335,21 @@ class MessageConsumer:
                                 f"content_length={metadata.get('content_length')} content_hash={metadata.get('content_hash') or ''} "
                                 f"consumer_id={id(self)} handler={handler.__class__.__name__}"
                             )
-                            success = await handler.handle(wrapper.context, metadata)
+                            async with session_lock:
+                                success = await handler.handle(wrapper.context, metadata)
                             if success:
+                                reliable_record_id = getattr(wrapper, "reliable_record_id", None)
+                                if reliable_record_id:
+                                    try:
+                                        queue = queue_manager.get_queue(self.queue_name)
+                                        if queue and getattr(queue, "reliable_store", None):
+                                            queue.reliable_store.mark_inbound_done(reliable_record_id)
+                                    except Exception as mark_error:
+                                        self.logger.warning(
+                                            f"Reliable inbound done mark failed: queue_name={self.queue_name}, "
+                                            f"queue_message_id={metadata.get('queue_message_id') or metadata.get('message_id') or ''}, "
+                                            f"error={mark_error}"
+                                        )
                                 processed = True
                                 self.logger.debug(
                                     f"event=pdd.handler.completed trace_id={metadata.get('trace_id') or ''} "
@@ -362,6 +379,18 @@ class MessageConsumer:
                         continue
 
                 if not processed:
+                    reliable_record_id = getattr(wrapper, "reliable_record_id", None)
+                    if reliable_record_id:
+                        try:
+                            queue = queue_manager.get_queue(self.queue_name)
+                            if queue and getattr(queue, "reliable_store", None):
+                                queue.reliable_store.mark_inbound_failed(reliable_record_id, "no_handler_processed")
+                        except Exception as mark_error:
+                            self.logger.warning(
+                                f"Reliable inbound failed mark failed: queue_name={self.queue_name}, "
+                                f"queue_message_id={metadata.get('queue_message_id') or metadata.get('message_id') or ''}, "
+                                f"error={mark_error}"
+                            )
                     self.logger.info(
                         f"event=pdd.message.skipped trace_id={metadata.get('trace_id') or ''} "
                         f"source_message_id={metadata.get('source_message_id') or ''} "
@@ -379,6 +408,14 @@ class MessageConsumer:
                     metadata = wrapper.to_metadata()
                 except Exception:
                     metadata = {}
+                reliable_record_id = getattr(wrapper, "reliable_record_id", None)
+                if reliable_record_id:
+                    try:
+                        queue = queue_manager.get_queue(self.queue_name)
+                        if queue and getattr(queue, "reliable_store", None):
+                            queue.reliable_store.mark_inbound_failed(reliable_record_id, type(e).__name__)
+                    except Exception:
+                        pass
                 self.logger.warning(
                     f"event=pdd.handler.failed trace_id={metadata.get('trace_id') or ''} "
                     f"source_message_id={metadata.get('source_message_id') or ''} "

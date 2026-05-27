@@ -28,6 +28,7 @@ from database.redis_manager import redis_manager
 # 导入集中式配置和常量
 from core.config import FALLBACK_SECOND_REMINDER_BEFORE_EXPIRY, HUMAN_LOCK_TTL, INFERENCE_LOCK_TTL
 from core.constants import IMAGE_INTERCEPT_REPLY, FALLBACK_REPLY_POOL
+from Message.workflow.private_trace import write_private_trace
 import random
 
 
@@ -131,6 +132,10 @@ class AIReplyHandler(BaseHandler):
         fields.update(extra)
         return " ".join(f"{key}={value}" for key, value in fields.items())
 
+    @staticmethod
+    def _write_send_private_trace(trace: Dict[str, Any], event: str, **payload: Any) -> None:
+        write_private_trace(str(trace.get("trace_id") or ""), event, payload)
+
     def _build_notification_metadata(
         self,
         metadata: Dict[str, Any],
@@ -195,6 +200,31 @@ class AIReplyHandler(BaseHandler):
             return "missing_result"
         value_length, value_hash = AIReplyHandler._fingerprint(pdd_result)
         return f"{type(pdd_result).__name__}:length={value_length}:hash={value_hash}"
+
+    @staticmethod
+    def _pdd_error_code(result: Any) -> str:
+        if not isinstance(result, dict):
+            return ""
+        pdd_result = result.get("result")
+        if isinstance(pdd_result, dict) and pdd_result.get("error_code") is not None:
+            return str(pdd_result.get("error_code"))
+        if result.get("error_code") is not None:
+            return str(result.get("error_code"))
+        return ""
+
+    @staticmethod
+    def _contains_emoji(text: str) -> bool:
+        return any(ord(char) > 0xFFFF for char in str(text or ""))
+
+    @staticmethod
+    def _contains_url(text: str) -> bool:
+        lowered = str(text or "").lower()
+        return "http://" in lowered or "https://" in lowered or "www." in lowered
+
+    @staticmethod
+    def _contains_human_service_phrase(text: str) -> bool:
+        value = str(text or "").lower()
+        return any(term in value for term in ("人工", "客服", "human service", "manual service"))
 
     async def handle(self, context: Context, metadata: Dict[str, Any]) -> bool:
         """处理AI回复"""
@@ -515,14 +545,22 @@ class AIReplyHandler(BaseHandler):
                     )
                 else:
                     duration_ms = int((time.perf_counter() - handle_started_at) * 1000)
+                    reply_action = str(metadata.get("reply_action") or "reply")
+                    failed_action = "transfer_send_failed" if reply_action == "transfer_human" else "reply_send_failed"
+                    failed_event = (
+                        "event=pdd.transfer.send.failed "
+                        if reply_action == "transfer_human"
+                        else "event=pdd.reply.send.failed_handled "
+                    )
                     self.logger.warning(
-                        "event=pdd.transfer_human.triggered "
+                        failed_event
                         + self._trace_fields(
                             trace,
-                            action="send_failed",
+                            action=failed_action,
                             duration_ms=duration_ms,
                             reply_length=reply_length,
                             reply_hash=reply_hash,
+                            final_status=failed_action,
                         )
                     )
                     self.logger.warning("AI回复发送失败")
@@ -650,8 +688,12 @@ class AIReplyHandler(BaseHandler):
                 )
                 action = result.get("action", "")
                 duration_ms = int((time.perf_counter() - request_started_at) * 1000)
+                pipeline_latency_ms = int(result.get("latency_ms") or 0)
+                post_pipeline_ms = max(0, duration_ms - pipeline_latency_ms) if pipeline_latency_ms else 0
                 trace["session_id"] = str(result.get("session_id") or trace.get("session_id") or "")
                 if action in ("reply", "transfer_human"):
+                    metadata["reply_action"] = action
+                    metadata["reply_source"] = str(result.get("source") or result.get("reason") or action)
                     reply = result.get("text", "")
                     reply_length, reply_hash = self._fingerprint(reply)
                     self.logger.info(
@@ -660,6 +702,7 @@ class AIReplyHandler(BaseHandler):
                             trace,
                             action=action,
                             duration_ms=duration_ms,
+                            post_pipeline_ms=post_pipeline_ms,
                             reply_length=reply_length,
                             reply_hash=reply_hash,
                         )
@@ -789,6 +832,40 @@ class AIReplyHandler(BaseHandler):
         send_request_id = uuid.uuid4().hex[:12]
         send_started_at = time.perf_counter()
         reply_length, reply_hash = self._fingerprint(reply)
+        reply_action = str(metadata.get("reply_action") or "reply")
+        reply_source = str(metadata.get("reply_source") or metadata.get("source") or "")
+        contains_human_service_phrase = self._contains_human_service_phrase(reply)
+        contains_emoji = self._contains_emoji(reply)
+        contains_url = self._contains_url(reply)
+        conversation_status_before = str(metadata.get("conversation_status_before") or "")
+        pending_human_before = bool(metadata.get("pending_human_before") or False)
+        outbox_id = ""
+        outbox_store = None
+        try:
+            from Message.core.reliable_queue import get_reliable_queue_store
+
+            outbox_store = get_reliable_queue_store()
+            outbox = outbox_store.create_outbox(
+                trace_id=str(trace.get("trace_id") or ""),
+                inbound_record_id=str(metadata.get("reliable_record_id") or metadata.get("queue_message_id") or ""),
+                shop_id=str(metadata.get("shop_id") or ""),
+                user_id=str(metadata.get("user_id") or ""),
+                buyer_id=str(metadata.get("from_uid") or metadata.get("customer_uid") or ""),
+                session_id=str(metadata.get("session_id") or ""),
+                reply_action=reply_action,
+                reply_text=reply,
+                reply_source=reply_source,
+            )
+            outbox_id = outbox.outbox_id
+        except Exception as outbox_error:
+            self.logger.warning(
+                "event=pdd.reply.outbox.failed "
+                + self._trace_fields(
+                    trace,
+                    action="outbox_create_failed",
+                    error_type=type(outbox_error).__name__,
+                )
+            )
         try:
             # 从metadata中提取必要信息
             shop_id = metadata.get('shop_id')
@@ -799,7 +876,10 @@ class AIReplyHandler(BaseHandler):
             trace["customer_uid"] = str(from_uid or trace.get("customer_uid") or "")
 
             if not all([shop_id, user_id, from_uid]):
+                failed_status = "transfer_send_failed" if reply_action == "transfer_human" else "reply_send_failed"
                 duration_ms = int((time.perf_counter() - send_started_at) * 1000)
+                if outbox_store and outbox_id:
+                    outbox_store.mark_outbox_failed(outbox_id, error_summary_hash="MissingSendFields")
                 self.logger.warning(
                     "event=pdd.reply.send.failed "
                     + self._trace_fields(
@@ -813,12 +893,26 @@ class AIReplyHandler(BaseHandler):
                         error_type="MissingSendFields",
                     )
                 )
+                self._write_send_private_trace(
+                    trace,
+                    "send_completed",
+                    send_request_id=send_request_id,
+                    final_status=failed_status,
+                    pdd_send_status="not_called",
+                    error_type="MissingSendFields",
+                    duration_ms=duration_ms,
+                    reply_action=reply_action,
+                    reply_source=reply_source,
+                    reply_text=reply,
+                    reply_length=reply_length,
+                    reply_hash=reply_hash,
+                )
                 self.logger.info(
                     "event=pdd.message.completed "
                     + self._trace_fields(
                         trace,
                         send_request_id=send_request_id,
-                        final_status="reply_send_failed",
+                        final_status=failed_status,
                         duration_ms=duration_ms,
                         pdd_result="not_called",
                         reply_length=reply_length,
@@ -832,32 +926,65 @@ class AIReplyHandler(BaseHandler):
             from Channel.pinduoduo.utils.API.send_message import SendMessage
             sender = SendMessage(shop_id, user_id)
             import asyncio
-            self.logger.debug(
+            if outbox_store and outbox_id:
+                outbox_store.mark_outbox_sending(outbox_id)
+            self.logger.info(
                 "event=pdd.reply.send.started "
                 + self._trace_fields(
                     trace,
                     send_request_id=send_request_id,
                     action="send_text",
+                    reply_action=reply_action,
+                    reply_source=reply_source,
                     duration_ms=0,
                     pdd_result="pending",
                     reply_length=reply_length,
                     reply_hash=reply_hash,
+                    contains_human_service_phrase=contains_human_service_phrase,
+                    contains_emoji=contains_emoji,
+                    contains_url=contains_url,
+                    conversation_status_before=conversation_status_before,
+                    pending_human_before=pending_human_before,
                 )
+            )
+            self._write_send_private_trace(
+                trace,
+                "send_started",
+                send_request_id=send_request_id,
+                reply_action=reply_action,
+                reply_source=reply_source,
+                reply_text=reply,
+                reply_length=reply_length,
+                reply_hash=reply_hash,
+                contains_human_service_phrase=contains_human_service_phrase,
+                contains_emoji=contains_emoji,
+                contains_url=contains_url,
+                conversation_status_before=conversation_status_before,
+                pending_human_before=pending_human_before,
             )
             result = await asyncio.to_thread(sender.send_text, from_uid, reply)
             pdd_result = result.get("result") if isinstance(result, dict) else None
             pdd_ok = isinstance(pdd_result, dict) and pdd_result.get("result") == "ok"
             pdd_result_summary = self._pdd_result_summary(result)
+            pdd_error_code = self._pdd_error_code(result)
+            _, sanitized_error_summary_hash = self._fingerprint(pdd_result_summary)
             duration_ms = int((time.perf_counter() - send_started_at) * 1000)
             if isinstance(result, dict) and result.get("success") and pdd_ok:
+                if outbox_store and outbox_id:
+                    outbox_store.mark_outbox_sent(outbox_id)
                 self.logger.info(
                     "event=pdd.reply.send.succeeded "
                     + self._trace_fields(
                         trace,
                         send_request_id=send_request_id,
                         action="send_text",
+                        reply_action=reply_action,
+                        reply_source=reply_source,
                         duration_ms=duration_ms,
+                        send_ms=duration_ms,
                         pdd_result=pdd_result_summary,
+                        pdd_send_status="ok",
+                        pdd_error_code=pdd_error_code,
                         reply_length=reply_length,
                         reply_hash=reply_hash,
                     )
@@ -869,17 +996,47 @@ class AIReplyHandler(BaseHandler):
                         send_request_id=send_request_id,
                         final_status="reply_sent",
                         duration_ms=duration_ms,
+                        send_ms=duration_ms,
                         pdd_result=pdd_result_summary,
+                        pdd_send_status="ok",
+                        pdd_error_code=pdd_error_code,
                         reply_length=reply_length,
                         reply_hash=reply_hash,
+                        conversation_status_after=str(metadata.get("conversation_status_after") or ""),
                     )
                 )
                 self.logger.info(
                     f"[发送回执] 文本消息接口成功: shop_id={shop_id}, user_id={user_id}, "
                     f"from_uid={from_uid}, pdd_result={pdd_result_summary}"
                 )
+                self._write_send_private_trace(
+                    trace,
+                    "send_completed",
+                    send_request_id=send_request_id,
+                    final_status="reply_sent",
+                    duration_ms=duration_ms,
+                    send_ms=duration_ms,
+                    pdd_send_status="ok",
+                    pdd_error_code=pdd_error_code,
+                    pdd_result=pdd_result_summary,
+                    reply_action=reply_action,
+                    reply_source=reply_source,
+                    reply_text=reply,
+                    reply_length=reply_length,
+                    reply_hash=reply_hash,
+                    conversation_status_after=str(metadata.get("conversation_status_after") or ""),
+                )
                 return True
             if isinstance(result, dict) and result.get("success") and not isinstance(pdd_result, dict):
+                if outbox_store and outbox_id:
+                    outbox_store.mark_outbox_unknown(
+                        outbox_id,
+                        pdd_error_code=pdd_error_code,
+                        error_summary_hash=sanitized_error_summary_hash,
+                    )
+                unknown_status = (
+                    "transfer_delivery_unknown" if reply_action == "transfer_human" else "reply_delivery_unknown"
+                )
                 self.logger.warning(
                     "event=pdd.reply.send.call_succeeded "
                     + self._trace_fields(
@@ -887,8 +1044,12 @@ class AIReplyHandler(BaseHandler):
                         send_request_id=send_request_id,
                         action="send_text",
                         status="unknown_delivery",
+                        reply_action=reply_action,
+                        reply_source=reply_source,
                         duration_ms=duration_ms,
                         pdd_result=pdd_result_summary,
+                        pdd_send_status="unknown_delivery",
+                        pdd_error_code=pdd_error_code,
                         reply_length=reply_length,
                         reply_hash=reply_hash,
                     )
@@ -898,12 +1059,35 @@ class AIReplyHandler(BaseHandler):
                     + self._trace_fields(
                         trace,
                         send_request_id=send_request_id,
-                        final_status="reply_delivery_unknown",
+                        final_status=unknown_status,
                         duration_ms=duration_ms,
+                        send_ms=duration_ms,
                         pdd_result=pdd_result_summary,
+                        pdd_send_status="unknown_delivery",
+                        pdd_error_code=pdd_error_code,
+                        sanitized_error_summary_hash=sanitized_error_summary_hash,
                         reply_length=reply_length,
                         reply_hash=reply_hash,
+                        conversation_status_after=str(metadata.get("conversation_status_after") or ""),
                     )
+                )
+                self._write_send_private_trace(
+                    trace,
+                    "send_completed",
+                    send_request_id=send_request_id,
+                    final_status=unknown_status,
+                    duration_ms=duration_ms,
+                    send_ms=duration_ms,
+                    pdd_send_status="unknown_delivery",
+                    pdd_error_code=pdd_error_code,
+                    sanitized_error_summary_hash=sanitized_error_summary_hash,
+                    pdd_result=pdd_result_summary,
+                    reply_action=reply_action,
+                    reply_source=reply_source,
+                    reply_text=reply,
+                    reply_length=reply_length,
+                    reply_hash=reply_hash,
+                    conversation_status_after=str(metadata.get("conversation_status_after") or ""),
                 )
                 self._alert_manual_transfer(
                     metadata,
@@ -911,20 +1095,27 @@ class AIReplyHandler(BaseHandler):
                     f"PDD send failed: pdd_result={pdd_result_summary}",
                     "high",
                     context=context,
-                    action="reply_delivery_unknown",
+                    action=unknown_status,
                     reply=reply,
-                    final_status="reply_delivery_unknown",
+                    final_status=unknown_status,
                 )
                 return False
+            failed_status = "transfer_send_failed" if reply_action == "transfer_human" else "reply_send_failed"
+            if outbox_store and outbox_id:
+                outbox_store.mark_outbox_failed(
+                    outbox_id,
+                    pdd_error_code=pdd_error_code,
+                    error_summary_hash=sanitized_error_summary_hash,
+                )
             self._alert_manual_transfer(
                 metadata,
                 f"{metadata.get('shop_id')}_{from_uid}",
                 f"PDD send failed: pdd_result={pdd_result_summary}",
                 "high",
                 context=context,
-                action="reply_send_failed",
+                action=failed_status,
                 reply=reply,
-                final_status="reply_send_failed",
+                final_status=failed_status,
             )
             self.logger.warning(
                 "event=pdd.reply.send.failed "
@@ -932,23 +1123,52 @@ class AIReplyHandler(BaseHandler):
                     trace,
                     send_request_id=send_request_id,
                     action="send_text",
+                    reply_action=reply_action,
+                    reply_source=reply_source,
                     duration_ms=duration_ms,
+                    send_ms=duration_ms,
                     pdd_result=pdd_result_summary,
+                    pdd_send_status="failed",
+                    pdd_error_code=pdd_error_code,
+                    sanitized_error_summary_hash=sanitized_error_summary_hash,
                     reply_length=reply_length,
                     reply_hash=reply_hash,
                     error_type="PddSendFailed",
                 )
+            )
+            self._write_send_private_trace(
+                trace,
+                "send_completed",
+                send_request_id=send_request_id,
+                final_status=failed_status,
+                duration_ms=duration_ms,
+                send_ms=duration_ms,
+                pdd_send_status="failed",
+                pdd_error_code=pdd_error_code,
+                sanitized_error_summary_hash=sanitized_error_summary_hash,
+                pdd_result=pdd_result_summary,
+                reply_action=reply_action,
+                reply_source=reply_source,
+                reply_text=reply,
+                reply_length=reply_length,
+                reply_hash=reply_hash,
+                conversation_status_after=str(metadata.get("conversation_status_after") or ""),
             )
             self.logger.info(
                 "event=pdd.message.completed "
                 + self._trace_fields(
                     trace,
                     send_request_id=send_request_id,
-                    final_status="reply_send_failed",
+                    final_status=failed_status,
                     duration_ms=duration_ms,
+                    send_ms=duration_ms,
                     pdd_result=pdd_result_summary,
+                    pdd_send_status="failed",
+                    pdd_error_code=pdd_error_code,
+                    sanitized_error_summary_hash=sanitized_error_summary_hash,
                     reply_length=reply_length,
                     reply_hash=reply_hash,
+                    conversation_status_after=str(metadata.get("conversation_status_after") or ""),
                 )
             )
             self.logger.warning(
@@ -958,7 +1178,13 @@ class AIReplyHandler(BaseHandler):
             return False
 
         except Exception as e:
+            failed_status = "transfer_send_failed" if reply_action == "transfer_human" else "reply_send_failed"
             duration_ms = int((time.perf_counter() - send_started_at) * 1000)
+            if outbox_store and outbox_id:
+                try:
+                    outbox_store.mark_outbox_failed(outbox_id, error_summary_hash=type(e).__name__)
+                except Exception:
+                    pass
             self.logger.warning(
                 "event=pdd.reply.send.failed "
                 + self._trace_fields(
@@ -966,19 +1192,36 @@ class AIReplyHandler(BaseHandler):
                     send_request_id=send_request_id,
                     action="send_text",
                     duration_ms=duration_ms,
+                    send_ms=duration_ms,
                     pdd_result="exception",
                     reply_length=reply_length,
                     reply_hash=reply_hash,
                     error_type=type(e).__name__,
                 )
             )
+            self._write_send_private_trace(
+                trace,
+                "send_completed",
+                send_request_id=send_request_id,
+                final_status=failed_status,
+                duration_ms=duration_ms,
+                send_ms=duration_ms,
+                pdd_send_status="exception",
+                error_type=type(e).__name__,
+                reply_action=reply_action,
+                reply_source=reply_source,
+                reply_text=reply,
+                reply_length=reply_length,
+                reply_hash=reply_hash,
+            )
             self.logger.info(
                 "event=pdd.message.completed "
                 + self._trace_fields(
                     trace,
                     send_request_id=send_request_id,
-                    final_status="reply_send_failed",
+                    final_status=failed_status,
                     duration_ms=duration_ms,
+                    send_ms=duration_ms,
                     pdd_result="exception",
                     reply_length=reply_length,
                     reply_hash=reply_hash,
@@ -993,7 +1236,7 @@ class AIReplyHandler(BaseHandler):
                 context=context,
                 action="reply_send_exception",
                 reply=reply,
-                final_status="reply_send_failed",
+                final_status=failed_status,
             )
             return False
 

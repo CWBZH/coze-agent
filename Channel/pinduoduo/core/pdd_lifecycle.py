@@ -1,10 +1,12 @@
 import asyncio
 import time
+import os
 import websockets
 from websockets import exceptions as ws_exceptions
 from typing import Optional
 from Channel.pinduoduo.utils.API.get_token import GetToken
 from config import config
+from Message.core.outbox_worker import OutboxWorker, trigger_reconnect_recovery
 
 
 class LifecycleMixin:
@@ -83,6 +85,34 @@ class LifecycleMixin:
             f"generation={generation}, current_generation={self._current_generation(connection_key)}"
         )
 
+    def _schedule_reconnect_recovery(self, queue_name: str) -> Optional[asyncio.Task]:
+        try:
+            task = asyncio.create_task(trigger_reconnect_recovery(queue_name))
+        except RuntimeError as exc:
+            self.logger.warning(f"Reconnect recovery schedule failed: queue_name={queue_name}, error={exc}")
+            return None
+
+        if not hasattr(self, "_recovery_tasks"):
+            self._recovery_tasks = set()
+        self._recovery_tasks.add(task)
+
+        def _done(done_task: asyncio.Task) -> None:
+            self._recovery_tasks.discard(done_task)
+            try:
+                summary = done_task.result()
+            except Exception as exc:
+                self.logger.warning(f"Reconnect recovery failed: queue_name={queue_name}, error={exc}")
+                return
+            self.logger.info(
+                "event=pdd.reconnect.recovery.completed "
+                f"queue_name={queue_name} inbound_recovered={summary.get('inbound_recovered', 0)} "
+                f"outbox_retried={summary.get('outbox_retried', 0)}"
+            )
+
+        task.add_done_callback(_done)
+        self.logger.info(f"event=pdd.reconnect.recovery.scheduled queue_name={queue_name}")
+        return task
+
     def _ensure_shutdown_maps(self):
         if not hasattr(self, "_connection_queue_names"):
             self._connection_queue_names = {}
@@ -90,6 +120,40 @@ class LifecycleMixin:
             self._message_tasks = {}
         if not hasattr(self, "_stop_wait_tasks"):
             self._stop_wait_tasks = {}
+        if not hasattr(self, "_outbox_retry_tasks"):
+            self._outbox_retry_tasks = {}
+
+    def _schedule_outbox_retry_loop(
+        self,
+        connection_key: str,
+        queue_name: str,
+        stop_event: asyncio.Event,
+    ) -> Optional[asyncio.Task]:
+        self._ensure_shutdown_maps()
+        existing = self._outbox_retry_tasks.get(connection_key)
+        if existing and not existing.done():
+            return existing
+        try:
+            interval = float(os.environ.get("AI_WORKFLOW_PDD_OUTBOX_RETRY_INTERVAL_SECONDS", "10"))
+        except ValueError:
+            interval = 10.0
+        try:
+            task = asyncio.create_task(
+                OutboxWorker().run_retry_loop(
+                    stop_event=stop_event,
+                    interval_seconds=interval,
+                    limit=20,
+                )
+            )
+        except RuntimeError as exc:
+            self.logger.warning(f"Outbox retry loop schedule failed: queue_name={queue_name}, error={exc}")
+            return None
+        self._outbox_retry_tasks[connection_key] = task
+        self.logger.info(
+            "event=pdd.outbox.retry_loop.scheduled "
+            f"connection_key={connection_key} queue_name={queue_name} interval_seconds={interval:g}"
+        )
+        return task
 
     async def _cancel_mapped_task(self, task_map: dict, connection_key: str, task_label: str, timeout: float = 5.0):
         task = task_map.get(connection_key)
@@ -183,6 +247,7 @@ class LifecycleMixin:
                 self.status_manager.update_status(shop_id, user_id, username, ConnectionState.CONNECTING)
 
                 await self._cancel_reconnect_task(connection_key)
+                await self._cancel_mapped_task(self._outbox_retry_tasks, connection_key, "outbox-retry", timeout=5.0)
 
                 generation = self._next_generation(connection_key)
                 self.logger.info(
@@ -196,6 +261,9 @@ class LifecycleMixin:
                     self._stop_event = self._stop_events[connection_key]
 
                 self._connection_queue_names[connection_key] = queue_name
+                stop_event = self._stop_events.get(connection_key) if hasattr(self, "_stop_events") else self._stop_event
+                if stop_event is not None:
+                    self._schedule_outbox_retry_loop(connection_key, queue_name, stop_event)
                 if self.reconnect_config.enable_auto_reconnect:
                     connect_task = asyncio.create_task(
                         self._connect_with_retry(
@@ -273,6 +341,7 @@ class LifecycleMixin:
                 await self._cancel_mapped_task(self._reconnect_tasks, connection_key, "reconnect", timeout=5.0)
                 await self._cancel_mapped_task(self._heartbeat_tasks, connection_key, "heartbeat", timeout=5.0)
                 await self._cancel_mapped_task(self._message_tasks, connection_key, "message", timeout=5.0)
+                await self._cancel_mapped_task(self._outbox_retry_tasks, connection_key, "outbox-retry", timeout=5.0)
                 await self._cancel_mapped_task(self._stop_wait_tasks, connection_key, "stop-wait", timeout=5.0)
 
                 if self.ws:
@@ -404,6 +473,8 @@ class LifecycleMixin:
                     self.status_manager.update_status(shop_id, user_id, username, ConnectionState.CONNECTED)
                     self.logger.debug(f"Status connected: {shop_id}-{username}")
                     on_success()
+                    self._schedule_reconnect_recovery(queue_name)
+                    self._schedule_outbox_retry_loop(connection_key, queue_name, stop_event)
 
                 heartbeat_task = None
                 if self.heartbeat_config.enable_heartbeat:
@@ -538,6 +609,7 @@ class LifecycleMixin:
             else:
                 self._log_stale_skip(connection_key, generation, "exception-cleanup")
             self.logger.error(f"WebSocket connection failed: {shop_id}-{username}, error={str(e)}")
+            raise
 
     def request_stop(self):
         """Request all active connections to stop."""
@@ -566,6 +638,7 @@ class LifecycleMixin:
                 f"Stopping all PDD connections: shutdown_phase=stop-all-start, "
                 f"connection_count={len(queue_names)}, reconnect_task_count={len(self._reconnect_tasks)}, "
                 f"heartbeat_task_count={len(self._heartbeat_tasks)}, message_task_count={len(self._message_tasks)}, "
+                f"outbox_retry_task_count={len(getattr(self, '_outbox_retry_tasks', {}))}, "
                 f"stop_wait_task_count={len(self._stop_wait_tasks)}, "
                 f"processing_tasks_count={len(self.processing_tasks)}, "
                 f"loop_id={id(asyncio.get_running_loop())}"
@@ -585,6 +658,7 @@ class LifecycleMixin:
             await self._cancel_task_map(self._reconnect_tasks, "reconnect", timeout=5.0)
             await self._cancel_task_map(self._heartbeat_tasks, "heartbeat", timeout=5.0)
             await self._cancel_task_map(self._message_tasks, "message", timeout=5.0)
+            await self._cancel_task_map(self._outbox_retry_tasks, "outbox-retry", timeout=5.0)
             await self._cancel_task_map(self._stop_wait_tasks, "stop-wait", timeout=5.0)
 
             if self.ws:
@@ -611,6 +685,7 @@ class LifecycleMixin:
             self._reconnect_tasks.clear()
             self._heartbeat_tasks.clear()
             self._message_tasks.clear()
+            self._outbox_retry_tasks.clear()
             self._stop_wait_tasks.clear()
             self._connection_queue_names.clear()
             self.ws = None

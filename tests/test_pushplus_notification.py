@@ -174,6 +174,28 @@ def test_configure_standard_services_uses_headless_pushplus_when_enabled(monkeyp
         di.container._scoped_instances.clear()
 
 
+def test_configure_standard_services_uses_pushplus_without_headless_mode(monkeypatch):
+    import core.config as config
+    import core.di_container as di
+
+    monkeypatch.delenv("HEADLESS_MODE", raising=False)
+    monkeypatch.setattr(config, "PUSHPLUS_ENABLED", True)
+    monkeypatch.setattr(config, "PUSHPLUS_TOKEN", "fake-token")
+    di.container._services.clear()
+    di.container._singletons.clear()
+    di.container._scoped_instances.clear()
+
+    try:
+        configured = di.configure_standard_services()
+        service = configured.get(NotificationService)
+
+        assert isinstance(service, HeadlessNotificationService)
+    finally:
+        di.container._services.clear()
+        di.container._singletons.clear()
+        di.container._scoped_instances.clear()
+
+
 def test_configure_standard_services_uses_dummy_when_headless_pushplus_missing(monkeypatch):
     import core.config as config
     import core.di_container as di
@@ -181,6 +203,29 @@ def test_configure_standard_services_uses_dummy_when_headless_pushplus_missing(m
 
     monkeypatch.setenv("HEADLESS_MODE", "1")
     monkeypatch.setattr(config, "PUSHPLUS_ENABLED", True)
+    monkeypatch.setattr(config, "PUSHPLUS_TOKEN", "")
+    di.container._services.clear()
+    di.container._singletons.clear()
+    di.container._scoped_instances.clear()
+
+    try:
+        configured = di.configure_standard_services()
+        service = configured.get(NotificationService)
+
+        assert isinstance(service, DummyNotificationService)
+    finally:
+        di.container._services.clear()
+        di.container._singletons.clear()
+        di.container._scoped_instances.clear()
+
+
+def test_configure_standard_services_uses_dummy_without_pushplus_and_without_ui(monkeypatch):
+    import core.config as config
+    import core.di_container as di
+    from core.notification import DummyNotificationService
+
+    monkeypatch.delenv("HEADLESS_MODE", raising=False)
+    monkeypatch.setattr(config, "PUSHPLUS_ENABLED", False)
     monkeypatch.setattr(config, "PUSHPLUS_TOKEN", "")
     di.container._services.clear()
     di.container._singletons.clear()

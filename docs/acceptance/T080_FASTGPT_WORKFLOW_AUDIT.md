@@ -26,6 +26,7 @@ Important implementation points:
 - Dataset ID is read from `shops.fastgpt_dataset_id`.
 - `chat_id` is generated as `{shop_platform_id}_{buyer_id}_{session_id}`.
 - No active runtime use of `FASTGPT_APP_ID` was found in the current message pipeline; it is documented as reserved configuration.
+- Every shop expected to auto-reply through FastGPT must have `shops.fastgpt_dataset_id` configured. Missing dataset id triggers the transfer-to-human path instead of a FastGPT request.
 
 ## 2. 当前 MessagePipeline 决策流程
 
@@ -170,7 +171,7 @@ Medium priority risks:
 
 Low priority risks:
 
-1. `FASTGPT_APP_ID` is documented but not used in the current runtime path.
+1. `FASTGPT_APP_ID` is reserved only and is not used in the current runtime path. Do not treat it as required deployment configuration until the workflow explicitly adopts it.
 2. Conversation compression uses a separate LLM endpoint and may log raw response snippets on failure in existing code; this should be reviewed if compression is enabled in production.
 3. `mall_cs` heartbeat renews compatibility human lock, but with current fail-open Redis compatibility this may not have durable effect beyond logs.
 

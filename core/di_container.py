@@ -373,6 +373,20 @@ def configure_standard_services(config_instance: Any = None) -> 'DIContainer':
     import os
 
     if not container.is_registered(NotificationService):
+        if PUSHPLUS_ENABLED and PUSHPLUS_TOKEN:
+            container.logger.info("[notification] PushPlus enabled; injecting HeadlessNotificationService")
+            container.register_singleton(
+                NotificationService,
+                factory=lambda: HeadlessNotificationService()
+            )
+        else:
+            container.logger.warning("[notification] PushPlus disabled or token missing; injecting DummyNotificationService")
+            container.register_singleton(
+                NotificationService,
+                factory=lambda: DummyNotificationService()
+            )
+
+    if False and not container.is_registered(NotificationService):
         if os.getenv("HEADLESS_MODE") == "1":
             if PUSHPLUS_ENABLED and PUSHPLUS_TOKEN:
                 container.logger.info("[环境隔离] HEADLESS_MODE=1，注入 HeadlessNotificationService")

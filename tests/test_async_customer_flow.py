@@ -1,4 +1,5 @@
 import asyncio
+import json
 import time
 from types import SimpleNamespace
 
@@ -7,6 +8,7 @@ from bridge.context import ContextType
 from Message.core.pipeline import MessagePipeline
 from Message.core.queue import queue_manager
 from Message.handlers.ai_handler import AIReplyHandler
+from Message.workflow.types import WorkflowAction, WorkflowResult
 from Session.session_manager import SessionManager
 from ui.auto_reply.manager import AutoReplyManager
 
@@ -80,6 +82,101 @@ class FakeLogger:
 
     def debug(self, message):
         self.messages.append(("debug", message))
+
+
+class FakePipelineDb:
+    def get_shop_by_platform_id(self, platform, shop_platform_id):
+        return {
+            "id": "db-shop-1",
+            "shop_id": shop_platform_id,
+            "shop_name": "shop",
+            "fastgpt_dataset_id": "dataset-1",
+        }
+
+
+class FakePipelineConversation:
+    def __init__(self, session_id="session-1", status="active"):
+        self.session_id = session_id
+        self.status = status
+
+
+class FakePipelineSessionManager:
+    def __init__(self):
+        self.statuses = {}
+        self.messages = {}
+
+    async def get_or_create_conversation(self, shop_id, buyer_id, user_id):
+        return FakePipelineConversation(session_id=f"{shop_id}:{buyer_id}:{user_id}", status="active")
+
+    def add_message(self, session_id, role, content):
+        self.messages.setdefault(session_id, []).append(SimpleNamespace(role=role, content=content))
+
+    def set_status(self, session_id, status):
+        self.statuses[session_id] = status
+
+    def reset_fallback_state(self, session_id):
+        pass
+
+    def get_fallback_state(self, session_id):
+        return {}
+
+    def should_send_fallback(self, session_id):
+        return "first"
+
+    def mark_fallback_sent(self, session_id, stage):
+        pass
+
+    def build_context_messages(self, session_id, shop_name, system_prompt_template, current_message, cached_products=""):
+        return [
+            {"role": item.role, "content": item.content}
+            for item in self.messages.get(session_id, [])
+        ]
+
+    def get_recent_messages(self, session_id, limit=40):
+        return list(self.messages.get(session_id, []))[-limit:]
+
+    async def check_and_compress(self, session_id):
+        return None
+
+
+class FakePipelineKeywordHandler:
+    def check(self, shop_id, text):
+        return {"matched": False}
+
+
+class FakePipelineFastGpt:
+    def __init__(self, transfer_on_text=False):
+        self.transfer_on_text = transfer_on_text
+
+    def reset_failures(self, session_id):
+        pass
+
+    def contains_transfer_intent(self, reply):
+        return bool(self.transfer_on_text and "human" in str(reply).lower())
+
+    def get_fallback(self, session_id, already_failed=False):
+        return "fallback"
+
+    def should_transfer(self, session_id):
+        return False
+
+
+class RecordingWorkflowEngine:
+    def __init__(self, reply="ok", action=WorkflowAction.REPLY, trace=None):
+        self.reply = reply
+        self.action = action
+        self.trace = trace or {"workflow_version": "internal-v1", "guardrail_status": "safe"}
+        self.contexts = []
+
+    async def run(self, context):
+        self.contexts.append(context)
+        return WorkflowResult(
+            action=self.action,
+            reply_text=self.reply,
+            intent="product_basic",
+            reason="test",
+            trace=dict(self.trace),
+        )
 
 
 class FakeConfigDb:
@@ -431,6 +528,32 @@ def test_send_reply_failure_notification_metadata_has_final_status(monkeypatch):
     asyncio.run(scenario())
 
 
+def test_send_reply_writes_private_trace_status(monkeypatch, tmp_path):
+    async def scenario():
+        monkeypatch.setenv("AI_WORKFLOW_DEBUG_TRACE", "1")
+        monkeypatch.setenv("AI_WORKFLOW_DEBUG_TRACE_DIR", str(tmp_path))
+        handler = AIReplyHandler()
+
+        class FakeSender:
+            def __init__(self, shop_id, user_id):
+                pass
+
+            def send_text(self, from_uid, reply):
+                return {"success": True, "result": {"result": "ok"}}
+
+        monkeypatch.setattr("Channel.pinduoduo.utils.API.send_message.SendMessage", FakeSender)
+        result = await handler._send_reply(_base_context(ContextType.TEXT, "buyer text"), "reply text", _base_metadata())
+
+        assert result is True
+        payload = json.loads((tmp_path / "trace-1.json").read_text(encoding="utf-8"))
+        events = payload["events"]
+        assert events["send_started"]["reply_text"] == "reply text"
+        assert events["send_completed"]["final_status"] == "reply_sent"
+        assert events["send_completed"]["pdd_send_status"] == "ok"
+
+    asyncio.run(scenario())
+
+
 def test_send_reply_unknown_delivery_notification_metadata_has_final_status(monkeypatch):
     async def scenario():
         notifier = FakeNotificationService()
@@ -458,6 +581,47 @@ def test_send_reply_unknown_delivery_notification_metadata_has_final_status(monk
         assert metadata["final_status"] == "reply_delivery_unknown"
         assert metadata["reply_length"] == len("reply text")
         assert metadata["reply_hash"]
+
+    asyncio.run(scenario())
+
+
+def test_reply_send_failed_is_not_logged_as_transfer_human():
+    async def scenario():
+        handler = AIReplyHandler()
+        handler._pipeline = OutcomePipeline("reply", text="reply text")
+        logger = FakeLogger()
+        handler.logger = logger
+
+        async def fake_send_reply(context, reply, metadata):
+            return False
+
+        handler._send_reply = fake_send_reply
+        result = await handler.handle(_base_context(ContextType.TEXT, "buyer text"), _base_metadata())
+
+        assert result is True
+        joined = "\n".join(message for _, message in logger.messages)
+        assert "action=reply_send_failed" in joined
+        assert "event=pdd.transfer_human.triggered" not in joined
+
+    asyncio.run(scenario())
+
+
+def test_transfer_send_failed_is_logged_separately_from_reply_failure():
+    async def scenario():
+        handler = AIReplyHandler()
+        handler._pipeline = OutcomePipeline("transfer_human", text="transfer reply")
+        logger = FakeLogger()
+        handler.logger = logger
+
+        async def fake_send_reply(context, reply, metadata):
+            return False
+
+        handler._send_reply = fake_send_reply
+        result = await handler.handle(_base_context(ContextType.TEXT, "buyer text"), _base_metadata())
+
+        assert result is True
+        joined = "\n".join(message for _, message in logger.messages)
+        assert "action=transfer_send_failed" in joined
 
     asyncio.run(scenario())
 
@@ -561,6 +725,139 @@ def test_pipeline_missing_dataset_notification_metadata_includes_action():
         assert metadata["content_hash"]
         assert metadata["reply_length"] > 0
         assert metadata["reply_hash"]
+
+    asyncio.run(scenario())
+
+
+def test_pipeline_inherits_product_context_across_messages_and_isolates_sessions():
+    async def scenario():
+        session_mgr = FakePipelineSessionManager()
+        workflow = RecordingWorkflowEngine(reply="safe reply")
+        pipeline = MessagePipeline(
+            FakePipelineDb(),
+            session_mgr,
+            FakePipelineKeywordHandler(),
+            FakePipelineFastGpt(),
+            None,
+            workflow_engine=workflow,
+        )
+
+        await pipeline.process(
+            {
+                "buyer_id": "buyer-1",
+                "shop_platform_id": "shop-1",
+                "content": "product card",
+                "user_id": "user-1",
+                "message_type": "64",
+                "goods_id": "goods-1",
+                "goods_name": "Mini Balm",
+            }
+        )
+        await pipeline.process(
+            {
+                "buyer_id": "buyer-1",
+                "shop_platform_id": "shop-1",
+                "content": "这个多少钱",
+                "user_id": "user-1",
+                "message_type": "text",
+            }
+        )
+        await pipeline.process(
+            {
+                "buyer_id": "buyer-2",
+                "shop_platform_id": "shop-1",
+                "content": "这个多少钱",
+                "user_id": "user-1",
+                "message_type": "text",
+            }
+        )
+
+        assert workflow.contexts[1].goods_context["goods_id"] == "goods-1"
+        assert workflow.contexts[1].metadata["product_context_inherited"] is True
+        assert workflow.contexts[1].metadata["product_context_age_messages"] == 1
+        assert workflow.contexts[1].history
+        assert workflow.contexts[2].goods_context in ({}, None)
+
+    asyncio.run(scenario())
+
+
+def test_workflow_history_extracts_product_anchor_from_text_card():
+    session_mgr = FakePipelineSessionManager()
+    session_id = "db-shop-1:buyer-1:user-1"
+    session_mgr.add_message(session_id, "user", "商品：Mini Balm，价格：99，商品ID：mini-balm")
+    pipeline = MessagePipeline(
+        FakePipelineDb(),
+        session_mgr,
+        FakePipelineKeywordHandler(),
+        FakePipelineFastGpt(),
+        None,
+        workflow_engine=RecordingWorkflowEngine(),
+    )
+
+    history = pipeline._workflow_history(session_id)
+
+    assert history[0]["goods_id"] == "mini-balm"
+    assert history[0]["goods_name"] == "Mini Balm"
+    assert history[0]["history_has_product_card"] is True
+
+
+def test_internal_safe_reply_with_human_phrase_triggers_transfer():
+    async def scenario():
+        session_mgr = FakePipelineSessionManager()
+        workflow = RecordingWorkflowEngine(reply="Safe reply can ask human service to verify.")
+        pipeline = MessagePipeline(
+            FakePipelineDb(),
+            session_mgr,
+            FakePipelineKeywordHandler(),
+            FakePipelineFastGpt(transfer_on_text=True),
+            None,
+            workflow_engine=workflow,
+        )
+
+        result = await pipeline.process(
+            {
+                "buyer_id": "buyer-1",
+                "shop_platform_id": "shop-1",
+                "content": "where is package",
+                "user_id": "user-1",
+                "message_type": "text",
+            }
+        )
+
+        assert result["action"] == "transfer_human"
+        assert session_mgr.statuses == {"db-shop-1:buyer-1:user-1": "pending_human"}
+
+    asyncio.run(scenario())
+
+
+def test_fastgpt_reply_still_uses_legacy_transfer_scan():
+    async def scenario():
+        session_mgr = FakePipelineSessionManager()
+        workflow = RecordingWorkflowEngine(
+            reply="Safe reply can ask human service to verify.",
+            trace={"guardrail_status": ""},
+        )
+        pipeline = MessagePipeline(
+            FakePipelineDb(),
+            session_mgr,
+            FakePipelineKeywordHandler(),
+            FakePipelineFastGpt(transfer_on_text=True),
+            None,
+            workflow_engine=workflow,
+        )
+
+        result = await pipeline.process(
+            {
+                "buyer_id": "buyer-1",
+                "shop_platform_id": "shop-1",
+                "content": "where is package",
+                "user_id": "user-1",
+                "message_type": "text",
+            }
+        )
+
+        assert result["action"] == "transfer_human"
+        assert session_mgr.statuses == {"db-shop-1:buyer-1:user-1": "pending_human"}
 
     asyncio.run(scenario())
 

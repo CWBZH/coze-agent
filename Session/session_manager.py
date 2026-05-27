@@ -25,7 +25,12 @@ from utils.logger_loguru import get_logger
 
 logger = get_logger("SessionManager")
 
-COMPRESS_PROMPT = """你是一个对话摘要器。请将以下客服对话压缩为一段简短摘要（不超过 80 字），保留关键信息：商品名称、规格、价格、买家需求、承诺事项。
+CONTEXT_FULL_MESSAGE_LIMIT = 20
+CONTEXT_COMPRESS_OLD_COUNT = 10
+
+COMPRESS_PROMPT = """你是一个拼多多客服对话摘要器。请将以下较早客服对话压缩为一段简短中文摘要（不超过 120 字）。
+必须保留：商品名称、商品ID、规格、价格、买家明确需求、已经给过的客服边界或承诺、售后/转人工状态。
+不要添加原文没有的信息。
 
 对话记录:
 {conversation_text}
@@ -175,12 +180,12 @@ class SessionManager:
             logger.warning(f"会话 {session_id[:8]} 压缩失败，已跳过: {e}")
             return
 
-        if count < 40:
+        if count <= CONTEXT_FULL_MESSAGE_LIMIT:
             return
 
-        messages = self.get_recent_messages(session_id, limit=40)
-        old_messages = messages[:20]
-        recent_messages = messages[20:]
+        messages = self.get_recent_messages(session_id, limit=max(count, CONTEXT_FULL_MESSAGE_LIMIT + CONTEXT_COMPRESS_OLD_COUNT))
+        old_messages = messages[:CONTEXT_COMPRESS_OLD_COUNT]
+        recent_messages = messages[CONTEXT_COMPRESS_OLD_COUNT:]
         try:
             summary = await self._summarize_messages(old_messages)
             if not summary:

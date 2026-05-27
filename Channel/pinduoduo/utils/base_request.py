@@ -73,6 +73,20 @@ class BaseRequest:
     def _init_account_info(self):
         """初始化账户信息"""
         try:
+            resolved_auth = self._resolve_auth_cookies()
+            if resolved_auth is not None:
+                if resolved_auth.status == "ok" and resolved_auth.cookies:
+                    self.cookies = resolved_auth.cookies
+                    if resolved_auth.account_name:
+                        self.account_name = resolved_auth.account_name
+                    self.logger.info(
+                        f"账号授权读取成功: shop_id={self.shop_id}, user_id={self.user_id}, source={resolved_auth.source}, cookie_keys={len(self.cookies)}"
+                    )
+                    return
+                if resolved_auth.status == "auth_invalid":
+                    self.cookies = {}
+                    return
+
             account_info = db_manager.get_account(self.channel_name, self.shop_id, self.user_id)
             if account_info:
                 self.account_name = account_info.get('username', '未知账号')
@@ -95,6 +109,25 @@ class BaseRequest:
         except Exception as e:
             self.logger.error(f"初始化账户信息失败: {str(e)}")
     
+    def _resolve_auth_cookies(self):
+        try:
+            from web_api.services.shop_auth_resolver import ShopAuthResolver
+
+            resolved = ShopAuthResolver().get_cookies(
+                str(self.shop_id),
+                platform="pdd",
+                user_id=str(self.user_id) if self.user_id else None,
+            )
+            if resolved.status in {"ok", "auth_invalid"}:
+                if resolved.status == "auth_invalid":
+                    self.logger.error(
+                        f"账号授权无效: shop_id={self.shop_id}, user_id={self.user_id}, error_type={resolved.error_type}"
+                    )
+                return resolved
+        except Exception as e:
+            self.logger.warning(f"读取 shop_auth 授权失败，回退旧账号 cookies: {type(e).__name__}")
+        return None
+
     def _is_session_expired(self, response_data: Dict[str, Any]) -> bool:
         """
         检测会话是否过期
@@ -587,12 +620,25 @@ class BaseRequest:
             new_cookies: 新cookies
         """
         self.update_cookies(new_cookies)
-        db_manager.update_account_cookies(
-            self.channel_name,
-            self.shop_id,
-            self.user_id,
-            new_cookies
-        )
+        try:
+            from web_api.services.shop_auth_service import AuthSavePayload, ShopAuthService
+
+            account_info = db_manager.get_account(self.channel_name, self.shop_id, self.user_id)
+            shop_info = db_manager.get_shop(self.channel_name, self.shop_id)
+            username = (account_info or {}).get("username") or self.account_name
+            ShopAuthService().save_auth(
+                AuthSavePayload(
+                    shop_id=str(self.shop_id),
+                    shop_name=(shop_info or {}).get("shop_name") or str(self.shop_id),
+                    platform="pdd",
+                    account_name=str(username or ""),
+                    user_id=str(self.user_id or username or ""),
+                    cookie_value=json.dumps(self.cookies, ensure_ascii=False),
+                )
+            )
+            self.logger.info(f"账号 {self.account_name} 会话凭据已加密保存到 shop_auth")
+        except Exception as e:
+            self.logger.warning(f"账号 {self.account_name} 新 cookies 仅更新到内存，shop_auth 加密保存失败: {type(e).__name__}")
 
     def force_relogin(self) -> bool:
         """

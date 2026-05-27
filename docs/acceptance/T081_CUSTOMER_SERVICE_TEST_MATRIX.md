@@ -188,7 +188,9 @@ P0 categories:
 6. Manual transfer in headless deployment:
    - Decide whether log-only `DummyNotificationService` is sufficient or PushPlus/external alert is mandatory.
 7. FastGPT app_id:
-   - Decide whether `FASTGPT_APP_ID` should be removed from delivery docs or implemented in workflow config.
+   - `FASTGPT_APP_ID` is reserved only and is not used by the current auto-reply runtime.
+   - Current FastGPT acceptance depends on `FASTGPT_API_KEY` / DB `fastgpt:api_key` plus each shop's `fastgpt_dataset_id`.
+   - Shops without `fastgpt_dataset_id` should transfer to human.
 
 ## 8. Next Task Recommendation
 
@@ -196,4 +198,4 @@ T082 workflow 节点补强:
 
 - Clarify ownership of static rules vs DB keywords vs FastGPT workflow.
 - Decide handling for video/emotion/empty messages.
-- Decide whether `FASTGPT_APP_ID` remains reserved or is removed from acceptance scope.
+- Keep `FASTGPT_APP_ID` out of acceptance scope until the runtime explicitly uses it.
