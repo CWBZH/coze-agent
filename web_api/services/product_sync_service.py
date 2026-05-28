@@ -230,6 +230,9 @@ class ProductSyncService:
         if not first or not first.get("success"):
             raise RuntimeError(first.get("error_msg") if isinstance(first, dict) else "product_list_failed")
         products = list(first.get("products") or [])
+        reported_total = int(first.get("total") or 0)
+        if reported_total > 0 and not products:
+            raise RuntimeError("product_list_parse_empty")
         if limit:
             return products[:limit]
         total = int(first.get("total") or len(products))
@@ -249,7 +252,12 @@ class ProductSyncService:
             product_info = detail.get("product_info") if isinstance(detail, dict) else {}
             product_info = product_info if isinstance(product_info, dict) else {}
             goods_id = str(product.get("goods_id") or product.get("goodsId") or product_info.get("goods_id") or "")
-            raw = {"list_item": product, "detail": product_info}
+            raw = {
+                "list_item": {key: value for key, value in product.items() if key != "raw_item"},
+                "detail": product_info,
+                "list_raw": product.get("raw_item"),
+                "detail_raw": detail.get("raw_response") if isinstance(detail, dict) else None,
+            }
             now = _now()
             values = {
                 "shop_id": internal_shop_id,

@@ -103,3 +103,53 @@ def test_product_sync_requires_auth(tmp_path):
         assert str(exc) == "auth_required"
     else:
         raise AssertionError("expected auth_required")
+
+
+class FakeRawProductManager:
+    def get_product_list(self, page=1, size=50):
+        if page > 1:
+            return {"success": True, "products": [], "total": 1}
+        return {
+            "success": True,
+            "total": 1,
+            "products": [
+                {
+                    "goods_id": "goods-raw-1",
+                    "goods_name": "Raw Product",
+                    "price": "39.90",
+                    "raw_item": {"goodsId": "goods-raw-1", "source": "list"},
+                }
+            ],
+            "raw_response": {"success": True, "result": {"total": 1}},
+        }
+
+    def get_product_detail(self, goods_id):
+        return {
+            "success": True,
+            "product_info": {
+                "goods_id": goods_id,
+                "goods_name": "Raw Product",
+                "specifications": ["100ml"],
+            },
+            "raw_response": {"success": True, "result": {"goodsId": goods_id, "source": "detail"}},
+        }
+
+
+def test_product_sync_preserves_list_and_detail_raw_payloads(tmp_path):
+    db_path = tmp_path / "sync.db"
+    service = _service(db_path, FakeRawProductManager())
+
+    job = service.create_job("565617", limit=1)
+
+    assert job["status"] == "succeeded"
+    conn = sqlite3.connect(db_path)
+    try:
+        row = conn.execute(
+            "SELECT raw_detail_json FROM product_knowledge WHERE goods_id='goods-raw-1'"
+        ).fetchone()
+        assert row is not None
+        raw = json.loads(row[0])
+        assert raw["list_raw"]["goodsId"] == "goods-raw-1"
+        assert raw["detail_raw"]["result"]["goodsId"] == "goods-raw-1"
+    finally:
+        conn.close()

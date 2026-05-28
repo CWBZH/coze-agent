@@ -100,8 +100,21 @@ def test_sync_item_failure_is_partial_and_retryable(tmp_path):
 def test_product_sync_shop_id_isolated(tmp_path):
     client = _client(tmp_path)
     try:
-        assert client.post("/api/shops/shop-a/product-sync/jobs", json={"limit": 1}).status_code == 200
-        assert client.get("/api/shops/shop-b/product-sync/coverage").json()["total"] == 0
-        assert client.get("/api/shops/shop-a/product-sync/coverage").json()["total"] == 1
+        assert client.post("/api/shops/565617/product-sync/jobs", json={"limit": 1}).status_code == 200
+        assert client.get("/api/shops/565618/product-sync/coverage").json()["total"] == 0
+        assert client.get("/api/shops/565617/product-sync/coverage").json()["total"] == 1
+    finally:
+        _clear()
+
+
+def test_product_sync_blocks_unbound_remote_shop_id(tmp_path):
+    client = _client(tmp_path)
+    try:
+        response = client.post("/api/shops/remote-login123/product-sync/jobs", json={"limit": 1})
+        assert response.status_code == 409
+        payload = response.json()
+        assert payload["error_type"] == "SHOP_ID_NOT_BOUND"
+        assert payload["retryable"] is False
+        assert "trace_id" in payload
     finally:
         _clear()
