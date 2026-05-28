@@ -89,6 +89,18 @@ def test_remote_browser_default_ttl_is_30_minutes():
     assert service.session_ttl_seconds == 1800
 
 
+def test_remote_browser_check_result_supports_pending_shop_identity():
+    result = RemoteBrowserCheckResult(
+        status="succeeded",
+        cookie_value="fake-cookie-value",
+        shop_identity_status="pending_real_shop_id",
+    )
+
+    assert result.status == "succeeded"
+    assert result.shop_identity_status == "pending_real_shop_id"
+    assert result.shop_id is None
+
+
 def test_remote_browser_check_login_waiting_and_success_saves_auth(tmp_path, monkeypatch):
     monkeypatch.setenv("SHOP_AUTH_ENCRYPTION_KEY", "unit-test-key")
     remote = FakeRemoteBrowserService()

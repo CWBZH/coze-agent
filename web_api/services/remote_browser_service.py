@@ -31,6 +31,7 @@ class RemoteBrowserCheckResult:
     shop_name: str | None = None
     user_id: str | None = None
     account_name: str | None = None
+    shop_identity_status: str = "unknown"
     cookie_value: str | None = None
     token_value: str | None = None
     error_summary: str | None = None
