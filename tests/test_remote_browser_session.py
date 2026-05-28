@@ -101,6 +101,77 @@ def test_remote_browser_check_result_supports_pending_shop_identity():
     assert result.shop_id is None
 
 
+def test_remote_browser_resolves_shop_identity_with_pdd_readonly_apis(monkeypatch):
+    class FakeResponse:
+        def __init__(self, payload):
+            self._payload = payload
+
+        def json(self):
+            return self._payload
+
+    calls = []
+
+    def fake_post(url, **kwargs):
+        calls.append({"url": url, "cookies": kwargs.get("cookies")})
+        assert kwargs.get("cookies") == {"api_uid": "fake-api-uid", "webp": "1"}
+        if "userinfo" in url:
+            return FakeResponse(
+                {
+                    "success": True,
+                    "result": {
+                        "mall_id": "323473738",
+                        "id": "seller-user-id",
+                        "username": "seller_account_10000000000",
+                    },
+                }
+            )
+        return FakeResponse({"success": True, "result": {"mallId": "323473738", "mallName": "美肌萌主驿站"}})
+
+    monkeypatch.setattr("web_api.services.remote_browser_service.requests.post", fake_post)
+    service = RemoteBrowserService(base_url="http://127.0.0.1:6088")
+
+    identity = service._fetch_shop_identity_from_pdd_api("api_uid=fake-api-uid; webp=1")
+
+    assert identity == {
+        "shop_id": "323473738",
+        "user_id": "seller-user-id",
+        "account_name": "seller_account_10000000000",
+        "shop_name": "美肌萌主驿站",
+    }
+    assert len(calls) == 2
+
+
+def test_remote_browser_check_login_auto_binds_shop_identity_from_cdp_cookie(monkeypatch):
+    service = RemoteBrowserService(base_url="http://127.0.0.1:6088")
+    session = service.create_session("login-auto-bind", "https://mms.pinduoduo.com/login")
+
+    monkeypatch.setattr(
+        service,
+        "_get_cdp_pages",
+        lambda: [{"type": "page", "url": "https://mms.pinduoduo.com/home", "webSocketDebuggerUrl": "ws://local"}],
+    )
+    monkeypatch.setattr(service, "_read_pdd_cookies_from_cdp", lambda pages: "api_uid=fake-api-uid; webp=1")
+    monkeypatch.setattr(
+        service,
+        "_fetch_shop_identity_from_pdd_api",
+        lambda cookie: {
+            "shop_id": "323473738",
+            "shop_name": "美肌萌主驿站",
+            "user_id": "seller-user-id",
+            "account_name": "seller_account_10000000000",
+        },
+    )
+
+    result = service.check_login_success(session.login_session_id)
+
+    assert result.status == "succeeded"
+    assert result.shop_identity_status == "bound"
+    assert result.shop_id == "323473738"
+    assert result.shop_name == "美肌萌主驿站"
+    assert result.user_id == "seller-user-id"
+    assert result.account_name == "seller_account_10000000000"
+
+
 def test_remote_browser_check_login_waiting_and_success_saves_auth(tmp_path, monkeypatch):
     monkeypatch.setenv("SHOP_AUTH_ENCRYPTION_KEY", "unit-test-key")
     remote = FakeRemoteBrowserService()

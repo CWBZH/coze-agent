@@ -10,6 +10,8 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+import requests
+
 
 @dataclass
 class RemoteBrowserSession:
@@ -107,7 +109,7 @@ class RemoteBrowserService:
         pdd_urls = [url for url in urls if "pinduoduo.com" in url or "yangkeduo.com" in url]
         login_urls = [url for url in pdd_urls if "login" in url.lower()]
         if cookie_value and pdd_urls and not login_urls:
-            identity = self._extract_shop_identity_from_cdp(pages)
+            identity = self._resolve_shop_identity(pages, cookie_value)
             if not identity:
                 return RemoteBrowserCheckResult(
                     status="succeeded",
@@ -116,8 +118,10 @@ class RemoteBrowserService:
                 )
             return RemoteBrowserCheckResult(
                 status="succeeded",
-                shop_id=identity,
-                user_id=identity,
+                shop_id=identity.get("shop_id"),
+                shop_name=identity.get("shop_name"),
+                user_id=identity.get("user_id"),
+                account_name=identity.get("account_name"),
                 cookie_value=cookie_value,
                 shop_identity_status="bound",
             )
@@ -197,6 +201,90 @@ class RemoteBrowserService:
             if match:
                 return match.group(1)
         return ""
+
+    def _resolve_shop_identity(self, pages: list[dict[str, Any]], cookie_value: str) -> dict[str, str]:
+        page_identity = self._extract_shop_identity_from_cdp(pages)
+        api_identity = self._fetch_shop_identity_from_pdd_api(cookie_value)
+        identity: dict[str, str] = {}
+        identity.update(api_identity)
+        if page_identity and not identity.get("shop_id"):
+            identity["shop_id"] = page_identity
+        if not self._is_real_pdd_id(identity.get("shop_id")):
+            return {}
+        return identity
+
+    def _fetch_shop_identity_from_pdd_api(self, cookie_value: str) -> dict[str, str]:
+        cookies = self._parse_cookie_header(cookie_value)
+        if not cookies:
+            return {}
+
+        identity: dict[str, str] = {}
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            "Content-Type": "application/json",
+            "Accept": "application/json, text/plain, */*",
+            "Origin": "https://mms.pinduoduo.com",
+            "Referer": "https://mms.pinduoduo.com/home",
+        }
+
+        try:
+            user_response = requests.post(
+                "https://mms.pinduoduo.com/janus/api/new/userinfo",
+                data="",
+                cookies=cookies,
+                headers=headers,
+                timeout=10,
+            )
+            user_payload = user_response.json()
+            if user_payload.get("success"):
+                result = user_payload.get("result") or {}
+                if result.get("mall_id"):
+                    identity["shop_id"] = str(result.get("mall_id"))
+                if result.get("id"):
+                    identity["user_id"] = str(result.get("id"))
+                if result.get("username"):
+                    identity["account_name"] = str(result.get("username"))
+        except Exception:
+            pass
+
+        try:
+            shop_response = requests.post(
+                "https://mms.pinduoduo.com/earth/api/merchant/queryMerchantInfoByMallId",
+                json={},
+                cookies=cookies,
+                headers=headers,
+                timeout=10,
+            )
+            shop_payload = shop_response.json()
+            if shop_payload.get("success"):
+                result = shop_payload.get("result") or {}
+                if result.get("mallId"):
+                    identity["shop_id"] = str(result.get("mallId"))
+                if result.get("mallName"):
+                    identity["shop_name"] = str(result.get("mallName"))
+        except Exception:
+            pass
+
+        if not self._is_real_pdd_id(identity.get("shop_id")):
+            return {}
+        return identity
+
+    @staticmethod
+    def _parse_cookie_header(cookie_value: str) -> dict[str, str]:
+        cookies: dict[str, str] = {}
+        for part in str(cookie_value or "").split(";"):
+            if "=" not in part:
+                continue
+            key, value = part.split("=", 1)
+            key = key.strip()
+            if key:
+                cookies[key] = value.strip()
+        return cookies
+
+    @staticmethod
+    def _is_real_pdd_id(value: str | None) -> bool:
+        value = str(value or "").strip()
+        return bool(re.fullmatch(r"\d{4,}", value))
 
     def _evaluate_runtime_snapshot(self, websocket_url: str) -> str:
         if not websocket_url:
