@@ -14,6 +14,20 @@ LIST_KEYS = (
     "data",
 )
 
+GOODS_ID_KEYS = ("goodsId", "goodsID", "goods_id", "id")
+GOODS_NAME_KEYS = ("goodsName", "goods_name", "name", "title")
+GOODS_SIGNAL_KEYS = (
+    "thumbUrl",
+    "thumb_url",
+    "hdThumbUrl",
+    "imageUrl",
+    "minOnSaleGroupPrice",
+    "groupPrice",
+    "price",
+    "quantity",
+    "stock",
+)
+
 
 def parse_product_list(response_data: dict[str, Any] | None) -> dict[str, Any]:
     data = _result_data(response_data)
@@ -89,18 +103,34 @@ def _result_data(response_data: dict[str, Any] | None) -> dict[str, Any]:
 def _find_goods_list(data: dict[str, Any]) -> list[Any]:
     for key in LIST_KEYS:
         value = data.get(key)
-        if isinstance(value, list):
+        if isinstance(value, list) and _looks_like_goods_list(value):
             return value
         if isinstance(value, dict):
             nested = _find_goods_list(value)
             if nested:
                 return nested
     for value in data.values():
+        if isinstance(value, list) and _looks_like_goods_list(value):
+            return value
         if isinstance(value, dict):
             nested = _find_goods_list(value)
             if nested:
                 return nested
     return []
+
+
+def _looks_like_goods_list(value: list[Any]) -> bool:
+    dict_items = [item for item in value[:10] if isinstance(item, dict)]
+    if not dict_items:
+        return False
+    matches = 0
+    for item in dict_items:
+        has_id = any(item.get(key) not in (None, "") for key in GOODS_ID_KEYS)
+        has_name = any(item.get(key) not in (None, "") for key in GOODS_NAME_KEYS)
+        has_signal = any(item.get(key) not in (None, "") for key in GOODS_SIGNAL_KEYS)
+        if has_id and (has_name or has_signal):
+            matches += 1
+    return matches > 0
 
 
 def _first_value(data: dict[str, Any], *keys: str) -> Any:

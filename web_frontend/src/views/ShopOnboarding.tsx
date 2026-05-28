@@ -106,6 +106,40 @@ function workerConsistencyTone(status?: string) {
   return "info";
 }
 
+function productSyncTone(status?: string): "success" | "warning" | "danger" | "info" {
+  if (status === "succeeded") return "success";
+  if (status === "partial_failed") return "warning";
+  if (status === "failed" || status === "cancelled") return "danger";
+  return "info";
+}
+
+function productSyncLabel(status?: string) {
+  const labels: Record<string, string> = {
+    pending: "等待中",
+    running: "同步中",
+    succeeded: "同步成功",
+    partial_failed: "部分失败",
+    failed: "同步失败",
+    cancelled: "已取消"
+  };
+  return labels[status || ""] ?? (status || "未知");
+}
+
+function productSyncNextAction(errorSummary?: string | null) {
+  const text = (errorSummary || "").toLowerCase();
+  if (!text) return "请刷新同步状态；如果仍失败，保留当前页面错误和后台日志 trace_id。";
+  if (text.includes("auth_required") || text.includes("auth_invalid")) {
+    return "请重新完成店铺登录授权，再重新同步商品。";
+  }
+  if (text.includes("anti") || text.includes("403") || text.includes("401")) {
+    return "PDD 商品接口拒绝了当前授权请求，请重新登录授权后再试；如果仍失败，需要补充浏览器侧商品同步通道。";
+  }
+  if (text.includes("product_list_parse_empty")) {
+    return "PDD 返回了商品总数，但当前解析器没有识别商品列表字段；请保留该错误，开发需要按返回结构补充解析规则。";
+  }
+  return "请先点击“刷新同步状态”，仍失败时重新登录授权后再同步。";
+}
+
 export function ShopOnboarding() {
   const [shopName, setShopName] = useState("");
   const [accountName, setAccountName] = useState("");
@@ -557,7 +591,7 @@ export function ShopOnboarding() {
             <h3>3. 同步商品</h3>
             <p className="muted">登录授权成功后，可用加密授权读取 PDD 商品列表和详情，写入本地 product_knowledge。不会发送 PDD 消息。</p>
           </div>
-          {syncJob && <StatusBadge tone={syncJob.status === "succeeded" ? "success" : syncJob.status === "partial_failed" ? "warning" : "info"}>{syncJob.status}</StatusBadge>}
+          {syncJob && <StatusBadge tone={productSyncTone(syncJob.status)}>{`${productSyncLabel(syncJob.status)} ${syncJob.status}`}</StatusBadge>}
         </div>
         {shopIdentityPending ? (
           <div className="warning-banner error-state">
@@ -588,6 +622,13 @@ export function ShopOnboarding() {
                 <div className="stat-card"><span>成功</span><strong>{syncJob.succeeded_count}</strong></div>
                 <div className="stat-card"><span>失败</span><strong>{syncJob.failed_count}</strong></div>
                 <div className="stat-card"><span>跳过</span><strong>{syncJob.skipped_count}</strong></div>
+              </div>
+            )}
+            {syncJob?.error_summary && syncJob.status !== "succeeded" && (
+              <div className="warning-banner error-state">
+                <strong>商品同步失败原因：</strong>
+                {syncJob.error_summary}
+                <p className="muted">建议处理：{productSyncNextAction(syncJob.error_summary)}</p>
               </div>
             )}
             {coverage && (
