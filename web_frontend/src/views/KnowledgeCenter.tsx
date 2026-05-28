@@ -361,7 +361,7 @@ function SopTab({
     if (!form.id) return;
     publishSop(form.id)
       .then((result) => {
-        setMessage("已生成版本快照和待处理索引任务。索引成功后才会生效。");
+        setMessage(`SOP 已发布并执行真实索引。当前版本状态：${result.version.status}。`);
         setLastJob(result.index_job);
         onPublished(result.version, result.index_job);
         load();
@@ -371,9 +371,12 @@ function SopTab({
 
   function runLastJob() {
     if (!lastJob) return;
-    runIndexJob(lastJob.id)
+    if (!window.confirm("真实索引会调用 embedding 服务并写入 pgvector，但不会发送 PDD 消息。确认继续执行真实索引吗？")) {
+      return;
+    }
+    runIndexJob(lastJob.id, { mode: "real", embedding_provider: "doubao", vector_store: "pgvector" })
       .then((result) => {
-        setMessage("Fake 索引成功，版本已生效。");
+        setMessage(`真实索引已完成，当前版本状态：${result.version.status}。`);
         setLastJob(result.index_job);
         onPublished(result.version, result.index_job);
         getVersionChunks(result.version.id).then((chunks) => {
@@ -446,8 +449,8 @@ function SopTab({
           <div className="warning-banner">发布只会生成版本和索引任务，不代表立即生效。索引成功后才会成为 AI 当前使用的知识。</div>
           <div className="button-row">
             <button type="button" onClick={saveDraft} disabled={!form.shop_id || !form.title || !form.content}>保存草稿</button>
-            <button type="button" onClick={publishCurrent} disabled={!form.id}>发布</button>
-            <button type="button" onClick={runLastJob} disabled={!lastJob || !["pending", "retrying"].includes(lastJob.status)}>执行 Fake 索引</button>
+            <button type="button" onClick={publishCurrent} disabled={!form.id}>发布并真实索引</button>
+            <button type="button" onClick={runLastJob} disabled={!lastJob || !["pending", "retrying", "failed"].includes(lastJob.status)}>重新执行真实索引</button>
             <button type="button" onClick={archiveCurrent} disabled={!form.id}>归档</button>
           </div>
           <ActiveVersionSummary
@@ -594,29 +597,21 @@ function ProductsTab({
       .then((result) => {
         setEffective(result.effective);
         setLastJob(result.index_job);
-        setMessage("商品知识快照已发布。请执行 Fake 或真实索引，索引成功后才会生效。");
+        setMessage(`商品知识已发布并执行真实索引。当前版本状态：${result.version.status}。`);
         onPublished(result.version, result.index_job);
       })
       .catch((err: Error) => setError(err.message));
   }
 
-  function runLastJob(mode: "fake" | "real" = "fake") {
+  function runLastJob() {
     if (!lastJob) return;
-    if (
-      mode === "real" &&
-      !window.confirm("真实索引会调用 embedding 服务并写入 pgvector，但不会发送 PDD 消息。确认继续执行真实索引吗？")
-    ) {
+    if (!window.confirm("真实索引会调用 embedding 服务并写入 pgvector，但不会发送 PDD 消息。确认继续执行真实索引吗？")) {
       return;
     }
-    runIndexJob(
-      lastJob.id,
-      mode === "real"
-        ? { mode: "real", embedding_provider: "ollama", vector_store: "pgvector" }
-        : { mode: "fake", embedding_provider: "fake", vector_store: "none" }
-    )
+    runIndexJob(lastJob.id, { mode: "real", embedding_provider: "doubao", vector_store: "pgvector" })
       .then((result) => {
         setLastJob(result.index_job);
-        setMessage(`${mode === "real" ? "真实" : "Fake"} 索引已完成。商品版本状态：${result.version.status}。`);
+        setMessage(`真实索引已完成。商品版本状态：${result.version.status}。`);
         onPublished(result.version, result.index_job);
         if (selectedProduct) {
           loadProductActiveSummary(selectedProduct.shop_id, selectedProduct.goods_id);
@@ -700,9 +695,8 @@ function ProductsTab({
             <span className="muted">content_hash: {override.content_hash || "新草稿"}</span>
             <div className="button-row">
               <button type="button" onClick={saveOverride}>保存人工知识</button>
-              <button type="button" onClick={publishSelectedProduct}>发布商品知识</button>
-              <button type="button" onClick={() => runLastJob("fake")} disabled={!lastJob || !["pending", "retrying"].includes(lastJob.status)}>执行 Fake 索引</button>
-              <button type="button" onClick={() => runLastJob("real")} disabled={!lastJob || !["pending", "retrying"].includes(lastJob.status)}>执行真实索引</button>
+              <button type="button" onClick={publishSelectedProduct}>发布商品知识并真实索引</button>
+              <button type="button" onClick={runLastJob} disabled={!lastJob || !["pending", "retrying", "failed"].includes(lastJob.status)}>重新执行真实索引</button>
             </div>
             <div className="warning-banner">当前生效版本才是 InternalEngine 会检索的知识。草稿修改不会立即生效，必须发布并索引成功。真实索引会调用 embedding 服务并写入 pgvector，但不会发送 PDD 消息。</div>
             <ActiveVersionSummary
@@ -891,7 +885,7 @@ function IndexJobsTab({
   }, [filters.shop_id, filters.status, filters.source_type, filters.source_id, filters.version_id]);
 
   function runJob(job: KnowledgeIndexJob) {
-    runIndexJob(job.id)
+    runIndexJob(job.id, { mode: "real", embedding_provider: "doubao", vector_store: "pgvector" })
       .then((result) => {
         setMessage(`任务 ${result.index_job.id} 已成功，版本 ${result.version.id} 已生效。`);
         setSelected(result.index_job);
@@ -919,7 +913,7 @@ function IndexJobsTab({
         <div className="panel-header">
           <div>
             <h2>索引任务</h2>
-            <p className="muted">查看和执行索引任务。默认执行 Fake 索引，不写 pgvector；真实索引入口只在商品/SOP发布面板中显式触发。</p>
+            <p className="muted">查看和执行索引任务。生产环境统一执行真实索引，写入已配置的 pgvector；该过程不会发送 PDD 消息。</p>
           </div>
           <button type="button" onClick={load}>刷新</button>
         </div>
@@ -1034,7 +1028,7 @@ export function KnowledgeCenter() {
           </div>
         </div>
         <div className="warning-banner">
-          保存草稿不会立即生效；发布只会生成版本快照和索引任务；只有索引成功后才会成为 AI 当前使用的知识。Fake index 不写 pgvector，Real index 会写入 pgvector。
+          保存草稿不会立即生效；发布会生成版本快照并执行真实索引；只有索引成功后才会成为 AI 当前使用的知识。真实索引会写入 pgvector，不会发送 PDD 消息。
         </div>
         <div className="tab-row">
           {tabs.map((tab) => (

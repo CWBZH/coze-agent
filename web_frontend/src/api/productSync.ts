@@ -54,6 +54,10 @@ export function createProductSyncJob(shopId: string, limit = 10) {
   });
 }
 
+export function listProductSyncJobs(shopId: string, limit = 20) {
+  return apiGet<ProductSyncJob[]>(`/api/shops/${encodeURIComponent(shopId)}/product-sync/jobs?limit=${limit}`);
+}
+
 export function getProductSyncJob(shopId: string, jobId: string) {
   return apiGet<ProductSyncJob>(`/api/shops/${encodeURIComponent(shopId)}/product-sync/jobs/${encodeURIComponent(jobId)}`);
 }

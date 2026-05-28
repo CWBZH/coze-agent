@@ -142,9 +142,9 @@ export type IndexRunResponse = {
 };
 
 export type IndexRunPayload = {
-  mode?: "fake" | "real";
-  embedding_provider?: "fake" | "ollama";
-  vector_store?: "none" | "pgvector";
+  mode?: "real";
+  embedding_provider?: "doubao" | "ark" | "ollama";
+  vector_store?: "pgvector";
 };
 
 export type VersionChunk = {

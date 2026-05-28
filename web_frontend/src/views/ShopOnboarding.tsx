@@ -21,11 +21,22 @@ import {
   createProductSyncJob,
   getProductSyncCoverage,
   getProductSyncJob,
+  listProductSyncJobs,
   ProductSyncCoverage,
   ProductSyncJob,
   retryProductSyncJob
 } from "../api/productSync";
 import { StatusBadge } from "../components/StatusBadge";
+
+const ONBOARDING_STORAGE_KEY = "web_admin_shop_onboarding_state";
+
+type SavedOnboardingState = {
+  sessionId?: string;
+  shopId?: string;
+  syncJobId?: string;
+  shopName?: string;
+  accountName?: string;
+};
 
 const terminalStatuses = new Set([
   "succeeded",
@@ -140,6 +151,40 @@ function productSyncNextAction(errorSummary?: string | null) {
   return "请先点击“刷新同步状态”，仍失败时重新登录授权后再同步。";
 }
 
+function loadSavedOnboardingState(): SavedOnboardingState | null {
+  try {
+    const raw = window.localStorage.getItem(ONBOARDING_STORAGE_KEY);
+    return raw ? JSON.parse(raw) as SavedOnboardingState : null;
+  } catch {
+    return null;
+  }
+}
+
+function saveOnboardingState(state: SavedOnboardingState) {
+  try {
+    const hasValue = Object.values(state).some((value) => Boolean(value));
+    if (!hasValue) {
+      window.localStorage.removeItem(ONBOARDING_STORAGE_KEY);
+      return;
+    }
+    window.localStorage.setItem(ONBOARDING_STORAGE_KEY, JSON.stringify(state));
+  } catch {
+    // localStorage is best-effort only; API state remains the source of truth.
+  }
+}
+
+function clearSavedOnboardingState() {
+  try {
+    window.localStorage.removeItem(ONBOARDING_STORAGE_KEY);
+  } catch {
+    // ignore browser storage errors
+  }
+}
+
+function isBusinessShopId(shopId?: string | null) {
+  return Boolean(shopId && !shopId.startsWith("remote-"));
+}
+
 export function ShopOnboarding() {
   const [shopName, setShopName] = useState("");
   const [accountName, setAccountName] = useState("");
@@ -156,6 +201,7 @@ export function ShopOnboarding() {
   const [overrideReason, setOverrideReason] = useState("");
   const [disableReason, setDisableReason] = useState("manual_disable");
   const [mallIdInput, setMallIdInput] = useState("");
+  const [stateLoaded, setStateLoaded] = useState(false);
 
   const currentStep = useMemo(() => {
     if (!session) return 1;
@@ -172,9 +218,70 @@ export function ShopOnboarding() {
       session?.shop_identity_status === "pending_real_shop_id" ||
       (session?.shop_id || "").startsWith("remote-")
   );
-  const businessShopIdReady = Boolean(activeShopId && !shopIdentityPending);
+  const businessShopIdReady = Boolean(isBusinessShopId(activeShopId) && !shopIdentityPending);
   const shopIdentityBlockReason =
     "授权已完成，但系统尚未绑定真实 PDD 店铺 ID/mall_id。为避免把 remote-* 临时会话 ID 写入正式数据，商品同步、知识发布、启用 AI 和 worker 启用已被阻断。请先完成真实店铺身份绑定。";
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function restore() {
+      const saved = loadSavedOnboardingState();
+      if (!saved) {
+        setStateLoaded(true);
+        return;
+      }
+      setShopName(saved.shopName || "");
+      setAccountName(saved.accountName || "");
+      try {
+        let restoredSession: OnboardingSession | null = null;
+        if (saved.sessionId) {
+          restoredSession = await getOnboardingSession(saved.sessionId);
+          if (!cancelled) setSession(restoredSession);
+        }
+
+        const restoredShopId = restoredSession?.shop_id || saved.shopId || "";
+        if (isBusinessShopId(restoredShopId)) {
+          const [nextCoverage, jobs, nextChecklist, nextAiStatus, nextWorkerStatus] = await Promise.all([
+            getProductSyncCoverage(restoredShopId),
+            saved.syncJobId
+              ? getProductSyncJob(restoredShopId, saved.syncJobId).then((job) => [job]).catch(() => listProductSyncJobs(restoredShopId, 1))
+              : listProductSyncJobs(restoredShopId, 1),
+            getOnboardingChecklist(restoredShopId),
+            getAiStatus(restoredShopId),
+            getWorkerStatus(restoredShopId)
+          ]);
+          if (!cancelled) {
+            setCoverage(nextCoverage);
+            setSyncJob(jobs[0] || null);
+            setChecklist(nextChecklist);
+            setAiStatus(nextAiStatus);
+            setWorkerStatus(nextWorkerStatus);
+          }
+        }
+      } catch (err) {
+        if (!cancelled) setError(err instanceof Error ? err.message : "恢复店铺接入流程失败");
+      } finally {
+        if (!cancelled) setStateLoaded(true);
+      }
+    }
+
+    restore();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!stateLoaded) return;
+    saveOnboardingState({
+      sessionId: session?.session_id,
+      shopId: isBusinessShopId(session?.shop_id) ? session?.shop_id || undefined : undefined,
+      syncJobId: syncJob?.id,
+      shopName,
+      accountName
+    });
+  }, [accountName, session?.session_id, session?.shop_id, shopName, stateLoaded, syncJob?.id]);
 
   useEffect(() => {
     if (!session || terminalStatuses.has(session.status)) {
@@ -214,12 +321,12 @@ export function ShopOnboarding() {
     event.preventDefault();
     setLoading(true);
     setError(null);
-      setSyncJob(null);
-      setCoverage(null);
-      setChecklist(null);
-      setAiStatus(null);
-      setWorkerStatus(null);
-      setMallIdInput("");
+    setSyncJob(null);
+    setCoverage(null);
+    setChecklist(null);
+    setAiStatus(null);
+    setWorkerStatus(null);
+    setMallIdInput("");
     try {
       const created = await createOnboardingSession({
         platform: "pdd",
@@ -245,6 +352,34 @@ export function ShopOnboarding() {
       setSession(await cancelOnboardingSession(session.session_id));
     } catch (err) {
       setError(err instanceof Error ? err.message : "取消登录会话失败");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleClearOnboarding() {
+    const ok = window.confirm("确定清空当前店铺接入流程吗？如果远程浏览器登录会话仍在进行，会先取消会话。该操作不会删除店铺授权，也不会发送 PDD 消息。");
+    if (!ok) return;
+    setLoading(true);
+    setError(null);
+    try {
+      if (session && !terminalStatuses.has(session.status)) {
+        await cancelOnboardingSession(session.session_id);
+      }
+      setSession(null);
+      setShopName("");
+      setAccountName("");
+      setSyncJob(null);
+      setCoverage(null);
+      setChecklist(null);
+      setAiStatus(null);
+      setWorkerStatus(null);
+      setMallIdInput("");
+      setOverrideReason("");
+      setDisableReason("manual_disable");
+      clearSavedOnboardingState();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "清空店铺接入流程失败");
     } finally {
       setLoading(false);
     }
@@ -448,6 +583,9 @@ export function ShopOnboarding() {
               <input value={accountName} onChange={(event) => setAccountName(event.target.value)} required placeholder="用于授权记录脱敏展示" />
             </label>
             <button disabled={loading}>{loading ? "处理中..." : "创建远程浏览器登录会话"}</button>
+            <button type="button" className="secondary-button" onClick={handleClearOnboarding} disabled={loading}>
+              清空当前接入流程
+            </button>
           </form>
         </section>
 

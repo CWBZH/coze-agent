@@ -42,14 +42,14 @@ class SopPublishResponse(BaseModel):
 class IndexRunResponse(BaseModel):
     version: dict[str, Any]
     index_job: dict[str, Any]
-    index_mode: str = "fake"
+    index_mode: str = "real"
     error_type: str = ""
 
 
 class IndexRunRequest(BaseModel):
-    mode: str = "fake"
-    embedding_provider: str = "fake"
-    vector_store: str = "none"
+    mode: str = "real"
+    embedding_provider: str = "doubao"
+    vector_store: str = "pgvector"
 
 
 class ProductPublishResponse(BaseModel):

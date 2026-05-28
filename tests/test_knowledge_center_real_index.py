@@ -49,17 +49,27 @@ def _create_product_db(path: Path) -> None:
         conn.close()
 
 
-def _service(db_path: Path, *, with_product: bool = False) -> KnowledgeCenterService:
+def _service(
+    db_path: Path,
+    *,
+    with_product: bool = False,
+    default_embedding_client=None,
+    default_vector_store=None,
+) -> KnowledgeCenterService:
     if with_product:
         _create_product_db(db_path)
-    service = KnowledgeCenterService(db_path)
+    service = KnowledgeCenterService(
+        db_path,
+        default_embedding_client=default_embedding_client,
+        default_vector_store=default_vector_store,
+    )
     service.init_schema()
     return service
 
 
 def _publish_sop(service: KnowledgeCenterService, content: str = "物流以订单页为准") -> dict:
     sop = service.create_sop("shop-1", "logistics_policy", "Shipping SOP", content)
-    return service.publish_sop("shop-1", sop["id"])
+    return service.publish_sop("shop-1", sop["id"], run_index=False)
 
 
 def _fake_embedder() -> _FakeEmbeddingClient:
@@ -106,10 +116,60 @@ def test_real_index_with_fake_providers_succeeds_and_activates_sop(tmp_path):
     assert len(store._items) == result["index_job"]["chunk_count"]
 
 
+def test_publish_sop_runs_real_index_and_activates_when_providers_are_configured(tmp_path):
+    store = _InMemoryVectorStore()
+    service = _service(tmp_path / "kc.db", default_embedding_client=_fake_embedder(), default_vector_store=store)
+    sop = service.create_sop("shop-1", "logistics_policy", "Shipping SOP", "real publish content")
+
+    published = service.publish_sop("shop-1", sop["id"])
+
+    assert published["job"]["status"] == "succeeded"
+    assert published["version"]["status"] == "active"
+    assert published["version"]["is_active"] == 1
+    assert published["index_result"]["index_mode"] == "real"
+    assert len(store._items) == published["job"]["chunk_count"]
+
+
+def test_publish_product_runs_real_index_and_activates_when_providers_are_configured(tmp_path):
+    store = _InMemoryVectorStore()
+    service = _service(
+        tmp_path / "kc.db",
+        with_product=True,
+        default_embedding_client=_fake_embedder(),
+        default_vector_store=store,
+    )
+
+    published = service.publish_product("shop-1", "goods-1")
+
+    assert published["job"]["status"] == "succeeded"
+    assert published["version"]["status"] == "active"
+    assert published["version"]["is_active"] == 1
+    assert published["index_result"]["index_mode"] == "real"
+    assert len(store._items) == published["job"]["chunk_count"]
+
+
+def test_unknown_embedding_provider_fails_instead_of_falling_back_to_fake(tmp_path):
+    service = _service(tmp_path / "kc.db")
+    sop = service.create_sop("shop-1", "logistics_policy", "Shipping SOP", "content")
+    published = service.publish_sop("shop-1", sop["id"], run_index=False)
+
+    result = service.run_index_job(
+        published["job"]["id"],
+        mode="real",
+        embedding_provider="unknown-provider",
+        vector_store_provider="pgvector",
+    )
+
+    assert result["index_mode"] == "real"
+    assert result["index_job"]["status"] == "failed"
+    assert result["error_type"] == "unsupported_embedding_provider"
+    assert result["version"]["is_active"] == 0
+
+
 def test_real_index_reads_snapshot_only_not_changed_sop_draft(tmp_path):
     service = _service(tmp_path / "kc.db")
     sop = service.create_sop("shop-1", "logistics_policy", "Shipping SOP", "snapshot content")
-    published = service.publish_sop("shop-1", sop["id"])
+    published = service.publish_sop("shop-1", sop["id"], run_index=False)
     service.update_sop(sop["id"], content="changed draft content")
     store = _InMemoryVectorStore()
 
@@ -123,7 +183,7 @@ def test_real_index_reads_snapshot_only_not_changed_sop_draft(tmp_path):
 def test_product_snapshot_chunks_include_field_sources(tmp_path):
     service = _service(tmp_path / "kc.db", with_product=True)
     service.upsert_override("shop-1", "goods-1", usage_override="manual usage", price_note_override="manual note")
-    published = service.publish_product("shop-1", "goods-1")
+    published = service.publish_product("shop-1", "goods-1", run_index=False)
     store = _InMemoryVectorStore()
 
     service.run_real_index_job(published["job"]["id"], embedding_client=_fake_embedder(), vector_store=store)
@@ -182,26 +242,30 @@ def test_failed_real_index_does_not_replace_old_active(tmp_path):
     assert active[0]["id"] == first["version"]["id"]
 
 
-def test_run_index_api_defaults_to_fake_and_accepts_explicit_real_missing_env(monkeypatch, tmp_path):
-    for key in ("AI_WORKFLOW_PGVECTOR_DSN", "AI_WORKFLOW_OLLAMA_BASE_URL", "AI_WORKFLOW_EMBEDDING_MODEL"):
+def test_run_index_api_defaults_to_real_doubao_pgvector_and_reports_missing_config(monkeypatch, tmp_path):
+    for key in (
+        "AI_WORKFLOW_PGVECTOR_DSN",
+        "AI_WORKFLOW_OLLAMA_BASE_URL",
+        "AI_WORKFLOW_EMBEDDING_MODEL",
+        "DOUBAO_EMBEDDING_API_KEY",
+        "ARK_API_KEY",
+        "DOUBAO_EMBEDDING_MODEL",
+        "ARK_EMBEDDING_MODEL",
+    ):
         monkeypatch.delenv(key, raising=False)
     service = _service(tmp_path / "kc.db")
-    published = _publish_sop(service)
+    sop = service.create_sop("shop-1", "logistics_policy", "Shipping SOP", "pending")
+    published = service.publish_sop("shop-1", sop["id"], run_index=False)
     app.dependency_overrides[get_knowledge_center_service] = lambda: service
     client = TestClient(app)
     try:
-        fake_response = client.post(f"/api/knowledge/index-jobs/{published['job']['id']}/run")
-        second = _publish_sop(service, content="real missing")
-        real_response = client.post(
-            f"/api/knowledge/index-jobs/{second['job']['id']}/run",
-            json={"mode": "real", "embedding_provider": "ollama", "vector_store": "pgvector"},
-        )
+        response = client.post(f"/api/knowledge/index-jobs/{published['job']['id']}/run")
 
-        assert fake_response.status_code == 200
-        assert fake_response.json()["index_mode"] == "fake"
-        assert real_response.status_code == 200
-        assert real_response.json()["error_type"] == "config_missing"
-        assert real_response.json()["version"]["is_active"] == 0
-        assert "fastgpt" not in json.dumps(real_response.json()).lower()
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["index_mode"] == "real"
+        assert payload["error_type"] == "config_missing"
+        assert payload["version"]["is_active"] == 0
+        assert "fastgpt" not in json.dumps(payload).lower()
     finally:
         app.dependency_overrides.clear()

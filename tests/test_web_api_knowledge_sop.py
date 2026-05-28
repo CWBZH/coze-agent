@@ -6,11 +6,15 @@ from fastapi.testclient import TestClient
 
 from web_api.deps import get_knowledge_center_service
 from web_api.main import app
-from web_api.services.knowledge_center_service import KnowledgeCenterService
+from web_api.services.knowledge_center_service import KnowledgeCenterService, _FakeEmbeddingClient, _InMemoryVectorStore
 
 
 def _client_for_db(db_path: Path) -> TestClient:
-    service = KnowledgeCenterService(db_path)
+    service = KnowledgeCenterService(
+        db_path,
+        default_embedding_client=_FakeEmbeddingClient(dimension=8, model="test-embedding"),
+        default_vector_store=_InMemoryVectorStore(),
+    )
     service.init_schema()
     app.dependency_overrides[get_knowledge_center_service] = lambda: service
     return TestClient(app)
@@ -78,23 +82,21 @@ def test_publish_sop_creates_snapshot_version_and_job(tmp_path):
         job_response = client.get(f"/api/knowledge/index-jobs/{published['index_job']['id']}")
         snapshot = json.loads(version_response.json()["snapshot_json"])
 
-        assert published["version"]["status"] == "pending_index"
-        assert published["index_job"]["status"] == "pending"
+        assert published["version"]["status"] == "active"
+        assert published["index_job"]["status"] == "succeeded"
         assert snapshot["content"] == "Version one"
         assert job_response.json()["version_id"] == published["version"]["id"]
     finally:
         _clear_overrides()
 
 
-def test_run_pending_job_fake_succeeds_and_activates_version(tmp_path):
+def test_publish_sop_runs_real_index_and_activates_version(tmp_path):
     client = _client_for_db(tmp_path / "kc.db")
     try:
         created = _create_sop(client)
         published = client.post(f"/api/knowledge/sop/{created['id']}/publish").json()
-        result = client.post(f"/api/knowledge/index-jobs/{published['index_job']['id']}/run")
 
-        assert result.status_code == 200
-        payload = result.json()
+        payload = published
         assert payload["index_job"]["status"] == "succeeded"
         assert payload["index_job"]["chunk_count"] >= 1
         assert payload["index_job"]["embedded_count"] == payload["index_job"]["chunk_count"]
@@ -109,38 +111,31 @@ def test_second_publish_run_deactivates_old_active_version(tmp_path):
     try:
         created = _create_sop(client, content="Version one")
         first = client.post(f"/api/knowledge/sop/{created['id']}/publish").json()
-        first_run = client.post(f"/api/knowledge/index-jobs/{first['index_job']['id']}/run").json()
         client.put(f"/api/knowledge/sop/{created['id']}", json={"content": "Version two"})
         second = client.post(f"/api/knowledge/sop/{created['id']}/publish").json()
-        second_run = client.post(f"/api/knowledge/index-jobs/{second['index_job']['id']}/run").json()
         versions = client.get("/api/knowledge/versions?shop_id=shop-1&is_active=true").json()["items"]
-        old_version = client.get(f"/api/knowledge/versions/{first_run['version']['id']}").json()
+        old_version = client.get(f"/api/knowledge/versions/{first['version']['id']}").json()
 
         assert len(versions) == 1
-        assert versions[0]["id"] == second_run["version"]["id"]
+        assert versions[0]["id"] == second["version"]["id"]
         assert old_version["is_active"] == 0
         assert old_version["status"] == "retired"
     finally:
         _clear_overrides()
 
 
-def test_fake_index_failed_does_not_activate_version(tmp_path):
+def test_real_index_config_failure_does_not_activate_version(tmp_path):
     db_path = tmp_path / "kc.db"
-    client = _client_for_db(db_path)
+    service = KnowledgeCenterService(db_path)
+    service.init_schema()
+    app.dependency_overrides[get_knowledge_center_service] = lambda: service
+    client = TestClient(app)
     try:
         created = _create_sop(client)
         published = client.post(f"/api/knowledge/sop/{created['id']}/publish").json()
-        conn = sqlite3.connect(db_path)
-        try:
-            conn.execute("UPDATE knowledge_versions SET snapshot_json='' WHERE id=?", (published["version"]["id"],))
-            conn.commit()
-        finally:
-            conn.close()
-
-        result = client.post(f"/api/knowledge/index-jobs/{published['index_job']['id']}/run")
         version = client.get(f"/api/knowledge/versions/{published['version']['id']}").json()
 
-        assert result.status_code == 500
+        assert published["index_job"]["status"] == "failed"
         assert version["is_active"] == 0
         assert version["status"] == "failed"
     finally:

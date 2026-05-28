@@ -535,8 +535,21 @@ class KnowledgeCenterRepository:
 
 
 class KnowledgeCenterService:
-    def __init__(self, db_path: str | Path | None = None, repository: KnowledgeCenterRepository | None = None) -> None:
+    def __init__(
+        self,
+        db_path: str | Path | None = None,
+        repository: KnowledgeCenterRepository | None = None,
+        *,
+        default_embedding_client: Any | None = None,
+        default_vector_store: Any | None = None,
+        default_embedding_provider: str | None = None,
+        default_vector_store_provider: str | None = None,
+    ) -> None:
         self.repository = repository or KnowledgeCenterRepository(db_path)
+        self.default_embedding_client = default_embedding_client
+        self.default_vector_store = default_vector_store
+        self.default_embedding_provider = (default_embedding_provider or os.getenv("WEB_KNOWLEDGE_EMBEDDING_PROVIDER") or "doubao").strip().lower()
+        self.default_vector_store_provider = (default_vector_store_provider or os.getenv("WEB_KNOWLEDGE_VECTOR_STORE") or "pgvector").strip().lower()
 
     def init_schema(self) -> None:
         self.repository.init_schema()
@@ -593,7 +606,7 @@ class KnowledgeCenterService:
             "override": _override_payload(override, shop_id=shop_id, goods_id=goods_id),
         }
 
-    def publish_sop(self, shop_id: str, sop_id: int, actor: str = "local_admin") -> dict[str, Any]:
+    def publish_sop(self, shop_id: str, sop_id: int, actor: str = "local_admin", *, run_index: bool = True) -> dict[str, Any]:
         sop = self.repository.get_sop(sop_id)
         if sop["shop_id"] != shop_id:
             raise KeyError(f"sop_not_found:{shop_id}:{sop_id}")
@@ -606,7 +619,7 @@ class KnowledgeCenterService:
             "content": sop["content"],
             "content_hash": sop["content_hash"],
         }
-        return self.repository.create_version_and_job(
+        result = self.repository.create_version_and_job(
             shop_id=shop_id,
             source_type="sop",
             source_id=str(sop["id"]),
@@ -614,8 +627,17 @@ class KnowledgeCenterService:
             snapshot=snapshot,
             actor=actor,
         )
+        if not run_index:
+            return result
+        index_result = self._run_default_real_index(result["job"]["id"])
+        return {
+            **result,
+            "version": index_result["version"],
+            "job": index_result["index_job"],
+            "index_result": index_result,
+        }
 
-    def publish_product(self, shop_id: str, goods_id: str, actor: str = "local_admin") -> dict[str, Any]:
+    def publish_product(self, shop_id: str, goods_id: str, actor: str = "local_admin", *, run_index: bool = True) -> dict[str, Any]:
         snapshot = self.build_effective_product_knowledge(shop_id, goods_id)
         result = self.repository.create_version_and_job(
             shop_id=shop_id,
@@ -625,7 +647,24 @@ class KnowledgeCenterService:
             snapshot=snapshot,
             actor=actor,
         )
+        if run_index:
+            index_result = self._run_default_real_index(result["job"]["id"])
+            result = {
+                **result,
+                "version": index_result["version"],
+                "job": index_result["index_job"],
+                "index_result": index_result,
+            }
         return {"effective": snapshot, **result}
+
+    def _run_default_real_index(self, job_id: int) -> dict[str, Any]:
+        return self.run_real_index_job(
+            job_id,
+            embedding_provider=self.default_embedding_provider,
+            vector_store_provider=self.default_vector_store_provider,
+            embedding_client=self.default_embedding_client,
+            vector_store=self.default_vector_store,
+        )
 
     def get_version(self, version_id: int) -> dict[str, Any]:
         return self.repository.get_version(version_id)
@@ -723,34 +762,48 @@ class KnowledgeCenterService:
         self,
         job_id: int,
         *,
-        mode: str = "fake",
-        embedding_provider: str = "fake",
-        vector_store_provider: str = "none",
+        mode: str = "real",
+        embedding_provider: str | None = None,
+        vector_store_provider: str | None = None,
     ) -> dict[str, Any]:
-        normalized_mode = str(mode or "fake").strip().lower()
+        normalized_mode = str(mode or "real").strip().lower()
         if normalized_mode != "real":
             return self.run_fake_index_job(job_id)
         return self.run_real_index_job(
             job_id,
-            embedding_provider=embedding_provider,
-            vector_store_provider=vector_store_provider,
+            embedding_provider=embedding_provider or self.default_embedding_provider,
+            vector_store_provider=vector_store_provider or self.default_vector_store_provider,
         )
 
     def run_real_index_job(
         self,
         job_id: int,
         *,
-        embedding_provider: str = "fake",
-        vector_store_provider: str = "none",
+        embedding_provider: str = "doubao",
+        vector_store_provider: str = "pgvector",
         embedding_client: Any | None = None,
         vector_store: Any | None = None,
     ) -> dict[str, Any]:
-        embedding_provider = str(embedding_provider or "fake").strip().lower()
-        vector_store_provider = str(vector_store_provider or "none").strip().lower()
+        embedding_provider = str(embedding_provider or self.default_embedding_provider or "doubao").strip().lower()
+        vector_store_provider = str(vector_store_provider or self.default_vector_store_provider or "pgvector").strip().lower()
         job = self.repository.get_index_job(job_id)
         if job["status"] not in {"pending", "retrying"}:
             raise ValueError(f"job_not_runnable:{job['status']}")
         version = self.repository.get_version(job["version_id"])
+        unsupported = self._unsupported_real_index_provider(
+            embedding_provider=embedding_provider,
+            vector_store_provider=vector_store_provider,
+            embedding_client=embedding_client,
+            vector_store=vector_store,
+        )
+        if unsupported:
+            failed_job = self.repository.mark_job_failed(job_id, unsupported)
+            return {
+                "version": self.repository.get_version(job["version_id"]),
+                "index_job": failed_job,
+                "index_mode": "real",
+                "error_type": unsupported.split(":", 1)[0],
+            }
         config_error = self._real_index_config_error(
             embedding_provider=embedding_provider,
             vector_store_provider=vector_store_provider,
@@ -816,9 +869,28 @@ class KnowledgeCenterService:
             for key in ("AI_WORKFLOW_OLLAMA_BASE_URL", "AI_WORKFLOW_EMBEDDING_MODEL"):
                 if not os.getenv(key):
                     missing.append(key)
-        if vector_store is None and vector_store_provider == "pgvector" and not os.getenv("AI_WORKFLOW_PGVECTOR_DSN"):
+        if embedding_client is None and embedding_provider in {"doubao", "ark"}:
+            if not _first_env("DOUBAO_EMBEDDING_API_KEY", "ARK_API_KEY"):
+                missing.append("DOUBAO_EMBEDDING_API_KEY|ARK_API_KEY")
+            if not _first_env("DOUBAO_EMBEDDING_MODEL", "ARK_EMBEDDING_MODEL", "AI_WORKFLOW_EMBEDDING_MODEL"):
+                missing.append("DOUBAO_EMBEDDING_MODEL|ARK_EMBEDDING_MODEL|AI_WORKFLOW_EMBEDDING_MODEL")
+        if vector_store is None and vector_store_provider == "pgvector" and not _first_env("WEB_API_PGVECTOR_DSN", "AI_WORKFLOW_PGVECTOR_DSN"):
             missing.append("AI_WORKFLOW_PGVECTOR_DSN")
         return "config_missing:" + ",".join(missing) if missing else ""
+
+    def _unsupported_real_index_provider(
+        self,
+        *,
+        embedding_provider: str,
+        vector_store_provider: str,
+        embedding_client: Any | None,
+        vector_store: Any | None,
+    ) -> str:
+        if embedding_client is None and embedding_provider not in {"doubao", "ark", "ollama"}:
+            return f"unsupported_embedding_provider:{embedding_provider}"
+        if vector_store is None and vector_store_provider not in {"pgvector"}:
+            return f"unsupported_vector_store:{vector_store_provider}"
+        return ""
 
     def _build_embedding_client(self, embedding_provider: str) -> Any:
         if embedding_provider == "ollama":
@@ -826,12 +898,18 @@ class KnowledgeCenterService:
                 base_url=os.getenv("AI_WORKFLOW_OLLAMA_BASE_URL", ""),
                 model=os.getenv("AI_WORKFLOW_EMBEDDING_MODEL", "bge-m3"),
             )
-        return _FakeEmbeddingClient()
+        if embedding_provider in {"doubao", "ark"}:
+            return _DoubaoEmbeddingClient(
+                base_url=_first_env("DOUBAO_EMBEDDING_BASE_URL", "ARK_BASE_URL") or "https://ark.cn-beijing.volces.com/api/v3",
+                api_key=_first_env("DOUBAO_EMBEDDING_API_KEY", "ARK_API_KEY") or "",
+                model=_first_env("DOUBAO_EMBEDDING_MODEL", "ARK_EMBEDDING_MODEL", "AI_WORKFLOW_EMBEDDING_MODEL") or "",
+            )
+        raise KnowledgeIndexError(f"unsupported_embedding_provider:{embedding_provider}")
 
     def _build_vector_store(self, vector_store_provider: str) -> Any:
         if vector_store_provider == "pgvector":
-            return _PgVectorUpsertStore(os.getenv("AI_WORKFLOW_PGVECTOR_DSN", ""))
-        return _InMemoryVectorStore()
+            return _PgVectorUpsertStore(_first_env("WEB_API_PGVECTOR_DSN", "AI_WORKFLOW_PGVECTOR_DSN") or "")
+        raise KnowledgeIndexError(f"unsupported_vector_store:{vector_store_provider}")
 
 
 def _field(override_value: Any, raw_value: Any) -> dict[str, Any]:
@@ -866,6 +944,14 @@ def _hash_json(value: dict[str, Any]) -> str:
 
 def _hash_text(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def _first_env(*names: str) -> str:
+    for name in names:
+        value = os.getenv(name)
+        if value:
+            return value
+    return ""
 
 
 def empty_product_override(shop_id: str, goods_id: str) -> dict[str, Any]:
@@ -1184,6 +1270,53 @@ class _OllamaEmbeddingClient:
         if not isinstance(raw_vector, list):
             raise KnowledgeIndexError("embedding_error:no_vector")
         return _EmbeddingVector(model=self.model, vector=[float(value) for value in raw_vector])
+
+
+class _DoubaoEmbeddingClient:
+    def __init__(self, *, base_url: str, api_key: str, model: str, timeout: float = 20.0) -> None:
+        self.base_url = str(base_url or "").rstrip("/")
+        self.api_key = api_key
+        self.model = model
+        self.timeout = float(timeout)
+
+    def embed_batch(self, texts: list[str]) -> list[_EmbeddingVector]:
+        if not texts:
+            return []
+        payload = json.dumps({"model": self.model, "input": texts}, ensure_ascii=False).encode("utf-8")
+        request = urllib.request.Request(
+            f"{self.base_url}/embeddings",
+            data=payload,
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {self.api_key}",
+            },
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=self.timeout) as response:  # nosec B310 - explicit opt-in.
+                data = json.loads(response.read().decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            raise KnowledgeIndexError(f"embedding_error:http_{exc.code}") from exc
+        except urllib.error.URLError as exc:
+            raise KnowledgeIndexError(f"embedding_error:{type(exc.reason).__name__}") from exc
+        rows = data.get("data")
+        if not isinstance(rows, list):
+            raise KnowledgeIndexError("embedding_error:no_data")
+        vectors: list[_EmbeddingVector] = []
+        for row in sorted(rows, key=lambda item: int(item.get("index", 0)) if isinstance(item, dict) else 0):
+            raw_vector = row.get("embedding") if isinstance(row, dict) else None
+            if not isinstance(raw_vector, list):
+                raise KnowledgeIndexError("embedding_error:no_vector")
+            vectors.append(_EmbeddingVector(model=self.model, vector=[float(value) for value in raw_vector]))
+        if len(vectors) != len(texts):
+            raise KnowledgeIndexError("embedding_error:count_mismatch")
+        return vectors
+
+    def embed(self, text: str) -> _EmbeddingVector:
+        vectors = self.embed_batch([text])
+        if not vectors:
+            raise KnowledgeIndexError("embedding_error:no_vector")
+        return vectors[0]
 
 
 class _InMemoryVectorStore:

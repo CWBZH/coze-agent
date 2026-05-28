@@ -7,12 +7,16 @@ from fastapi.testclient import TestClient
 
 from web_api.deps import get_knowledge_center_service
 from web_api.main import app
-from web_api.services.knowledge_center_service import KnowledgeCenterService
+from web_api.services.knowledge_center_service import KnowledgeCenterService, _FakeEmbeddingClient, _InMemoryVectorStore
 
 
 def _client_for_db(db_path: Path) -> TestClient:
     _create_product_db(db_path)
-    service = KnowledgeCenterService(db_path)
+    service = KnowledgeCenterService(
+        db_path,
+        default_embedding_client=_FakeEmbeddingClient(dimension=8, model="test-embedding"),
+        default_vector_store=_InMemoryVectorStore(),
+    )
     service.init_schema()
     app.dependency_overrides[get_knowledge_center_service] = lambda: service
     return TestClient(app)
@@ -169,8 +173,8 @@ def test_publish_product_creates_snapshot_version_and_index_job(tmp_path):
 
         assert published.status_code == 200
         assert payload["version"]["source_type"] == "product"
-        assert payload["version"]["status"] == "pending_index"
-        assert payload["index_job"]["status"] == "pending"
+        assert payload["version"]["status"] == "active"
+        assert payload["index_job"]["status"] == "succeeded"
         assert payload["index_job"]["version_id"] == payload["version"]["id"]
         assert snapshot["source_type"] == "product"
         assert snapshot["goods_id"] == "goods-1"
@@ -199,27 +203,25 @@ def test_product_snapshot_is_immutable_after_override_changes(tmp_path):
         _clear_overrides()
 
 
-def test_run_fake_index_job_activates_product_version_and_second_publish_retires_old(tmp_path):
+def test_publish_product_runs_real_index_and_second_publish_retires_old(tmp_path):
     client = _client_for_db(tmp_path / "kc.db")
     try:
         _put_override(client)
         first = client.post("/api/knowledge/products/goods-1/publish?shop_id=shop-1").json()
-        first_run = client.post(f"/api/knowledge/index-jobs/{first['index_job']['id']}/run").json()
         client.put(
             "/api/knowledge/products/goods-1/overrides?shop_id=shop-1",
             json={"usage_override": "changed usage"},
         )
         second = client.post("/api/knowledge/products/goods-1/publish?shop_id=shop-1").json()
-        second_run = client.post(f"/api/knowledge/index-jobs/{second['index_job']['id']}/run").json()
         active = client.get(
             "/api/knowledge/versions?shop_id=shop-1&source_type=product&source_id=goods-1&is_active=true"
         ).json()["items"]
-        old = client.get(f"/api/knowledge/versions/{first_run['version']['id']}").json()
+        old = client.get(f"/api/knowledge/versions/{first['version']['id']}").json()
 
-        assert first_run["version"]["status"] == "active"
-        assert second_run["version"]["status"] == "active"
+        assert first["version"]["status"] == "active"
+        assert second["version"]["status"] == "active"
         assert len(active) == 1
-        assert active[0]["id"] == second_run["version"]["id"]
+        assert active[0]["id"] == second["version"]["id"]
         assert old["is_active"] == 0
         assert old["status"] == "retired"
     finally:
