@@ -37,6 +37,12 @@ class OnboardingSessionResponse(BaseModel):
     auth_status: str | None = None
 
 
+class BindShopIdentityRequest(BaseModel):
+    mall_id: str = Field(min_length=4, max_length=64)
+    shop_name: str | None = Field(default=None, max_length=200)
+    operator: str = Field(default="local_admin", max_length=100)
+
+
 class SmsCodeSubmitRequest(BaseModel):
     sms_code: str = Field(min_length=1, max_length=12, repr=False)
 

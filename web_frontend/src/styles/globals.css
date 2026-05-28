@@ -630,6 +630,28 @@ pre {
   gap: 10px;
 }
 
+.identity-bind-form {
+  display: grid;
+  grid-template-columns: minmax(260px, 1fr) auto;
+  gap: 10px;
+  align-items: end;
+  border: 1px solid #fecaca;
+  border-radius: 8px;
+  background: #fff7f7;
+  margin: 12px 0;
+  padding: 14px;
+}
+
+.identity-bind-form label {
+  display: grid;
+  gap: 6px;
+  font-weight: 600;
+}
+
+.identity-bind-form .muted {
+  grid-column: 1 / -1;
+}
+
 .onboarding-next-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));

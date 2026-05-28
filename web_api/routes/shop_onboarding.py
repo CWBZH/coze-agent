@@ -5,6 +5,7 @@ from web_api.deps import get_shop_onboarding_service
 from web_api.schemas.shop_onboarding import (
     AiStatusResponse,
     AuthStatusResponse,
+    BindShopIdentityRequest,
     CaptchaSubmitRequest,
     CheckLoginResponse,
     DisableAiRequest,
@@ -108,6 +109,27 @@ def check_remote_browser_login(
         raise HTTPException(status_code=404, detail={"error": "session_not_found"}) from exc
     except TimeoutError as exc:
         raise HTTPException(status_code=400, detail={"error": "session_expired"}) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail={"error": str(exc)}) from exc
+
+
+@router.post("/shops/onboarding/{session_id}/bind-shop-identity", response_model=OnboardingSessionResponse)
+def bind_shop_identity(
+    session_id: str,
+    payload: BindShopIdentityRequest,
+    service: ShopOnboardingService = Depends(get_shop_onboarding_service),
+) -> dict:
+    try:
+        return service.bind_shop_identity(
+            session_id,
+            mall_id=payload.mall_id,
+            shop_name=payload.shop_name,
+            operator=payload.operator,
+        )
+    except ApiError as exc:
+        return api_error_response(exc)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail={"error": "session_not_found"}) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail={"error": str(exc)}) from exc
 

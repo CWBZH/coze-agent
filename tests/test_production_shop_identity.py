@@ -107,6 +107,58 @@ def test_unbound_remote_shop_id_blocks_product_sync_with_standard_error(tmp_path
         _clear()
 
 
+def test_pending_remote_browser_auth_can_bind_real_shop_id_then_sync(tmp_path, monkeypatch):
+    monkeypatch.setenv("SHOP_AUTH_ENCRYPTION_KEY", "unit-test-key")
+    db_path = tmp_path / "prod_identity.db"
+    remote = FakeRemoteBrowserWithoutMallId()
+    client = _client(db_path, remote)
+    try:
+        session = client.post(
+            "/api/shops/onboarding",
+            json={
+                "platform": "pdd",
+                "shop_name": "Production Shop",
+                "account_name": "seller_account_10000000000",
+                "password": "DO_NOT_RETURN_PASSWORD",
+                "runner_mode": "remote_browser",
+            },
+        ).json()
+        checked = client.post(f"/api/shops/onboarding/{session['session_id']}/check-login").json()
+        assert checked["status"] == "shop_identity_pending"
+
+        bound = client.post(
+            f"/api/shops/onboarding/{session['session_id']}/bind-shop-identity",
+            json={"mall_id": "565617", "shop_name": "Production Shop", "operator": "local_admin"},
+        )
+
+        assert bound.status_code == 200
+        payload = bound.json()
+        assert payload["status"] == "succeeded"
+        assert payload["shop_id"] == "565617"
+        assert payload["shop_identity_status"] == "bound"
+        assert payload["real_shop_id_pending"] is False
+        assert "DO_NOT_RETURN_COOKIE" not in bound.text
+
+        conn = sqlite3.connect(db_path)
+        try:
+            shop_ids = [row[0] for row in conn.execute("SELECT shop_id FROM shops").fetchall()]
+            auth = conn.execute("SELECT shop_id, cookie_encrypted FROM shop_auth WHERE shop_id='565617'").fetchone()
+            session_secret = conn.execute(
+                "SELECT cookie_encrypted FROM shop_login_sessions WHERE id=?",
+                (session["session_id"],),
+            ).fetchone()
+        finally:
+            conn.close()
+        assert "565617" in shop_ids
+        assert not any(str(shop_id).startswith("remote-") for shop_id in shop_ids)
+        assert auth is not None
+        assert "DO_NOT_RETURN_COOKIE" not in str(auth[1])
+        assert session_secret is not None
+        assert session_secret[0] is None
+    finally:
+        _clear()
+
+
 def test_unbound_remote_shop_id_blocks_enable_ai_with_standard_error(tmp_path):
     client = _client(tmp_path / "prod_identity.db")
     try:

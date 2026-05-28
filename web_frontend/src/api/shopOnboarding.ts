@@ -36,6 +36,12 @@ export type CreateOnboardingPayload = {
   runner_mode?: "fake" | "real" | "remote_browser";
 };
 
+export type BindShopIdentityPayload = {
+  mall_id: string;
+  shop_name?: string;
+  operator?: string;
+};
+
 export type AuthStatus = {
   shop_id: string;
   platform: string;
@@ -125,6 +131,10 @@ export function cancelOnboardingSession(sessionId: string) {
 
 export function checkRemoteBrowserLogin(sessionId: string) {
   return apiPost<OnboardingSession>(`/api/shops/onboarding/${encodeURIComponent(sessionId)}/check-login`, {});
+}
+
+export function bindShopIdentity(sessionId: string, payload: BindShopIdentityPayload) {
+  return apiPost<OnboardingSession>(`/api/shops/onboarding/${encodeURIComponent(sessionId)}/bind-shop-identity`, payload);
 }
 
 export function getShopAuthStatus(shopId: string) {

@@ -2,6 +2,7 @@ import { FormEvent, useEffect, useMemo, useState } from "react";
 
 import {
   AiStatus,
+  bindShopIdentity,
   cancelOnboardingSession,
   checkRemoteBrowserLogin,
   createOnboardingSession,
@@ -120,6 +121,7 @@ export function ShopOnboarding() {
   const [validationSummary, setValidationSummary] = useState("已在试聊调试中测试价格、规格、用法、物流、售后、敏感问题和转人工。");
   const [overrideReason, setOverrideReason] = useState("");
   const [disableReason, setDisableReason] = useState("manual_disable");
+  const [mallIdInput, setMallIdInput] = useState("");
 
   const currentStep = useMemo(() => {
     if (!session) return 1;
@@ -183,6 +185,7 @@ export function ShopOnboarding() {
       setChecklist(null);
       setAiStatus(null);
       setWorkerStatus(null);
+      setMallIdInput("");
     try {
       const created = await createOnboardingSession({
         platform: "pdd",
@@ -221,6 +224,43 @@ export function ShopOnboarding() {
       setSession(await checkRemoteBrowserLogin(session.session_id));
     } catch (err) {
       setError(err instanceof Error ? err.message : "检查远程浏览器登录状态失败");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleBindShopIdentity(event: FormEvent) {
+    event.preventDefault();
+    if (!session) return;
+    const mallId = mallIdInput.trim();
+    if (!mallId) {
+      setError("请输入真实 PDD 店铺 ID / mall_id。");
+      return;
+    }
+    if (!/^\d{4,}$/.test(mallId)) {
+      setError("真实 PDD 店铺 ID / mall_id 应为平台提供的数字 ID，不能填写 remote-* 或临时会话 ID。");
+      return;
+    }
+    const ok = window.confirm(
+      `确认将当前授权绑定到真实 PDD 店铺 ID / mall_id=${mallId} 吗？绑定后商品同步会写入该店铺数据；本操作不会发送 PDD 消息，不会启用 AI。`
+    );
+    if (!ok) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const bound = await bindShopIdentity(session.session_id, {
+        mall_id: mallId,
+        shop_name: shopName || session.shop_name || undefined,
+        operator: "local_admin"
+      });
+      setSession(bound);
+      setSyncJob(null);
+      setCoverage(null);
+      setChecklist(null);
+      setAiStatus(null);
+      setWorkerStatus(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "绑定真实店铺身份失败");
     } finally {
       setLoading(false);
     }
@@ -426,10 +466,29 @@ export function ShopOnboarding() {
           )}
 
           {shopIdentityPending && (
-            <div className="warning-banner error-state">
-              <strong>店铺身份待绑定：</strong>
-              {shopIdentityBlockReason}
-            </div>
+            <>
+              <div className="warning-banner error-state">
+                <strong>店铺身份待绑定：</strong>
+                {shopIdentityBlockReason}
+              </div>
+              <form className="identity-bind-form" onSubmit={handleBindShopIdentity}>
+                <label>
+                  真实 PDD 店铺 ID / mall_id
+                  <input
+                    value={mallIdInput}
+                    onChange={(event) => setMallIdInput(event.target.value)}
+                    placeholder="请输入 PDD 商家后台中的真实数字店铺 ID"
+                    inputMode="numeric"
+                  />
+                </label>
+                <button type="submit" disabled={loading || !mallIdInput.trim()}>
+                  绑定真实店铺身份
+                </button>
+                <p className="muted">
+                  绑定只会把当前加密授权关联到真实店铺 ID，不会发送 PDD 消息、不会启动 worker、不会启用 AI。绑定完成后才允许商品同步写入正式数据。
+                </p>
+              </form>
+            </>
           )}
 
           {session?.runner_mode === "remote_browser" && (

@@ -4,11 +4,13 @@ import sqlite3
 import uuid
 import json
 import os
+import re
 import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
+from web_api.errors import ApiError
 from web_api.services.pdd_login_runner import FakePddLoginRunner, LoginRunnerState, LoginRunnerSuccess, PddLoginRunnerProtocol, RealPddLoginRunner
 from web_api.services.remote_browser_service import RemoteBrowserCheckResult, RemoteBrowserService
 from web_api.services.schema_migration_service import SchemaMigrationService
@@ -312,6 +314,126 @@ class ShopOnboardingService:
             self._apply_state(conn, session_id, state, cancelled=True)
             conn.commit()
             return self.get_session(session_id)
+        finally:
+            conn.close()
+
+    def bind_shop_identity(
+        self,
+        session_id: str,
+        *,
+        mall_id: str,
+        shop_name: str | None = None,
+        operator: str = "local_admin",
+    ) -> dict[str, Any]:
+        self.init_schema()
+        real_shop_id = str(mall_id or "").strip()
+        if not real_shop_id or is_temporary_shop_id(real_shop_id) or not re.fullmatch(r"\d{4,}", real_shop_id):
+            raise ApiError(
+                error_type="INVALID_PDD_MALL_ID",
+                error_summary="请输入真实 PDD 店铺 ID / mall_id，不能使用 remote-* 临时会话 ID。",
+                status_code=400,
+                retryable=True,
+                next_action="请在 PDD 商家后台确认真实店铺 ID / mall_id 后重新绑定。",
+            )
+
+        conn = self._connect()
+        try:
+            row = conn.execute("SELECT * FROM shop_login_sessions WHERE id=?", (session_id,)).fetchone()
+            if row is None:
+                raise KeyError(session_id)
+            session = self._session_from_row(row)
+            existing_shop_id = str(session.get("shop_id") or "")
+            if session.get("status") == "succeeded" and existing_shop_id == real_shop_id:
+                return session
+            if session.get("status") != "shop_identity_pending" or session.get("shop_identity_status") != "pending_real_shop_id":
+                raise ApiError(
+                    error_type="SHOP_ID_BINDING_NOT_ALLOWED",
+                    error_summary="当前登录会话不是店铺身份待绑定状态，不能执行手动绑定。",
+                    status_code=409,
+                    retryable=False,
+                    next_action="请重新创建远程浏览器登录会话，登录成功且进入店铺身份待绑定状态后再绑定。",
+                )
+
+            expires_at = datetime.fromisoformat(str(session["expires_at"]))
+            if expires_at < datetime.now(timezone.utc):
+                self._apply_state(
+                    conn,
+                    session_id,
+                    LoginRunnerState(status="expired", step="expired", error_summary="session_expired"),
+                )
+                conn.commit()
+                raise ApiError(
+                    error_type="SESSION_EXPIRED",
+                    error_summary="登录会话已过期，不能继续绑定店铺身份。",
+                    status_code=400,
+                    retryable=True,
+                    next_action="请重新创建远程浏览器登录会话并完成登录授权。",
+                )
+
+            encrypted_cookie = row["cookie_encrypted"]
+            if not encrypted_cookie:
+                raise ApiError(
+                    error_type="AUTH_COOKIE_MISSING",
+                    error_summary="当前会话缺少可保存的授权信息，不能绑定店铺身份。",
+                    status_code=409,
+                    retryable=True,
+                    next_action="请重新创建远程浏览器登录会话，完成 PDD 登录后再绑定真实店铺 ID。",
+                )
+
+            try:
+                cookie_value = self.auth_service.cipher.decrypt(str(encrypted_cookie))
+                token_value = self.auth_service.cipher.decrypt(str(row["token_encrypted"])) if row["token_encrypted"] else None
+            except ValueError as exc:
+                raise ApiError(
+                    error_type="AUTH_DECRYPT_FAILED",
+                    error_summary="授权信息解密失败，不能绑定店铺身份。",
+                    status_code=409,
+                    retryable=True,
+                    next_action="请确认 SHOP_AUTH_ENCRYPTION_KEY 未变化；如无法恢复，请重新登录授权。",
+                ) from exc
+
+            account_name = str(session.get("account_name") or "")
+            final_shop_name = (shop_name or session.get("shop_name") or real_shop_id).strip()
+            self.auth_service.save_auth(
+                AuthSavePayload(
+                    shop_id=real_shop_id,
+                    shop_name=final_shop_name,
+                    platform=str(session.get("platform") or "pdd"),
+                    account_name=account_name,
+                    user_id=real_shop_id,
+                    cookie_value=cookie_value,
+                    token_value=token_value,
+                )
+            )
+            now = utc_now_iso()
+            conn.execute(
+                """
+                UPDATE shop_login_sessions
+                SET status='succeeded',
+                    step='succeeded',
+                    shop_id=?,
+                    shop_name=?,
+                    shop_identity_status='bound',
+                    auth_status='valid',
+                    cookie_encrypted=NULL,
+                    token_encrypted=NULL,
+                    error_summary=NULL,
+                    completed_at=COALESCE(completed_at, ?),
+                    updated_at=?
+                WHERE id=?
+                """,
+                (real_shop_id, final_shop_name, now, now, session_id),
+            )
+            self._record_audit(
+                conn,
+                shop_id=real_shop_id,
+                action="shop_identity_bound",
+                operator=operator,
+                result="succeeded",
+                detail={"session_id": session_id, "source": "manual_confirmed"},
+            )
+            conn.commit()
+            return self.get_session(session_id, sync_runner=False)
         finally:
             conn.close()
 
