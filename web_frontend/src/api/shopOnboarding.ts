@@ -23,6 +23,8 @@ export type OnboardingSession = {
   vnc_url_ready?: boolean;
   vnc_url?: string | null;
   real_shop_id_pending?: boolean;
+  shop_identity_status?: string | null;
+  auth_status?: string | null;
 };
 
 export type CreateOnboardingPayload = {

@@ -26,7 +26,14 @@ import {
 } from "../api/productSync";
 import { StatusBadge } from "../components/StatusBadge";
 
-const terminalStatuses = new Set(["succeeded", "failed", "expired", "cancelled", "blocked_complex_verification"]);
+const terminalStatuses = new Set([
+  "succeeded",
+  "shop_identity_pending",
+  "failed",
+  "expired",
+  "cancelled",
+  "blocked_complex_verification"
+]);
 
 function statusLabel(status: string) {
   const labels: Record<string, string> = {
@@ -38,6 +45,7 @@ function statusLabel(status: string) {
     logging_in: "登录中",
     waiting_user_verification: "等待远程浏览器验证",
     succeeded: "登录成功",
+    shop_identity_pending: "授权成功，店铺身份待绑定",
     failed: "登录失败",
     expired: "已过期",
     cancelled: "已取消",
@@ -51,6 +59,7 @@ function stepLabel(step: string) {
     created: "创建会话",
     waiting_user_verification: "远程浏览器验证",
     succeeded: "授权成功",
+    shop_identity_pending: "店铺身份待绑定",
     failed: "失败",
     expired: "过期",
     cancelled: "取消",
@@ -99,7 +108,6 @@ function workerConsistencyTone(status?: string) {
 export function ShopOnboarding() {
   const [shopName, setShopName] = useState("");
   const [accountName, setAccountName] = useState("");
-  const [password, setPassword] = useState("");
   const [session, setSession] = useState<OnboardingSession | null>(null);
   const [loading, setLoading] = useState(false);
   const [polling, setPolling] = useState(false);
@@ -117,10 +125,20 @@ export function ShopOnboarding() {
     if (!session) return 1;
     if (aiStatus?.ai_enabled) return 6;
     if (session.status === "succeeded") return syncJob ? 5 : 3;
+    if (session.status === "shop_identity_pending" || session.real_shop_id_pending) return 2;
     return 2;
   }, [aiStatus?.ai_enabled, session, syncJob]);
 
   const activeShopId = session?.shop_id || "";
+  const shopIdentityPending = Boolean(
+    session?.status === "shop_identity_pending" ||
+      session?.real_shop_id_pending ||
+      session?.shop_identity_status === "pending_real_shop_id" ||
+      (session?.shop_id || "").startsWith("remote-")
+  );
+  const businessShopIdReady = Boolean(activeShopId && !shopIdentityPending);
+  const shopIdentityBlockReason =
+    "授权已完成，但系统尚未绑定真实 PDD 店铺 ID/mall_id。为避免把 remote-* 临时会话 ID 写入正式数据，商品同步、知识发布、启用 AI 和 worker 启用已被阻断。请先完成真实店铺身份绑定。";
 
   useEffect(() => {
     if (!session || terminalStatuses.has(session.status)) {
@@ -139,13 +157,13 @@ export function ShopOnboarding() {
   }, [session]);
 
   useEffect(() => {
-    if (!activeShopId || session?.status !== "succeeded") return;
+    if (!businessShopIdReady || session?.status !== "succeeded") return;
     refreshReadiness().catch((err) => setError(err instanceof Error ? err.message : "刷新接入验收状态失败"));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeShopId, session?.status]);
+  }, [activeShopId, businessShopIdReady, session?.status]);
 
   async function refreshReadiness() {
-    if (!activeShopId) return;
+    if (!businessShopIdReady) return;
     const [nextChecklist, nextAiStatus, nextWorkerStatus] = await Promise.all([
       getOnboardingChecklist(activeShopId),
       getAiStatus(activeShopId),
@@ -170,11 +188,9 @@ export function ShopOnboarding() {
         platform: "pdd",
         shop_name: shopName,
         account_name: accountName,
-        password: password || undefined,
         runner_mode: "remote_browser",
         operator: "local_admin"
       });
-      setPassword("");
       setSession(created);
     } catch (err) {
       setError(err instanceof Error ? err.message : "创建登录会话失败");
@@ -227,7 +243,7 @@ export function ShopOnboarding() {
   }
 
   async function handleRefreshSync() {
-    if (!activeShopId || !syncJob) return;
+    if (!businessShopIdReady || !syncJob) return;
     setLoading(true);
     setError(null);
     try {
@@ -242,7 +258,7 @@ export function ShopOnboarding() {
   }
 
   async function handleRetrySync() {
-    if (!activeShopId || !syncJob) return;
+    if (!businessShopIdReady || !syncJob) return;
     setLoading(true);
     setError(null);
     try {
@@ -258,7 +274,7 @@ export function ShopOnboarding() {
   }
 
   async function handleMarkValidationPassed() {
-    if (!activeShopId) return;
+    if (!businessShopIdReady) return;
     const ok = window.confirm("确认已经在试聊调试中完成 no-send 验收？此操作只记录验收状态，不会发送 PDD 消息。");
     if (!ok) return;
     setLoading(true);
@@ -274,7 +290,7 @@ export function ShopOnboarding() {
   }
 
   async function handleEnableAi(override = false) {
-    if (!activeShopId) return;
+    if (!businessShopIdReady) return;
     const message = override
       ? "当前 checklist 未完全通过，确认要强制启用 AI 配置状态吗？此操作不会启动 worker，也不会发送 PDD 消息。"
       : "开启后，系统配置会标记该店铺允许 AI 自动回复。请确认已完成商品同步、知识检查、试聊验证和人工锁管理。此操作不会直接发送 PDD 消息，也不会启动 worker。";
@@ -299,7 +315,7 @@ export function ShopOnboarding() {
   }
 
   async function handleDisableAi() {
-    if (!activeShopId) return;
+    if (!businessShopIdReady) return;
     const ok = window.confirm("确认关闭该店铺 AI 配置状态？此操作不会停止 worker，只修改后台配置。");
     if (!ok) return;
     setLoading(true);
@@ -357,15 +373,6 @@ export function ShopOnboarding() {
               PDD 账号
               <input value={accountName} onChange={(event) => setAccountName(event.target.value)} required placeholder="用于授权记录脱敏展示" />
             </label>
-            <label>
-              密码
-              <input
-                type="password"
-                value={password}
-                onChange={(event) => setPassword(event.target.value)}
-                placeholder="可留空，在远程浏览器中输入"
-              />
-            </label>
             <button disabled={loading}>{loading ? "处理中..." : "创建远程浏览器登录会话"}</button>
           </form>
         </section>
@@ -406,11 +413,9 @@ export function ShopOnboarding() {
               <div>
                 <span className="muted">店铺 ID</span>
                 <strong>
-                  {session.shop_id
-                    ? session.real_shop_id_pending
-                      ? `待商品同步确认（临时 ${session.shop_id}）`
-                      : session.shop_id
-                    : "登录成功后绑定"}
+                  {shopIdentityPending
+                    ? "待绑定真实 PDD 店铺 ID"
+                    : session.shop_id || "登录成功后绑定"}
                 </strong>
               </div>
               <div>
@@ -420,21 +425,32 @@ export function ShopOnboarding() {
             </div>
           )}
 
+          {shopIdentityPending && (
+            <div className="warning-banner error-state">
+              <strong>店铺身份待绑定：</strong>
+              {shopIdentityBlockReason}
+            </div>
+          )}
+
           {session?.runner_mode === "remote_browser" && (
             <div className="remote-browser-panel">
               <div className="panel-header">
                 <div>
                   <h4>远程浏览器</h4>
                   <p className="muted">
-                    该窗口带当前会话 token。请在窗口内完成 PDD 登录和平台验证；系统不会记录你的键盘输入。
+                    该窗口仅限当前登录会话访问。请在窗口内完成 PDD 登录和平台验证；系统不会记录你的键盘输入。
                   </p>
                 </div>
-                <StatusBadge tone={session.vnc_url_ready || session.status === "succeeded" ? "success" : "warning"}>
+                <StatusBadge tone={session.vnc_url_ready || session.status === "succeeded" || shopIdentityPending ? "success" : "warning"}>
                   {session.remote_browser_status || "not_ready"}
                 </StatusBadge>
               </div>
               {session.status === "succeeded" ? (
                 <div className="state-card">登录授权已完成，远程浏览器会话已关闭。</div>
+              ) : shopIdentityPending ? (
+                <div className="state-card">
+                  登录授权已完成，远程浏览器会话已关闭；但尚未识别真实 PDD 店铺 ID，正式业务操作已被阻断。
+                </div>
               ) : session.vnc_url_ready && session.vnc_url ? (
                 <iframe className="remote-browser-frame" src={session.vnc_url} title="PDD 远程浏览器登录" />
               ) : session.status === "expired" ? (
@@ -444,7 +460,7 @@ export function ShopOnboarding() {
                   远程浏览器暂不可用：{session.error_summary || "noVNC 依赖或地址未配置"}。请确认服务器已配置 noVNC/websockify，并设置 WEB_NOVNC_BASE_URL。
                 </div>
               )}
-              {session.status !== "succeeded" && session.status !== "expired" && (
+              {session.status !== "succeeded" && !shopIdentityPending && session.status !== "expired" && (
                 <div className="inline-form">
                   <button type="button" disabled={loading} onClick={handleCheckRemoteLogin}>
                     我已完成登录，检查状态
@@ -484,12 +500,17 @@ export function ShopOnboarding() {
           </div>
           {syncJob && <StatusBadge tone={syncJob.status === "succeeded" ? "success" : syncJob.status === "partial_failed" ? "warning" : "info"}>{syncJob.status}</StatusBadge>}
         </div>
-        {session?.status !== "succeeded" ? (
+        {shopIdentityPending ? (
+          <div className="warning-banner error-state">
+            <strong>暂不能同步商品：</strong>
+            {shopIdentityBlockReason}
+          </div>
+        ) : session?.status !== "succeeded" ? (
           <div className="state-card">请先完成登录授权。</div>
         ) : (
           <>
             <div className="inline-form">
-              <button type="button" onClick={handleStartSync} disabled={loading || !activeShopId}>
+              <button type="button" onClick={handleStartSync} disabled={loading || !businessShopIdReady}>
                 开始同步商品（最多 10 个）
               </button>
               {syncJob && (
@@ -564,9 +585,14 @@ export function ShopOnboarding() {
             <h3>5. 接入验收</h3>
             <p className="muted">启用 AI 前必须确认授权、商品同步、试聊验证和人工锁管理状态。默认不会调用真实 LLM/Ollama/pgvector。</p>
           </div>
-          <button type="button" onClick={refreshReadiness} disabled={!activeShopId || loading}>刷新验收状态</button>
+          <button type="button" onClick={refreshReadiness} disabled={!businessShopIdReady || loading}>刷新验收状态</button>
         </div>
-        {!activeShopId ? (
+        {shopIdentityPending ? (
+          <div className="warning-banner error-state">
+            <strong>接入验收已阻断：</strong>
+            {shopIdentityBlockReason}
+          </div>
+        ) : !activeShopId ? (
           <div className="state-card">请先完成登录授权。</div>
         ) : (
           <>
@@ -644,7 +670,12 @@ export function ShopOnboarding() {
           </div>
           {aiStatus && <StatusBadge tone={aiStatus.ai_enabled ? "success" : "warning"}>{aiStatus.ai_enabled ? "已启用" : "未启用"}</StatusBadge>}
         </div>
-        {!activeShopId ? (
+        {shopIdentityPending ? (
+          <div className="warning-banner error-state">
+            <strong>暂不能启用 AI：</strong>
+            {shopIdentityBlockReason}
+          </div>
+        ) : !activeShopId ? (
           <div className="state-card">请先完成登录授权。</div>
         ) : (
           <>

@@ -8,6 +8,8 @@ from pathlib import Path
 from typing import Any, Callable
 
 from web_api.services.shop_auth_resolver import ShopAuthResolution, ShopAuthResolver
+from web_api.services.schema_migration_service import SchemaMigrationService
+from web_api.services.shop_identity import assert_real_shop_id_bound, is_temporary_shop_id
 from web_api.services.sqlite_readonly import DEFAULT_DB_PATH
 
 
@@ -35,18 +37,11 @@ class ProductSyncService:
         self.product_manager_factory = product_manager_factory or self._default_product_manager_factory
 
     def init_schema(self) -> None:
-        schema_path = Path(__file__).resolve().parents[2] / "deploy" / "sql" / "product_sync_jobs_schema.sql"
-        self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        conn = self._connect()
-        try:
-            conn.executescript(schema_path.read_text(encoding="utf-8"))
-            self._ensure_product_knowledge_columns(conn)
-            conn.commit()
-        finally:
-            conn.close()
+        SchemaMigrationService(self.db_path).migrate()
 
     def create_job(self, shop_id: str, *, mode: str = "full", operator: str = "local_admin", limit: int | None = None) -> dict[str, Any]:
         self.init_schema()
+        assert_real_shop_id_bound(shop_id)
         auth = self.auth_resolver.get_cookies(shop_id, platform="pdd")
         if auth.status != "ok" or not auth.cookies:
             raise ValueError("auth_required")
@@ -100,6 +95,7 @@ class ProductSyncService:
 
     def retry_failed_items(self, shop_id: str, job_id: str) -> dict[str, Any]:
         self.init_schema()
+        assert_real_shop_id_bound(shop_id)
         conn = self._connect()
         try:
             failed_items = conn.execute(
@@ -113,6 +109,20 @@ class ProductSyncService:
 
     def coverage(self, shop_id: str) -> dict[str, Any]:
         self.init_schema()
+        if is_temporary_shop_id(shop_id):
+            return {
+                "shop_id": shop_id,
+                "total": 0,
+                "has_price": 0,
+                "has_specs": 0,
+                "has_usage": 0,
+                "has_ingredients": 0,
+                "has_shelf_life": 0,
+                "has_warnings": 0,
+                "has_manual_notes": 0,
+                "last_sync_at": None,
+                "warning": "pending_real_shop_id",
+            }
         conn = self._connect()
         try:
             internal_shop_id = self._internal_shop_id(conn, shop_id)
@@ -135,7 +145,7 @@ class ProductSyncService:
                 "has_warnings": 0,
                 "has_manual_notes": 0,
                 "last_sync_at": None,
-                "warning": "pending_real_shop_id" if shop_id.startswith("remote-") else None,
+                "warning": "pending_real_shop_id" if is_temporary_shop_id(shop_id) else None,
             }
             for row in rows:
                 raw = self._json(row["raw_detail_json"])
@@ -153,6 +163,7 @@ class ProductSyncService:
             conn.close()
 
     def _run_job(self, job_id: str, shop_id: str, *, limit: int | None = None, retry_goods: list[str] | None = None) -> None:
+        assert_real_shop_id_bound(shop_id)
         now = _now()
         conn = self._connect()
         try:
@@ -327,6 +338,7 @@ class ProductSyncService:
         return ProductManager(shop_id=shop_id, user_id=user_id, cookies=cookies)
 
     def _internal_shop_id(self, conn: sqlite3.Connection, platform_shop_id: str) -> int:
+        assert_real_shop_id_bound(platform_shop_id)
         conn.execute("INSERT OR IGNORE INTO channels (channel_name, description) VALUES ('pinduoduo', 'PDD')")
         channel_id = int(conn.execute("SELECT id FROM channels WHERE channel_name='pinduoduo'").fetchone()["id"])
         conn.execute(

@@ -11,11 +11,13 @@ from typing import Any
 
 from web_api.services.pdd_login_runner import FakePddLoginRunner, LoginRunnerState, LoginRunnerSuccess, PddLoginRunnerProtocol, RealPddLoginRunner
 from web_api.services.remote_browser_service import RemoteBrowserCheckResult, RemoteBrowserService
+from web_api.services.schema_migration_service import SchemaMigrationService
 from web_api.services.shop_auth_service import AuthSavePayload, ShopAuthService, build_safe_account_display, utc_now_iso
+from web_api.services.shop_identity import assert_real_shop_id_bound, is_temporary_shop_id, shop_id_not_bound_error
 from web_api.services.sqlite_readonly import DEFAULT_DB_PATH
 
 
-TERMINAL_STATUSES = {"succeeded", "failed", "expired", "cancelled", "blocked_complex_verification"}
+TERMINAL_STATUSES = {"succeeded", "failed", "expired", "cancelled", "blocked_complex_verification", "shop_identity_pending"}
 
 
 class ChecklistNotReadyError(Exception):
@@ -53,15 +55,7 @@ class ShopOnboardingService:
             return Path("temp/worker_status.json")
 
     def init_schema(self) -> None:
-        schema_path = Path(__file__).resolve().parents[2] / "deploy" / "sql" / "shop_onboarding_schema.sql"
-        self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        conn = sqlite3.connect(self.db_path)
-        try:
-            conn.executescript(schema_path.read_text(encoding="utf-8"))
-            self._ensure_optional_columns(conn)
-            conn.commit()
-        finally:
-            conn.close()
+        SchemaMigrationService(self.db_path).migrate()
 
     def _ensure_optional_columns(self, conn: sqlite3.Connection) -> None:
         columns = {row[1] for row in conn.execute("PRAGMA table_info(shop_login_sessions)").fetchall()}
@@ -90,7 +84,8 @@ class ShopOnboardingService:
         if not result["vnc_url_ready"]:
             result["vnc_url"] = None
         shop_id = str(result.get("shop_id") or "")
-        result["real_shop_id_pending"] = bool(shop_id.startswith("remote-"))
+        identity_status = str(result.get("shop_identity_status") or "")
+        result["real_shop_id_pending"] = bool(identity_status == "pending_real_shop_id" or is_temporary_shop_id(shop_id))
         return result
 
     def _runner_for_mode(self, runner_mode: str | None) -> PddLoginRunnerProtocol:
@@ -153,7 +148,38 @@ class ShopOnboardingService:
                 token_value=success.token_value,
             )
         )
+        conn.execute(
+            "UPDATE shop_login_sessions SET shop_identity_status='bound', auth_status='valid' WHERE id=?",
+            (session["session_id"],),
+        )
         self._apply_state(conn, session["session_id"], state, shop_id=success.shop_id, completed=True)
+
+    def _save_pending_identity_auth(
+        self,
+        conn: sqlite3.Connection,
+        session: dict[str, Any],
+        result: RemoteBrowserCheckResult,
+    ) -> None:
+        encrypted_cookie = self.auth_service.cipher.encrypt(str(result.cookie_value or ""))
+        encrypted_token = self.auth_service.cipher.encrypt(str(result.token_value or "")) if result.token_value else None
+        now = utc_now_iso()
+        conn.execute(
+            """
+            UPDATE shop_login_sessions
+            SET status='shop_identity_pending',
+                step='shop_identity_pending',
+                shop_id=NULL,
+                auth_status='valid',
+                shop_identity_status='pending_real_shop_id',
+                cookie_encrypted=?,
+                token_encrypted=?,
+                error_summary='授权成功，店铺身份待绑定',
+                completed_at=?,
+                updated_at=?
+            WHERE id=?
+            """,
+            (encrypted_cookie, encrypted_token, now, now, session["session_id"]),
+        )
 
     def create_session(
         self,
@@ -293,6 +319,20 @@ class ShopOnboardingService:
         return self.auth_service.get_auth_status(shop_id)
 
     def get_onboarding_checklist(self, shop_id: str) -> dict[str, Any]:
+        if is_temporary_shop_id(shop_id):
+            blocked = self._check_item(
+                "real_shop_identity_bound",
+                "真实店铺身份已绑定",
+                "failed",
+                True,
+                "授权已完成，但尚未绑定真实 PDD 店铺 ID，不能继续接入验收或启用 AI。",
+            )
+            return {
+                "shop_id": shop_id,
+                "ready_for_ai": False,
+                "blocking_items": ["real_shop_identity_bound"],
+                "items": [blocked],
+            }
         self.init_schema()
         items = [
             self._check_auth_valid(shop_id),
@@ -383,6 +423,7 @@ class ShopOnboardingService:
         override: bool = False,
         override_reason: str | None = None,
     ) -> dict[str, Any]:
+        assert_real_shop_id_bound(shop_id)
         if not confirm:
             raise ValueError("confirm_required")
         checklist = self.get_onboarding_checklist(shop_id)
@@ -786,8 +827,16 @@ class ShopOnboardingService:
                     )
                     conn.commit()
                     return self.get_session(session_id, sync_runner=False)
-                fallback_key = session_id.replace("login-", "")
-                shop_id = str(result.shop_id or session.get("shop_id") or f"remote-{fallback_key}")
+                shop_id = str(result.shop_id or "")
+                if not shop_id or is_temporary_shop_id(shop_id):
+                    self._save_pending_identity_auth(conn, session, result)
+                    self.remote_browser_service.close_session(session_id)
+                    conn.execute(
+                        "UPDATE shop_login_sessions SET remote_browser_status=? WHERE id=?",
+                        ("closed", session_id),
+                    )
+                    conn.commit()
+                    return self.get_session(session_id, sync_runner=False)
                 account_name = str(result.account_name or session.get("account_name") or "")
                 success = LoginRunnerSuccess(
                     shop_id=shop_id,

@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException
 
+from web_api.errors import ApiError, api_error_response
 from web_api.deps import get_shop_onboarding_service
 from web_api.schemas.shop_onboarding import (
     AiStatusResponse,
@@ -153,6 +154,8 @@ def enable_shop_ai(
             override=payload.override,
             override_reason=payload.override_reason,
         )
+    except ApiError as exc:
+        return api_error_response(exc)
     except ChecklistNotReadyError as exc:
         raise HTTPException(status_code=409, detail={"error": "checklist_not_ready", "blocking_items": exc.blocking_items}) from exc
     except ValueError as exc:

@@ -54,7 +54,7 @@ def test_create_sync_job_requires_auth(tmp_path):
     try:
         response = client.post("/api/shops/565617/product-sync/jobs", json={"limit": 1})
         assert response.status_code == 409
-        assert response.json()["detail"]["error"] == "auth_required"
+        assert response.json()["error_type"] == "AUTH_REQUIRED"
     finally:
         _clear()
 

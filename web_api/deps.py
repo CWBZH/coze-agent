@@ -9,6 +9,7 @@ from web_api.services.product_sync_service import ProductSyncService
 from web_api.services.provider_status_service import ProviderStatusService
 from web_api.services.rag_debug_service import RagDebugService
 from web_api.services.rag_job_service import RagJobService
+from web_api.services.schema_migration_service import SchemaMigrationService
 from web_api.services.shop_service import ShopService
 from web_api.services.shop_onboarding_service import ShopOnboardingService
 from web_api.services.sop_service import SopService
@@ -16,7 +17,15 @@ from web_api.services.trace_service import TraceService
 
 
 @lru_cache
+def get_schema_migration_service() -> SchemaMigrationService:
+    service = SchemaMigrationService()
+    service.migrate()
+    return service
+
+
+@lru_cache
 def get_shop_service() -> ShopService:
+    get_schema_migration_service()
     return ShopService()
 
 
@@ -62,6 +71,7 @@ def get_provider_status_service() -> ProviderStatusService:
 
 @lru_cache
 def get_knowledge_center_service() -> KnowledgeCenterService:
+    get_schema_migration_service()
     service = KnowledgeCenterService()
     service.init_schema()
     return service
@@ -74,6 +84,7 @@ def get_human_lock_service() -> HumanLockService:
 
 @lru_cache
 def get_shop_onboarding_service() -> ShopOnboardingService:
+    get_schema_migration_service()
     service = ShopOnboardingService()
     service.init_schema()
     return service
@@ -81,6 +92,7 @@ def get_shop_onboarding_service() -> ShopOnboardingService:
 
 @lru_cache
 def get_product_sync_service() -> ProductSyncService:
+    get_schema_migration_service()
     service = ProductSyncService()
     service.init_schema()
     return service

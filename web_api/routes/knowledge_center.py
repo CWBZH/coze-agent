@@ -2,6 +2,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
 
+from web_api.errors import ApiError, api_error_response
 from web_api.deps import get_knowledge_center_service
 from web_api.schemas.knowledge_center import (
     IndexRunRequest,
@@ -15,6 +16,7 @@ from web_api.schemas.knowledge_center import (
     VersionChunksResponse,
 )
 from web_api.services.knowledge_center_service import KnowledgeCenterService, empty_product_override
+from web_api.services.shop_identity import assert_real_shop_id_bound
 
 
 router = APIRouter(prefix="/knowledge", tags=["knowledge"])
@@ -72,8 +74,11 @@ def archive_sop(sop_id: int, service: KnowledgeCenterService = Depends(get_knowl
 def publish_sop(sop_id: int, service: KnowledgeCenterService = Depends(get_knowledge_center_service)) -> dict[str, Any]:
     try:
         sop = service.get_sop(sop_id)
+        assert_real_shop_id_bound(sop["shop_id"])
         result = service.publish_sop(sop["shop_id"], sop_id)
         return {"sop": sop, "version": result["version"], "index_job": result["job"]}
+    except ApiError as exc:
+        return api_error_response(exc)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail={"status": "not_found"}) from exc
 
@@ -124,8 +129,11 @@ def publish_product(
     service: KnowledgeCenterService = Depends(get_knowledge_center_service),
 ) -> dict[str, Any]:
     try:
+        assert_real_shop_id_bound(shop_id)
         result = service.publish_product(shop_id, goods_id)
         return {"effective": result["effective"], "version": result["version"], "index_job": result["job"]}
+    except ApiError as exc:
+        return api_error_response(exc)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail={"status": "not_found"}) from exc
 

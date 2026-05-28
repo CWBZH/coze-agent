@@ -33,6 +33,8 @@ class OnboardingSessionResponse(BaseModel):
     vnc_url_ready: bool = False
     vnc_url: str | None = None
     real_shop_id_pending: bool = False
+    shop_identity_status: str = "unknown"
+    auth_status: str | None = None
 
 
 class SmsCodeSubmitRequest(BaseModel):

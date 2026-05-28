@@ -47,7 +47,11 @@ CREATE TABLE IF NOT EXISTS shop_login_sessions (
     cancelled_at TEXT,
     remote_browser_status TEXT,
     remote_browser_token TEXT,
-    vnc_url TEXT
+    vnc_url TEXT,
+    shop_identity_status TEXT NOT NULL DEFAULT 'unknown',
+    auth_status TEXT,
+    cookie_encrypted TEXT,
+    token_encrypted TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_shop_login_sessions_status ON shop_login_sessions(status);
@@ -65,6 +69,7 @@ CREATE TABLE IF NOT EXISTS shop_auth (
     safe_display TEXT,
     last_login_at TEXT,
     expires_at TEXT,
+    shop_binding_status TEXT NOT NULL DEFAULT 'bound',
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     UNIQUE(shop_id, platform)

@@ -1,5 +1,8 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import JSONResponse
 
+from web_api.errors import ApiError, api_error_response
+from web_api.errors import standard_error_payload
 from web_api.deps import get_product_sync_service
 from web_api.schemas.product_sync import (
     ProductSyncCoverageResponse,
@@ -21,11 +24,21 @@ def create_product_sync_job(
 ) -> dict:
     try:
         return service.create_job(shop_id, mode=payload.mode, operator=payload.operator, limit=payload.limit)
+    except ApiError as exc:
+        return api_error_response(exc)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail={"error": "job_not_found"}) from exc
     except ValueError as exc:
         if str(exc) == "auth_required":
-            raise HTTPException(status_code=409, detail={"error": "auth_required"}) from exc
+            return JSONResponse(
+                status_code=409,
+                content=standard_error_payload(
+                    "AUTH_REQUIRED",
+                    "当前店铺没有可用授权，无法同步商品。",
+                    retryable=False,
+                    next_action="请先完成店铺登录授权。",
+                ),
+            )
         raise HTTPException(status_code=400, detail={"error": "product_sync_failed"}) from exc
 
 
@@ -58,6 +71,8 @@ def retry_product_sync_job(
 ) -> dict:
     try:
         return service.retry_failed_items(shop_id, job_id)
+    except ApiError as exc:
+        return api_error_response(exc)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail={"error": "job_not_found"}) from exc
 

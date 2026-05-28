@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import secrets
 import urllib.error
 import urllib.request
@@ -17,6 +18,7 @@ class RemoteBrowserSession:
     access_token: str
     vnc_url: str | None = None
     error_summary: str | None = None
+    shop_identity_status: str = "unknown"
     created_at: str | None = None
     expires_at: str | None = None
     closed_at: str | None = None
@@ -104,12 +106,19 @@ class RemoteBrowserService:
         pdd_urls = [url for url in urls if "pinduoduo.com" in url or "yangkeduo.com" in url]
         login_urls = [url for url in pdd_urls if "login" in url.lower()]
         if cookie_value and pdd_urls and not login_urls:
-            session_key = login_session_id.replace("login-", "")
+            identity = self._extract_shop_identity_from_cdp(pages)
+            if not identity:
+                return RemoteBrowserCheckResult(
+                    status="succeeded",
+                    cookie_value=cookie_value,
+                    shop_identity_status="pending_real_shop_id",
+                )
             return RemoteBrowserCheckResult(
                 status="succeeded",
-                shop_id=f"remote-{session_key}",
-                user_id=f"remote-{session_key}",
+                shop_id=identity,
+                user_id=identity,
                 cookie_value=cookie_value,
+                shop_identity_status="bound",
             )
         return RemoteBrowserCheckResult(status="still_waiting_user_verification")
 
@@ -143,7 +152,7 @@ class RemoteBrowserService:
         except Exception:
             return ""
 
-        ws = websocket.create_connection(str(page["webSocketDebuggerUrl"]), timeout=3)
+        ws = websocket.create_connection(str(page["webSocketDebuggerUrl"]), timeout=3, origin=self.cdp_url)
         try:
             ws.send(json.dumps({"id": 1, "method": "Network.getAllCookies"}))
             result: dict[str, Any] = {}
@@ -166,3 +175,54 @@ class RemoteBrowserService:
             and cookie.get("name")
         ]
         return "; ".join(f"{cookie['name']}={cookie.get('value', '')}" for cookie in pdd_cookies)
+
+    def _extract_shop_identity_from_cdp(self, pages: list[dict[str, Any]]) -> str:
+        page = next((item for item in pages if item.get("type") == "page" and item.get("webSocketDebuggerUrl")), None)
+        if not page:
+            return ""
+        candidates = [str(page.get("url") or ""), str(page.get("title") or "")]
+        runtime_payload = self._evaluate_runtime_snapshot(str(page.get("webSocketDebuggerUrl") or ""))
+        if runtime_payload:
+            candidates.append(runtime_payload)
+        combined = "\n".join(candidates)
+        patterns = (
+            r"\bmall[_-]?id[\"'\s:=]+([0-9]{4,})",
+            r"\bshop[_-]?id[\"'\s:=]+([0-9]{4,})",
+            r"\bmallId[\"'\s:=]+([0-9]{4,})",
+            r"\bshopId[\"'\s:=]+([0-9]{4,})",
+        )
+        for pattern in patterns:
+            match = re.search(pattern, combined, flags=re.IGNORECASE)
+            if match:
+                return match.group(1)
+        return ""
+
+    def _evaluate_runtime_snapshot(self, websocket_url: str) -> str:
+        if not websocket_url:
+            return ""
+        try:
+            import websocket  # type: ignore
+        except Exception:
+            return ""
+        expression = """
+        JSON.stringify({
+          href: location.href,
+          title: document.title,
+          localStorage: Object.assign({}, localStorage),
+          sessionStorage: Object.assign({}, sessionStorage),
+          bodyText: document.body ? document.body.innerText.slice(0, 8000) : ''
+        })
+        """
+        try:
+            ws = websocket.create_connection(websocket_url, timeout=3, origin=self.cdp_url)
+            try:
+                ws.send(json.dumps({"id": 2, "method": "Runtime.evaluate", "params": {"expression": expression}}))
+                for _ in range(10):
+                    message = json.loads(ws.recv())
+                    if message.get("id") == 2:
+                        return str(message.get("result", {}).get("result", {}).get("value") or "")
+            finally:
+                ws.close()
+        except Exception:
+            return ""
+        return ""
