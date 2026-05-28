@@ -636,6 +636,74 @@ pre {
   gap: 12px;
 }
 
+.checklist-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 12px;
+  margin: 14px 0;
+}
+
+.checklist-item .panel-header {
+  align-items: center;
+}
+
+.validation-box {
+  border: 1px solid #bfdbfe;
+  border-radius: 8px;
+  background: #f8fbff;
+  margin-top: 16px;
+  padding: 14px;
+}
+
+.validation-box textarea,
+.warning-banner textarea {
+  min-height: 76px;
+  margin: 8px 0 12px;
+}
+
+.button-like {
+  align-items: center;
+  background: #2563eb;
+  border-radius: 8px;
+  color: #fff;
+  display: inline-flex;
+  font-weight: 700;
+  justify-content: center;
+  min-height: 40px;
+  padding: 0 14px;
+  text-decoration: none;
+}
+
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin: 14px 0;
+}
+
+.stat-card {
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #f8fafc;
+  padding: 12px;
+}
+
+.stat-card span,
+.stat-card strong {
+  display: block;
+}
+
+.stat-card span {
+  color: #64748b;
+  font-size: 13px;
+}
+
+.stat-card strong {
+  margin-top: 6px;
+  color: #0f172a;
+  font-size: 24px;
+}
+
 .debug-card {
   border: 1px solid #e2e8f0;
   border-radius: 8px;

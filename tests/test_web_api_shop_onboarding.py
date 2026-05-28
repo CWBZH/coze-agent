@@ -48,7 +48,7 @@ def test_create_and_get_onboarding_session(tmp_path, monkeypatch):
             json={
                 "platform": "pdd",
                 "shop_name": "测试店铺",
-                "account_name": "seller_account_13570354888",
+                "account_name": "seller_account_10000000000",
                 "password": "DO_NOT_STORE_PASSWORD",
                 "operator": "local_admin",
             },
@@ -63,7 +63,7 @@ def test_create_and_get_onboarding_session(tmp_path, monkeypatch):
         fetched = client.get(f"/api/shops/onboarding/{payload['session_id']}")
         assert fetched.status_code == 200
         assert fetched.json()["session_id"] == payload["session_id"]
-        assert fetched.json()["safe_display"] == "seller_account_135***888"
+        assert fetched.json()["safe_display"] == "seller_account_100***000"
     finally:
         _clear_overrides()
 
@@ -75,7 +75,7 @@ def test_submit_sms_success_saves_encrypted_auth_and_binds_shop(tmp_path, monkey
     try:
         session = client.post(
             "/api/shops/onboarding",
-            json={"platform": "pdd", "shop_name": "测试店铺", "account_name": "seller_account_13570354888", "password": "secret"},
+            json={"platform": "pdd", "shop_name": "测试店铺", "account_name": "seller_account_10000000000", "password": "secret"},
         ).json()
 
         submitted = client.post(f"/api/shops/onboarding/{session['session_id']}/submit-sms-code", json={"sms_code": "123456"})
@@ -91,7 +91,7 @@ def test_submit_sms_success_saves_encrypted_auth_and_binds_shop(tmp_path, monkey
         assert auth.status_code == 200
         auth_payload = auth.json()
         assert auth_payload["auth_status"] == "auth_valid"
-        assert auth_payload["safe_display"] == "seller_account_135***888"
+        assert auth_payload["safe_display"] == "seller_account_100***000"
         assert auth_payload["insecure_auth_storage"] is False
         assert "cookie" not in auth.text.lower()
 
@@ -102,7 +102,7 @@ def test_submit_sms_success_saves_encrypted_auth_and_binds_shop(tmp_path, monkey
         try:
             account = conn.execute("SELECT username, password, cookies FROM accounts LIMIT 1").fetchone()
             assert account is not None
-            assert account[0] == "seller_account_13570354888"
+            assert account[0] == "seller_account_10000000000"
             assert account[1] == ""
             assert account[2] is None
         finally:
@@ -219,7 +219,7 @@ def test_real_runner_mode_uses_injected_runner_and_polling_does_not_expose_secre
             json={
                 "platform": "pdd",
                 "shop_name": "测试店铺",
-                "account_name": "seller_account_13570354888",
+                "account_name": "seller_account_10000000000",
                 "password": "DO_NOT_LEAK_PASSWORD",
                 "runner_mode": "real",
             },
@@ -228,7 +228,7 @@ def test_real_runner_mode_uses_injected_runner_and_polling_does_not_expose_secre
         assert created.status_code == 200
         session_id = created.json()["session_id"]
         assert created.json()["status"] == "opening_login_page"
-        assert real_runner.started == [(session_id, "seller_account_13570354888", "DO_NOT_LEAK_PASSWORD")]
+        assert real_runner.started == [(session_id, "seller_account_10000000000", "DO_NOT_LEAK_PASSWORD")]
         assert "DO_NOT_LEAK_PASSWORD" not in created.text
 
         polled = client.get(f"/api/shops/onboarding/{session_id}")
@@ -281,7 +281,7 @@ def test_real_runner_mode_sms_success_saves_encrypted_auth_without_plaintext(tmp
             json={
                 "platform": "pdd",
                 "shop_name": "测试店铺",
-                "account_name": "seller_account_13570354888",
+                "account_name": "seller_account_10000000000",
                 "password": "DO_NOT_LEAK_PASSWORD",
                 "runner_mode": "real",
             },

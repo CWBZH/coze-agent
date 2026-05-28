@@ -5,6 +5,7 @@ from web_api.services.human_lock_service import HumanLockService
 from web_api.services.knowledge_center_service import KnowledgeCenterService
 from web_api.services.live_chat_service import LiveChatService
 from web_api.services.product_service import ProductService
+from web_api.services.product_sync_service import ProductSyncService
 from web_api.services.provider_status_service import ProviderStatusService
 from web_api.services.rag_debug_service import RagDebugService
 from web_api.services.rag_job_service import RagJobService
@@ -74,5 +75,12 @@ def get_human_lock_service() -> HumanLockService:
 @lru_cache
 def get_shop_onboarding_service() -> ShopOnboardingService:
     service = ShopOnboardingService()
+    service.init_schema()
+    return service
+
+
+@lru_cache
+def get_product_sync_service() -> ProductSyncService:
+    service = ProductSyncService()
     service.init_schema()
     return service

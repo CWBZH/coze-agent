@@ -47,7 +47,7 @@ def test_shop_auth_resolver_prefers_encrypted_shop_auth(tmp_path, monkeypatch):
             shop_id="565617",
             shop_name="测试店铺",
             platform="pdd",
-            account_name="seller_account_13570354888",
+            account_name="seller_account_10000000000",
             user_id="seller-user",
             cookie_value=json.dumps({"new": "cookie"}),
         )
@@ -72,6 +72,27 @@ def test_shop_auth_resolver_falls_back_to_legacy_accounts_cookies(tmp_path):
     assert result.source == "legacy_accounts"
     assert result.cookies == {"legacy": "cookie"}
     assert result.user_id == "legacy-user"
+
+
+def test_shop_auth_resolver_parses_browser_cookie_header(tmp_path, monkeypatch):
+    monkeypatch.setenv("SHOP_AUTH_ENCRYPTION_KEY", "unit-test-key")
+    db_path = tmp_path / "auth.db"
+    _init_schema(db_path)
+    ShopAuthService(db_path=db_path).save_auth(
+        AuthSavePayload(
+            shop_id="565617",
+            shop_name="测试店铺",
+            platform="pdd",
+            account_name="seller_account_10000000000",
+            user_id="seller-user",
+            cookie_value="api_uid=abc; mms_b84d1838=xyz",
+        )
+    )
+
+    result = ShopAuthResolver(db_path=db_path).get_cookies("565617")
+
+    assert result.status == "ok"
+    assert result.cookies == {"api_uid": "abc", "mms_b84d1838": "xyz"}
 
 
 def test_shop_auth_resolver_reports_decrypt_failure_without_fallback(tmp_path, monkeypatch):

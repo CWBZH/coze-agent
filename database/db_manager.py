@@ -4,6 +4,7 @@ import threading
 from contextlib import contextmanager
 from datetime import datetime
 from sqlalchemy import create_engine, desc
+from sqlalchemy import text
 from sqlalchemy.orm import sessionmaker, Session
 from sqlalchemy.exc import SQLAlchemyError
 from database.models import (Base, Channel, Shop, Account, ProductKnowledge, Keyword,
@@ -284,6 +285,15 @@ class DatabaseManager:
                 }
                 for account, shop, channel in results
             ]
+
+    def is_shop_ai_enabled(self, shop_id: str) -> bool:
+        """Return the durable Web Admin AI enablement flag for a platform shop id."""
+        with self.session_scope() as session:
+            row = session.execute(
+                text("SELECT ai_enabled FROM shop_ai_settings WHERE shop_id = :shop_id LIMIT 1"),
+                {"shop_id": str(shop_id)},
+            ).fetchone()
+            return bool(row and int(row[0] or 0) == 1)
 
     def update_account_cookies(self, channel_name: str, shop_id: str, user_id: str, cookies: str) -> bool:
         with self.session_scope() as session:

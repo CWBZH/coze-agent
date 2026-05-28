@@ -49,7 +49,7 @@ def test_human_alert_message_contains_actionable_context():
     context = HumanAlertContext(
         shop_id="565617",
         shop_name="佳琪如梦",
-        account_name="13570354888",
+        account_name="10000000000",
         buyer_id="6694171636407",
         session_id="s1",
         session_status="pending_human",
@@ -65,7 +65,7 @@ def test_human_alert_message_contains_actionable_context():
     )
 
     assert "shop=佳琪如梦 (565617)" in message
-    assert "13570354888" in message
+    assert "10000000000" in message
     assert "6694171636407" in message
     assert "reason=AI 判断需要转人工" in message
     assert "这个用了过敏怎么办" in message

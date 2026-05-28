@@ -150,7 +150,18 @@ class ShopAuthResolver:
         if isinstance(value, dict):
             return {str(k): str(v) for k, v in value.items() if k}
         if isinstance(value, str) and value.strip():
-            data = json.loads(value)
+            try:
+                data = json.loads(value)
+            except json.JSONDecodeError:
+                cookies: dict[str, str] = {}
+                for part in value.split(";"):
+                    if "=" not in part:
+                        continue
+                    key, raw = part.split("=", 1)
+                    key = key.strip()
+                    if key:
+                        cookies[key] = raw.strip()
+                return cookies
             if isinstance(data, dict):
                 return {str(k): str(v) for k, v in data.items() if k}
         return {}

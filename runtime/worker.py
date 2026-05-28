@@ -468,6 +468,22 @@ def _record_account_error(state: WorkerState, account_key: str, error: str) -> N
             account["error_summary"] = error[:240]
 
 
+def _account_ai_enabled(db_manager: Any, account: dict) -> bool:
+    checker = getattr(db_manager, "is_shop_ai_enabled", None)
+    if checker is None:
+        return False
+    try:
+        return bool(checker(str(account.get("shop_id", ""))))
+    except Exception as exc:
+        _emit(
+            "worker.ai_gate.check_failed",
+            shop_id=account.get("shop_id", ""),
+            user_id=account.get("user_id", ""),
+            error_type=type(exc).__name__,
+        )
+        return False
+
+
 def _make_callbacks(account: dict, state: Optional[WorkerState] = None):
     account_key = _account_key(account)
 
@@ -573,6 +589,9 @@ async def _run_account_task(
 
 
 async def _stop_channel(account_key: str, channel: Any, state: WorkerState, timeout: float = 10.0) -> None:
+    if account_key in state.stopped_accounts and account_key not in state.running_accounts:
+        _emit("worker.shutdown.account_already_stopped", account_key=account_key, channel_id=id(channel))
+        return
     _emit("worker.shutdown.account_stopping", account_key=account_key, channel_id=id(channel), timeout=timeout)
     try:
         await asyncio.wait_for(channel.stop_all_connections(), timeout=timeout)
@@ -596,6 +615,46 @@ async def _stop_channel(account_key: str, channel: Any, state: WorkerState, time
             error_type=type(exc).__name__,
             error=str(exc),
         )
+
+
+async def _ai_enablement_watch(
+    state: WorkerState,
+    stop_event: asyncio.Event,
+    db_manager: Any,
+    interval: float,
+    shutdown_timeout: float,
+) -> None:
+    if db_manager is None or interval <= 0:
+        return
+    _emit("worker.ai_gate.watch_started", interval=interval)
+    try:
+        while not stop_event.is_set():
+            for account_key, account in list(state.accounts.items()):
+                if account_key in state.stopped_accounts or account_key in state.failed_accounts:
+                    continue
+                if _account_ai_enabled(db_manager, account):
+                    continue
+
+                _emit(
+                    "worker.account.ai_disabled",
+                    **_account_log_fields(account),
+                    action="stop_account",
+                )
+                channel = state.channels.get(account_key)
+                if channel is not None:
+                    await _stop_channel(account_key, channel, state, timeout=shutdown_timeout)
+                task = state.tasks.get(account_key)
+                if task is not None and not task.done():
+                    task.cancel()
+                _schedule_status_write(state)
+
+            await asyncio.sleep(interval)
+    except asyncio.CancelledError:
+        _emit("worker.ai_gate.watch_stopped", reason="cancelled")
+        raise
+    finally:
+        if stop_event.is_set():
+            _emit("worker.ai_gate.watch_stopped", reason="shutdown")
 
 
 async def _shutdown_accounts(state: WorkerState, stop_event: asyncio.Event, timeout: float = 10.0) -> None:
@@ -676,6 +735,8 @@ async def _run_accounts(
     shutdown_timeout: float = 10.0,
     status_interval: float = 5.0,
     channel_factory: Optional[Callable[[], Any]] = None,
+    ai_gate_db_manager: Any = None,
+    ai_gate_interval: float = 5.0,
 ) -> int:
     if status_file_path is None:
         from core import settings
@@ -749,6 +810,19 @@ async def _run_accounts(
         control_tasks.append(asyncio.create_task(_run_seconds_watch(state, stop_event, run_seconds), name="worker.run_seconds"))
     if stop_file:
         control_tasks.append(asyncio.create_task(_stop_file_watch(state, stop_event, stop_file), name="worker.stop_file"))
+    if ai_gate_db_manager is not None and ai_gate_interval > 0:
+        control_tasks.append(
+            asyncio.create_task(
+                _ai_enablement_watch(
+                    state,
+                    stop_event,
+                    ai_gate_db_manager,
+                    interval=ai_gate_interval,
+                    shutdown_timeout=shutdown_timeout,
+                ),
+                name="worker.ai_gate",
+            )
+        )
 
     try:
         while not stop_event.is_set():
@@ -811,6 +885,7 @@ async def _run_single_account(
         stop_file=stop_file,
         shutdown_timeout=shutdown_timeout,
         status_interval=status_interval,
+        ai_gate_db_manager=context.db_manager,
     )
 
 
@@ -833,6 +908,7 @@ async def _run_all_enabled(
         stop_file=stop_file,
         shutdown_timeout=shutdown_timeout,
         status_interval=status_interval,
+        ai_gate_db_manager=context.db_manager,
     )
 
 

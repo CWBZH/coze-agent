@@ -26,9 +26,9 @@ def test_shop_auth_cipher_uses_insecure_dev_key_when_env_missing(monkeypatch):
 
 
 def test_safe_account_display_excludes_sensitive_values():
-    display = build_safe_account_display("seller_account_13570354888")
+    display = build_safe_account_display("seller_account_10000000000")
 
-    assert display == "seller_account_135***888"
+    assert display == "seller_account_100***000"
     assert "fake-cookie" not in display
     assert "token" not in display.lower()
     assert "password" not in display.lower()

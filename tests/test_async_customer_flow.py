@@ -944,14 +944,14 @@ def test_auto_reply_manager_suspends_after_final_reconnect_failure():
 def test_auto_reply_manager_alerts_on_final_reconnect_failure():
     notifier = FakeNotificationService()
     manager = AutoReplyManager(notification_service=notifier)
-    account_key = "pinduoduo_565617_13570354888"
+    account_key = "pinduoduo_565617_10000000000"
 
     manager._on_connection_failed(account_key, "连接失败，已达到最大重试次数: closed")
 
     assert notifier.alerts == [
         {
             "shop_id": "565617",
-            "user_id": "13570354888",
+            "user_id": "10000000000",
             "reason": "自动回复连接失败: 连接失败，已达到最大重试次数: closed",
             "alert_level": "high",
         }

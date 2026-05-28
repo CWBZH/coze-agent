@@ -32,6 +32,7 @@ class OnboardingSessionResponse(BaseModel):
     remote_browser_status: str | None = None
     vnc_url_ready: bool = False
     vnc_url: str | None = None
+    real_shop_id_pending: bool = False
 
 
 class SmsCodeSubmitRequest(BaseModel):
@@ -55,3 +56,72 @@ class AuthStatusResponse(BaseModel):
     last_login_at: str | None = None
     expires_at: str | None = None
     insecure_auth_storage: bool = False
+
+
+class ChecklistItem(BaseModel):
+    key: str
+    label: str
+    status: str
+    required: bool
+    summary: str
+
+
+class OnboardingChecklistResponse(BaseModel):
+    shop_id: str
+    ready_for_ai: bool
+    blocking_items: list[str]
+    items: list[ChecklistItem]
+
+
+class ValidationMarkPassedRequest(BaseModel):
+    operator: str = "local_admin"
+    summary: str = ""
+
+
+class ValidationRunResponse(BaseModel):
+    id: str
+    shop_id: str
+    status: str
+    mode: str = "no_send"
+    passed_count: int = 0
+    failed_count: int = 0
+    tested_at: str
+    created_by: str
+    summary: str = ""
+
+
+class EnableAiRequest(BaseModel):
+    operator: str = "local_admin"
+    confirm: bool = False
+    override: bool = False
+    override_reason: str | None = None
+
+
+class DisableAiRequest(BaseModel):
+    operator: str = "local_admin"
+    reason: str = "manual_disable"
+
+
+class AiStatusResponse(BaseModel):
+    shop_id: str
+    ai_enabled: bool
+    enabled_at: str | None = None
+    enabled_by: str | None = None
+    disabled_at: str | None = None
+    disabled_by: str | None = None
+    last_change_reason: str | None = None
+    override_enabled: bool = False
+    override_reason: str | None = None
+
+
+class WorkerStatusResponse(BaseModel):
+    shop_id: str
+    status: str
+    process_id: int | None = None
+    last_seen_at: str | None = None
+    websocket_status: str
+    summary: str
+    ai_enabled: bool = False
+    consistency_status: str = "unknown"
+    attention_required: bool = False
+    recommended_action: str | None = None

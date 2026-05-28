@@ -2,14 +2,21 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from web_api.deps import get_shop_onboarding_service
 from web_api.schemas.shop_onboarding import (
+    AiStatusResponse,
     AuthStatusResponse,
     CaptchaSubmitRequest,
     CheckLoginResponse,
+    DisableAiRequest,
+    EnableAiRequest,
     OnboardingCreateRequest,
+    OnboardingChecklistResponse,
     OnboardingSessionResponse,
     SmsCodeSubmitRequest,
+    ValidationMarkPassedRequest,
+    ValidationRunResponse,
+    WorkerStatusResponse,
 )
-from web_api.services.shop_onboarding_service import ShopOnboardingService
+from web_api.services.shop_onboarding_service import ChecklistNotReadyError, ShopOnboardingService
 
 
 router = APIRouter(tags=["shop-onboarding"])
@@ -113,3 +120,65 @@ def get_shop_auth_status(
         return service.get_auth_status(shop_id)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail={"error": "auth_not_found"}) from exc
+
+
+@router.get("/shops/{shop_id}/onboarding-checklist", response_model=OnboardingChecklistResponse)
+def get_onboarding_checklist(
+    shop_id: str,
+    service: ShopOnboardingService = Depends(get_shop_onboarding_service),
+) -> dict:
+    return service.get_onboarding_checklist(shop_id)
+
+
+@router.post("/shops/{shop_id}/onboarding-validation/mark-passed", response_model=ValidationRunResponse)
+def mark_onboarding_validation_passed(
+    shop_id: str,
+    payload: ValidationMarkPassedRequest,
+    service: ShopOnboardingService = Depends(get_shop_onboarding_service),
+) -> dict:
+    return service.mark_no_send_validation_passed(shop_id, operator=payload.operator, summary=payload.summary)
+
+
+@router.post("/shops/{shop_id}/enable-ai", response_model=AiStatusResponse)
+def enable_shop_ai(
+    shop_id: str,
+    payload: EnableAiRequest,
+    service: ShopOnboardingService = Depends(get_shop_onboarding_service),
+) -> dict:
+    try:
+        return service.enable_ai(
+            shop_id,
+            operator=payload.operator,
+            confirm=payload.confirm,
+            override=payload.override,
+            override_reason=payload.override_reason,
+        )
+    except ChecklistNotReadyError as exc:
+        raise HTTPException(status_code=409, detail={"error": "checklist_not_ready", "blocking_items": exc.blocking_items}) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail={"error": str(exc)}) from exc
+
+
+@router.post("/shops/{shop_id}/disable-ai", response_model=AiStatusResponse)
+def disable_shop_ai(
+    shop_id: str,
+    payload: DisableAiRequest,
+    service: ShopOnboardingService = Depends(get_shop_onboarding_service),
+) -> dict:
+    return service.disable_ai(shop_id, operator=payload.operator, reason=payload.reason)
+
+
+@router.get("/shops/{shop_id}/ai-status", response_model=AiStatusResponse)
+def get_shop_ai_status(
+    shop_id: str,
+    service: ShopOnboardingService = Depends(get_shop_onboarding_service),
+) -> dict:
+    return service.get_ai_status(shop_id)
+
+
+@router.get("/shops/{shop_id}/worker-status", response_model=WorkerStatusResponse)
+def get_shop_worker_status(
+    shop_id: str,
+    service: ShopOnboardingService = Depends(get_shop_onboarding_service),
+) -> dict:
+    return service.get_worker_status(shop_id)

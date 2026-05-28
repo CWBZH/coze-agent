@@ -7,6 +7,7 @@ from web_api.deps import get_shop_onboarding_service
 from web_api.main import app
 from web_api.services.pdd_login_runner import FakePddLoginRunner
 from web_api.services.remote_browser_service import RemoteBrowserCheckResult, RemoteBrowserSession
+from web_api.services.remote_browser_service import RemoteBrowserService
 from web_api.services.shop_onboarding_service import ShopOnboardingService
 
 
@@ -62,7 +63,7 @@ def test_remote_browser_mode_creates_tokenized_vnc_session(tmp_path):
             json={
                 "platform": "pdd",
                 "shop_name": "测试店铺",
-                "account_name": "seller_account_13570354888",
+                "account_name": "seller_account_10000000000",
                 "password": "DO_NOT_LEAK_PASSWORD",
                 "runner_mode": "remote_browser",
             },
@@ -82,6 +83,12 @@ def test_remote_browser_mode_creates_tokenized_vnc_session(tmp_path):
         _clear_overrides()
 
 
+def test_remote_browser_default_ttl_is_30_minutes():
+    service = RemoteBrowserService(base_url="http://127.0.0.1:6088")
+
+    assert service.session_ttl_seconds == 1800
+
+
 def test_remote_browser_check_login_waiting_and_success_saves_auth(tmp_path, monkeypatch):
     monkeypatch.setenv("SHOP_AUTH_ENCRYPTION_KEY", "unit-test-key")
     remote = FakeRemoteBrowserService()
@@ -92,7 +99,7 @@ def test_remote_browser_check_login_waiting_and_success_saves_auth(tmp_path, mon
             json={
                 "platform": "pdd",
                 "shop_name": "测试店铺",
-                "account_name": "seller_account_13570354888",
+                "account_name": "seller_account_10000000000",
                 "password": "DO_NOT_LEAK_PASSWORD",
                 "runner_mode": "remote_browser",
             },
@@ -107,7 +114,7 @@ def test_remote_browser_check_login_waiting_and_success_saves_auth(tmp_path, mon
             shop_id="565617",
             shop_name="测试店铺",
             user_id="fake-user-565617",
-            account_name="seller_account_13570354888",
+            account_name="seller_account_10000000000",
             cookie_value="fake-cookie-value",
         )
         succeeded = client.post(f"/api/shops/onboarding/{session['session_id']}/check-login")
@@ -144,7 +151,7 @@ def test_remote_browser_cancel_closes_session(tmp_path):
             json={
                 "platform": "pdd",
                 "shop_name": "测试店铺",
-                "account_name": "seller_account_13570354888",
+                "account_name": "seller_account_10000000000",
                 "password": "DO_NOT_LEAK_PASSWORD",
                 "runner_mode": "remote_browser",
             },

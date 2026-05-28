@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+import json
 import os
 import secrets
+import urllib.error
+import urllib.request
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta, timezone
+from typing import Any
 
 
 @dataclass
@@ -33,19 +37,25 @@ class RemoteBrowserCheckResult:
 class RemoteBrowserService:
     """Tokenized remote browser session manager.
 
-    This service provides the Web API contract for noVNC-style login sessions.
-    In environments without noVNC/websockify/Xvfb, sessions fail closed with a
-    sanitized missing dependency status instead of exposing an unauthenticated
-    browser endpoint.
+    The service controls the Web API contract for noVNC login sessions and can
+    detect login completion through Chrome DevTools Protocol. It never returns
+    or logs raw cookies; the caller is responsible for encrypting persisted auth.
     """
 
-    def __init__(self, *, base_url: str | None = None, session_ttl_seconds: int = 600) -> None:
+    def __init__(
+        self,
+        *,
+        base_url: str | None = None,
+        cdp_url: str | None = None,
+        session_ttl_seconds: int = 1800,
+    ) -> None:
         self.base_url = (base_url or os.environ.get("WEB_NOVNC_BASE_URL") or "").rstrip("/")
+        self.cdp_url = (cdp_url or os.environ.get("WEB_REMOTE_BROWSER_CDP_URL") or "http://127.0.0.1:9222").rstrip("/")
         self.session_ttl_seconds = session_ttl_seconds
         self._sessions: dict[str, RemoteBrowserSession] = {}
 
     def create_session(self, login_session_id: str, login_url: str) -> RemoteBrowserSession:
-        now = datetime.now(UTC)
+        now = datetime.now(timezone.utc)
         token = secrets.token_urlsafe(24)
         if not self.base_url:
             session = RemoteBrowserSession(
@@ -80,6 +90,27 @@ class RemoteBrowserService:
             return RemoteBrowserCheckResult(status="failed", error_summary="remote_browser_session_not_found")
         if session.status == "failed":
             return RemoteBrowserCheckResult(status="failed", error_summary=session.error_summary)
+        if self._is_expired(session):
+            self.close_session(login_session_id)
+            return RemoteBrowserCheckResult(status="failed", error_summary="session_expired")
+
+        try:
+            pages = self._get_cdp_pages()
+            urls = [str(page.get("url") or "") for page in pages]
+            cookie_value = self._read_pdd_cookies_from_cdp(pages)
+        except Exception:
+            return RemoteBrowserCheckResult(status="still_waiting_user_verification")
+
+        pdd_urls = [url for url in urls if "pinduoduo.com" in url or "yangkeduo.com" in url]
+        login_urls = [url for url in pdd_urls if "login" in url.lower()]
+        if cookie_value and pdd_urls and not login_urls:
+            session_key = login_session_id.replace("login-", "")
+            return RemoteBrowserCheckResult(
+                status="succeeded",
+                shop_id=f"remote-{session_key}",
+                user_id=f"remote-{session_key}",
+                cookie_value=cookie_value,
+            )
         return RemoteBrowserCheckResult(status="still_waiting_user_verification")
 
     def close_session(self, login_session_id: str) -> None:
@@ -87,5 +118,51 @@ class RemoteBrowserService:
         if session is None:
             return
         session.status = "closed"
-        session.closed_at = datetime.now(UTC).isoformat()
+        session.closed_at = datetime.now(timezone.utc).isoformat()
 
+    def _is_expired(self, session: RemoteBrowserSession) -> bool:
+        if not session.expires_at:
+            return False
+        try:
+            expires_at = datetime.fromisoformat(session.expires_at)
+        except ValueError:
+            return False
+        return expires_at < datetime.now(timezone.utc)
+
+    def _get_cdp_pages(self) -> list[dict[str, Any]]:
+        with urllib.request.urlopen(f"{self.cdp_url}/json/list", timeout=3) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+        return payload if isinstance(payload, list) else []
+
+    def _read_pdd_cookies_from_cdp(self, pages: list[dict[str, Any]]) -> str:
+        page = next((item for item in pages if item.get("type") == "page" and item.get("webSocketDebuggerUrl")), None)
+        if not page:
+            return ""
+        try:
+            import websocket  # type: ignore
+        except Exception:
+            return ""
+
+        ws = websocket.create_connection(str(page["webSocketDebuggerUrl"]), timeout=3)
+        try:
+            ws.send(json.dumps({"id": 1, "method": "Network.getAllCookies"}))
+            result: dict[str, Any] = {}
+            for _ in range(10):
+                message = json.loads(ws.recv())
+                if message.get("id") == 1:
+                    result = message
+                    break
+        finally:
+            ws.close()
+
+        cookies = result.get("result", {}).get("cookies", [])
+        if not isinstance(cookies, list):
+            return ""
+        pdd_cookies = [
+            cookie
+            for cookie in cookies
+            if isinstance(cookie, dict)
+            and ("pinduoduo.com" in str(cookie.get("domain", "")) or "yangkeduo.com" in str(cookie.get("domain", "")))
+            and cookie.get("name")
+        ]
+        return "; ".join(f"{cookie['name']}={cookie.get('value', '')}" for cookie in pdd_cookies)

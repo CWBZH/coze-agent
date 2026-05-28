@@ -72,3 +72,46 @@ CREATE TABLE IF NOT EXISTS shop_auth (
 
 CREATE INDEX IF NOT EXISTS idx_shop_auth_shop_id ON shop_auth(shop_id);
 CREATE INDEX IF NOT EXISTS idx_shop_auth_status ON shop_auth(auth_status);
+
+CREATE TABLE IF NOT EXISTS onboarding_validation_runs (
+    id TEXT PRIMARY KEY,
+    shop_id TEXT NOT NULL,
+    status TEXT NOT NULL,
+    mode TEXT NOT NULL DEFAULT 'no_send',
+    passed_count INTEGER NOT NULL DEFAULT 0,
+    failed_count INTEGER NOT NULL DEFAULT 0,
+    summary_json TEXT,
+    created_by TEXT NOT NULL DEFAULT 'local_admin',
+    tested_at TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_onboarding_validation_shop_id ON onboarding_validation_runs(shop_id);
+CREATE INDEX IF NOT EXISTS idx_onboarding_validation_status ON onboarding_validation_runs(status);
+
+CREATE TABLE IF NOT EXISTS shop_ai_settings (
+    shop_id TEXT PRIMARY KEY,
+    ai_enabled INTEGER NOT NULL DEFAULT 0,
+    enabled_at TEXT,
+    enabled_by TEXT,
+    disabled_at TEXT,
+    disabled_by TEXT,
+    last_change_reason TEXT,
+    override_enabled INTEGER NOT NULL DEFAULT 0,
+    override_reason TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS web_admin_audit_log (
+    id TEXT PRIMARY KEY,
+    shop_id TEXT NOT NULL,
+    action TEXT NOT NULL,
+    operator TEXT NOT NULL DEFAULT 'local_admin',
+    result TEXT NOT NULL,
+    detail_json TEXT,
+    created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_web_admin_audit_shop_id ON web_admin_audit_log(shop_id);
+CREATE INDEX IF NOT EXISTS idx_web_admin_audit_action ON web_admin_audit_log(action);

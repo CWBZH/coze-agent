@@ -7,14 +7,14 @@ import os
 import re
 import sqlite3
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from web_api.services.sqlite_readonly import DEFAULT_DB_PATH
 
 
 def utc_now_iso() -> str:
-    return datetime.now(UTC).isoformat()
+    return datetime.now(timezone.utc).isoformat()
 
 
 def build_safe_account_display(account_name: str | None) -> str:
@@ -135,7 +135,7 @@ class ShopAuthService:
         safe_display = build_safe_account_display(payload.account_name)
         cookie_encrypted = self.cipher.encrypt(payload.cookie_value)
         token_encrypted = self.cipher.encrypt(payload.token_value or "") if payload.token_value else None
-        expires_at = payload.expires_at or (datetime.now(UTC) + timedelta(days=7)).isoformat()
+        expires_at = payload.expires_at or (datetime.now(timezone.utc) + timedelta(days=7)).isoformat()
         conn = self._connect()
         try:
             shop_pk = self._ensure_channel_and_shop(conn, payload)
