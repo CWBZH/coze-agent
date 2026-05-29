@@ -903,6 +903,7 @@ class KnowledgeCenterService:
                 base_url=_first_env("DOUBAO_EMBEDDING_BASE_URL", "ARK_BASE_URL") or "https://ark.cn-beijing.volces.com/api/v3",
                 api_key=_first_env("DOUBAO_EMBEDDING_API_KEY", "ARK_API_KEY") or "",
                 model=_first_env("DOUBAO_EMBEDDING_MODEL", "ARK_EMBEDDING_MODEL", "AI_WORKFLOW_EMBEDDING_MODEL") or "",
+                endpoint=_first_env("DOUBAO_EMBEDDING_ENDPOINT", "ARK_EMBEDDING_ENDPOINT") or "auto",
             )
         raise KnowledgeIndexError(f"unsupported_embedding_provider:{embedding_provider}")
 
@@ -1273,32 +1274,20 @@ class _OllamaEmbeddingClient:
 
 
 class _DoubaoEmbeddingClient:
-    def __init__(self, *, base_url: str, api_key: str, model: str, timeout: float = 20.0) -> None:
+    def __init__(self, *, base_url: str, api_key: str, model: str, endpoint: str = "auto", timeout: float = 20.0) -> None:
         self.base_url = str(base_url or "").rstrip("/")
         self.api_key = api_key
         self.model = model
+        self.endpoint = str(endpoint or "auto").strip().lower()
         self.timeout = float(timeout)
 
     def embed_batch(self, texts: list[str]) -> list[_EmbeddingVector]:
         if not texts:
             return []
+        if self._uses_multimodal_endpoint():
+            return [self._embed_multimodal(text) for text in texts]
         payload = json.dumps({"model": self.model, "input": texts}, ensure_ascii=False).encode("utf-8")
-        request = urllib.request.Request(
-            f"{self.base_url}/embeddings",
-            data=payload,
-            headers={
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {self.api_key}",
-            },
-            method="POST",
-        )
-        try:
-            with urllib.request.urlopen(request, timeout=self.timeout) as response:  # nosec B310 - explicit opt-in.
-                data = json.loads(response.read().decode("utf-8"))
-        except urllib.error.HTTPError as exc:
-            raise KnowledgeIndexError(f"embedding_error:http_{exc.code}") from exc
-        except urllib.error.URLError as exc:
-            raise KnowledgeIndexError(f"embedding_error:{type(exc.reason).__name__}") from exc
+        data = self._post_json("/embeddings", payload)
         rows = data.get("data")
         if not isinstance(rows, list):
             raise KnowledgeIndexError("embedding_error:no_data")
@@ -1317,6 +1306,59 @@ class _DoubaoEmbeddingClient:
         if not vectors:
             raise KnowledgeIndexError("embedding_error:no_vector")
         return vectors[0]
+
+    def _uses_multimodal_endpoint(self) -> bool:
+        if self.endpoint in {"multimodal", "embeddings/multimodal", "/embeddings/multimodal"}:
+            return True
+        if self.endpoint in {"text", "embeddings", "/embeddings"}:
+            return False
+        return "vision" in self.model.lower() or "multimodal" in self.model.lower()
+
+    def _embed_multimodal(self, text: str) -> _EmbeddingVector:
+        payload = json.dumps(
+            {
+                "model": self.model,
+                "input": [
+                    {
+                        "type": "text",
+                        "text": text,
+                    }
+                ],
+            },
+            ensure_ascii=False,
+        ).encode("utf-8")
+        data = self._post_json("/embeddings/multimodal", payload)
+        raw_vector: Any = None
+        result = data.get("data")
+        if isinstance(result, dict):
+            raw_vector = result.get("embedding")
+        elif isinstance(result, list) and result:
+            first = result[0]
+            raw_vector = first.get("embedding") if isinstance(first, dict) else None
+        if not isinstance(raw_vector, list):
+            raise KnowledgeIndexError("embedding_error:no_vector")
+        return _EmbeddingVector(model=self.model, vector=[float(value) for value in raw_vector])
+
+    def _post_json(self, path: str, payload: bytes) -> dict[str, Any]:
+        request = urllib.request.Request(
+            f"{self.base_url}{path}",
+            data=payload,
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {self.api_key}",
+            },
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=self.timeout) as response:  # nosec B310 - explicit opt-in.
+                data = json.loads(response.read().decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            raise KnowledgeIndexError(f"embedding_error:http_{exc.code}") from exc
+        except urllib.error.URLError as exc:
+            raise KnowledgeIndexError(f"embedding_error:{type(exc.reason).__name__}") from exc
+        if not isinstance(data, dict):
+            raise KnowledgeIndexError("embedding_error:invalid_response")
+        return data
 
 
 class _InMemoryVectorStore:

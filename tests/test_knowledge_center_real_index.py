@@ -6,7 +6,12 @@ from fastapi.testclient import TestClient
 
 from web_api.deps import get_knowledge_center_service
 from web_api.main import app
-from web_api.services.knowledge_center_service import KnowledgeCenterService, _FakeEmbeddingClient, _InMemoryVectorStore
+from web_api.services.knowledge_center_service import (
+    KnowledgeCenterService,
+    _DoubaoEmbeddingClient,
+    _FakeEmbeddingClient,
+    _InMemoryVectorStore,
+)
 
 
 def _create_product_db(path: Path) -> None:
@@ -269,3 +274,85 @@ def test_run_index_api_defaults_to_real_doubao_pgvector_and_reports_missing_conf
         assert "fastgpt" not in json.dumps(payload).lower()
     finally:
         app.dependency_overrides.clear()
+
+
+def test_doubao_client_uses_multimodal_endpoint_for_vision_model(monkeypatch):
+    calls = []
+
+    class _Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def read(self):
+            return json.dumps({"data": {"embedding": [0.1, 0.2, 0.3]}}).encode("utf-8")
+
+    def _fake_urlopen(request, timeout):
+        calls.append(
+            {
+                "url": request.full_url,
+                "body": json.loads(request.data.decode("utf-8")),
+                "authorization": request.headers.get("Authorization"),
+                "timeout": timeout,
+            }
+        )
+        return _Response()
+
+    monkeypatch.setattr("urllib.request.urlopen", _fake_urlopen)
+
+    client = _DoubaoEmbeddingClient(
+        base_url="https://ark.example/api/v3",
+        api_key="test-key",
+        model="doubao-embedding-vision-251215",
+    )
+
+    vectors = client.embed_batch(["测试商品知识索引"])
+
+    assert len(vectors) == 1
+    assert vectors[0].vector == [0.1, 0.2, 0.3]
+    assert calls[0]["url"] == "https://ark.example/api/v3/embeddings/multimodal"
+    assert calls[0]["body"] == {
+        "model": "doubao-embedding-vision-251215",
+        "input": [{"type": "text", "text": "测试商品知识索引"}],
+    }
+
+
+def test_doubao_client_keeps_text_embedding_batch_endpoint(monkeypatch):
+    calls = []
+
+    class _Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def read(self):
+            return json.dumps(
+                {
+                    "data": [
+                        {"index": 1, "embedding": [0.4, 0.5]},
+                        {"index": 0, "embedding": [0.1, 0.2]},
+                    ]
+                }
+            ).encode("utf-8")
+
+    def _fake_urlopen(request, timeout):
+        calls.append({"url": request.full_url, "body": json.loads(request.data.decode("utf-8"))})
+        return _Response()
+
+    monkeypatch.setattr("urllib.request.urlopen", _fake_urlopen)
+
+    client = _DoubaoEmbeddingClient(
+        base_url="https://ark.example/api/v3",
+        api_key="test-key",
+        model="doubao-embedding-text",
+    )
+
+    vectors = client.embed_batch(["a", "b"])
+
+    assert [vector.vector for vector in vectors] == [[0.1, 0.2], [0.4, 0.5]]
+    assert calls[0]["url"] == "https://ark.example/api/v3/embeddings"
+    assert calls[0]["body"] == {"model": "doubao-embedding-text", "input": ["a", "b"]}
