@@ -68,6 +68,45 @@ def test_create_and_get_onboarding_session(tmp_path, monkeypatch):
         _clear_overrides()
 
 
+def test_latest_onboarding_session_recovers_last_non_cancelled_flow(tmp_path, monkeypatch):
+    monkeypatch.setenv("SHOP_AUTH_ENCRYPTION_KEY", "unit-test-key")
+    db_path = tmp_path / "onboarding.db"
+    client = _client_for_db(db_path)
+    try:
+        first = client.post(
+            "/api/shops/onboarding",
+            json={
+                "platform": "pdd",
+                "shop_name": "旧店铺",
+                "account_name": "old_seller",
+                "password": "secret",
+                "operator": "local_admin",
+            },
+        ).json()
+        client.post(f"/api/shops/onboarding/{first['session_id']}/cancel")
+        second = client.post(
+            "/api/shops/onboarding",
+            json={
+                "platform": "pdd",
+                "shop_name": "新店铺",
+                "account_name": "new_seller",
+                "password": "secret",
+                "operator": "local_admin",
+            },
+        ).json()
+
+        latest = client.get("/api/shops/onboarding/latest")
+
+        assert latest.status_code == 200
+        payload = latest.json()
+        assert payload["session_id"] == second["session_id"]
+        assert payload["shop_name"] == "新店铺"
+        assert payload["status"] != "cancelled"
+        assert "secret" not in latest.text
+    finally:
+        _clear_overrides()
+
+
 def test_submit_sms_success_saves_encrypted_auth_and_binds_shop(tmp_path, monkeypatch):
     monkeypatch.setenv("SHOP_AUTH_ENCRYPTION_KEY", "unit-test-key")
     db_path = tmp_path / "onboarding.db"

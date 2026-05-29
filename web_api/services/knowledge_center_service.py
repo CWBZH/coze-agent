@@ -771,8 +771,8 @@ class KnowledgeCenterService:
             return self.run_fake_index_job(job_id)
         return self.run_real_index_job(
             job_id,
-            embedding_provider=embedding_provider or self.default_embedding_provider,
-            vector_store_provider=vector_store_provider or self.default_vector_store_provider,
+            embedding_provider=self._normalize_embedding_provider(embedding_provider),
+            vector_store_provider=self._normalize_vector_store_provider(vector_store_provider),
         )
 
     def run_real_index_job(
@@ -891,6 +891,18 @@ class KnowledgeCenterService:
         if vector_store is None and vector_store_provider not in {"pgvector"}:
             return f"unsupported_vector_store:{vector_store_provider}"
         return ""
+
+    def _normalize_embedding_provider(self, embedding_provider: str | None) -> str:
+        provider = str(embedding_provider or "").strip().lower()
+        if provider in {"", "default", "auto"}:
+            return str(self.default_embedding_provider or "doubao").strip().lower()
+        return provider
+
+    def _normalize_vector_store_provider(self, vector_store_provider: str | None) -> str:
+        provider = str(vector_store_provider or "").strip().lower()
+        if provider in {"", "default", "auto"}:
+            return str(self.default_vector_store_provider or "pgvector").strip().lower()
+        return provider
 
     def _build_embedding_client(self, embedding_provider: str) -> Any:
         if embedding_provider == "ollama":
@@ -1382,6 +1394,7 @@ class _PgVectorUpsertStore:
             raise KnowledgeIndexError("pgvector_connection_error:psycopg_missing") from exc
         self._psycopg = psycopg
         self._dsn = dsn
+        self._schema_checked = False
 
     def upsert(self, chunk: _KnowledgeChunk, vector: list[float], *, embedding_model: str = "bge-m3") -> None:
         errors = chunk.validate()
@@ -1390,6 +1403,7 @@ class _PgVectorUpsertStore:
         vector_literal = "[" + ",".join(f"{float(value):.8f}" for value in vector) + "]"
         try:
             with self._psycopg.connect(self._dsn) as conn:  # pragma: no cover - integration only.
+                self._ensure_schema(conn)
                 conn.execute(
                     """
                     INSERT INTO knowledge_chunks (
@@ -1434,6 +1448,70 @@ class _PgVectorUpsertStore:
                 )
         except Exception as exc:  # noqa: BLE001
             raise KnowledgeIndexError(f"pgvector_upsert_error:{type(exc).__name__}") from exc
+
+    def _ensure_schema(self, conn: Any) -> None:
+        if self._schema_checked:
+            return
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS knowledge_chunks (
+                id BIGSERIAL PRIMARY KEY,
+                chunk_id TEXT NOT NULL UNIQUE,
+                shop_id TEXT NOT NULL,
+                domain TEXT NOT NULL,
+                source_type TEXT NOT NULL,
+                source_id TEXT NOT NULL,
+                title TEXT NOT NULL,
+                content TEXT NOT NULL,
+                content_hash TEXT NOT NULL,
+                version TEXT NOT NULL,
+                index_run_id TEXT,
+                namespace TEXT,
+                is_test_data BOOLEAN NOT NULL DEFAULT false,
+                created_by TEXT,
+                metadata_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+                embedding_model TEXT NOT NULL,
+                embedding_dimension INTEGER NOT NULL,
+                embedding VECTOR NOT NULL,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+            )
+            """
+        )
+        conn.execute("ALTER TABLE knowledge_chunks ADD COLUMN IF NOT EXISTS index_run_id TEXT")
+        conn.execute("ALTER TABLE knowledge_chunks ADD COLUMN IF NOT EXISTS namespace TEXT")
+        conn.execute("ALTER TABLE knowledge_chunks ADD COLUMN IF NOT EXISTS is_test_data BOOLEAN NOT NULL DEFAULT false")
+        conn.execute("ALTER TABLE knowledge_chunks ADD COLUMN IF NOT EXISTS created_by TEXT")
+        conn.execute("ALTER TABLE knowledge_chunks ADD COLUMN IF NOT EXISTS embedding_dimension INTEGER")
+        cursor = conn.execute(
+            """
+            SELECT format_type(a.atttypid, a.atttypmod) AS column_type
+            FROM pg_attribute a
+            JOIN pg_class c ON c.oid = a.attrelid
+            JOIN pg_namespace n ON n.oid = c.relnamespace
+            WHERE n.nspname = 'public'
+              AND c.relname = 'knowledge_chunks'
+              AND a.attname = 'embedding'
+              AND a.attnum > 0
+              AND NOT a.attisdropped
+            """
+        )
+        row = cursor.fetchone()
+        column_type = str(row[0]) if row else ""
+        if column_type.startswith("vector("):
+            conn.execute("ALTER TABLE knowledge_chunks ALTER COLUMN embedding TYPE vector USING embedding::vector")
+        for sql in (
+            "CREATE INDEX IF NOT EXISTS idx_knowledge_chunks_shop_domain ON knowledge_chunks (shop_id, domain)",
+            "CREATE INDEX IF NOT EXISTS idx_knowledge_chunks_version ON knowledge_chunks (version)",
+            "CREATE INDEX IF NOT EXISTS idx_knowledge_chunks_content_hash ON knowledge_chunks (content_hash)",
+            "CREATE INDEX IF NOT EXISTS idx_knowledge_chunks_source_type ON knowledge_chunks (source_type)",
+            "CREATE INDEX IF NOT EXISTS idx_knowledge_chunks_shop_domain_version ON knowledge_chunks (shop_id, domain, version)",
+            "CREATE INDEX IF NOT EXISTS idx_knowledge_chunks_index_run_id ON knowledge_chunks (index_run_id)",
+            "CREATE INDEX IF NOT EXISTS idx_knowledge_chunks_namespace_source_type ON knowledge_chunks (namespace, source_type)",
+            "CREATE INDEX IF NOT EXISTS idx_knowledge_chunks_metadata_index_run_id ON knowledge_chunks ((metadata_json ->> 'index_run_id'))",
+        ):
+            conn.execute(sql)
+        self._schema_checked = True
 
 
 def _mask_pg_dsn(dsn: str) -> str:

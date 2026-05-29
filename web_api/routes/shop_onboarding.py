@@ -42,6 +42,16 @@ def create_onboarding_session(
         raise HTTPException(status_code=400, detail={"error": str(exc)}) from exc
 
 
+@router.get("/shops/onboarding/latest", response_model=OnboardingSessionResponse)
+def get_latest_onboarding_session(
+    service: ShopOnboardingService = Depends(get_shop_onboarding_service),
+) -> dict:
+    try:
+        return service.get_latest_session()
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail={"error": "session_not_found"}) from exc
+
+
 @router.get("/shops/onboarding/{session_id}", response_model=OnboardingSessionResponse)
 def get_onboarding_session(
     session_id: str,

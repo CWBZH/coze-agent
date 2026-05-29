@@ -9,6 +9,7 @@ import {
   disableAi,
   enableAi,
   getAiStatus,
+  getLatestOnboardingSession,
   getOnboardingChecklist,
   getOnboardingSession,
   getWorkerStatus,
@@ -227,24 +228,34 @@ export function ShopOnboarding() {
 
     async function restore() {
       const saved = loadSavedOnboardingState();
-      if (!saved) {
-        setStateLoaded(true);
-        return;
-      }
-      setShopName(saved.shopName || "");
-      setAccountName(saved.accountName || "");
+      setShopName(saved?.shopName || "");
+      setAccountName(saved?.accountName || "");
       try {
         let restoredSession: OnboardingSession | null = null;
-        if (saved.sessionId) {
-          restoredSession = await getOnboardingSession(saved.sessionId);
+        if (saved?.sessionId) {
+          try {
+            restoredSession = await getOnboardingSession(saved.sessionId);
+          } catch {
+            restoredSession = null;
+          }
+        }
+        if (!restoredSession) {
+          try {
+            restoredSession = await getLatestOnboardingSession();
+          } catch {
+            restoredSession = null;
+          }
+        }
+        if (restoredSession) {
           if (!cancelled) setSession(restoredSession);
+          if (!saved?.shopName && restoredSession.shop_name) setShopName(restoredSession.shop_name);
         }
 
-        const restoredShopId = restoredSession?.shop_id || saved.shopId || "";
+        const restoredShopId = restoredSession?.shop_id || saved?.shopId || "";
         if (isBusinessShopId(restoredShopId)) {
           const [nextCoverage, jobs, nextChecklist, nextAiStatus, nextWorkerStatus] = await Promise.all([
             getProductSyncCoverage(restoredShopId),
-            saved.syncJobId
+            saved?.syncJobId
               ? getProductSyncJob(restoredShopId, saved.syncJobId).then((job) => [job]).catch(() => listProductSyncJobs(restoredShopId, 1))
               : listProductSyncJobs(restoredShopId, 1),
             getOnboardingChecklist(restoredShopId),

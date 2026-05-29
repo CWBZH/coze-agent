@@ -277,8 +277,16 @@ export function getIndexJob(id: number) {
   return apiGet<KnowledgeIndexJob>(`/api/knowledge/index-jobs/${id}`);
 }
 
-export function runIndexJob(id: number, payload: IndexRunPayload = {}) {
-  return apiPost<IndexRunResponse>(`/api/knowledge/index-jobs/${id}/run`, payload);
+export function runIndexJob(
+  id: number,
+  payload: IndexRunPayload = { mode: "real", embedding_provider: "doubao", vector_store: "pgvector" }
+) {
+  return apiPost<IndexRunResponse>(`/api/knowledge/index-jobs/${id}/run`, {
+    mode: "real",
+    embedding_provider: "doubao",
+    vector_store: "pgvector",
+    ...payload,
+  });
 }
 
 export function retryIndexJob(id: number) {

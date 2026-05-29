@@ -21,7 +21,9 @@ CREATE TABLE IF NOT EXISTS knowledge_chunks (
     metadata_json JSONB NOT NULL DEFAULT '{}'::jsonb,
     embedding_model TEXT NOT NULL,
     embedding_dimension INTEGER NOT NULL,
-    embedding VECTOR(1024) NOT NULL,
+    -- Do not pin the dimension here. Production can switch embedding models
+    -- (for example text vs multimodal providers) without recreating the table.
+    embedding VECTOR NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
@@ -30,6 +32,7 @@ ALTER TABLE knowledge_chunks ADD COLUMN IF NOT EXISTS index_run_id TEXT;
 ALTER TABLE knowledge_chunks ADD COLUMN IF NOT EXISTS namespace TEXT;
 ALTER TABLE knowledge_chunks ADD COLUMN IF NOT EXISTS is_test_data BOOLEAN NOT NULL DEFAULT false;
 ALTER TABLE knowledge_chunks ADD COLUMN IF NOT EXISTS created_by TEXT;
+ALTER TABLE knowledge_chunks ALTER COLUMN embedding TYPE vector USING embedding::vector;
 
 CREATE INDEX IF NOT EXISTS idx_knowledge_chunks_shop_domain
     ON knowledge_chunks (shop_id, domain);

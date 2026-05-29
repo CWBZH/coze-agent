@@ -113,6 +113,10 @@ export function getOnboardingSession(sessionId: string) {
   return apiGet<OnboardingSession>(`/api/shops/onboarding/${encodeURIComponent(sessionId)}`);
 }
 
+export function getLatestOnboardingSession() {
+  return apiGet<OnboardingSession>("/api/shops/onboarding/latest");
+}
+
 export function submitSmsCode(sessionId: string, smsCode: string) {
   return apiPost<OnboardingSession>(`/api/shops/onboarding/${encodeURIComponent(sessionId)}/submit-sms-code`, {
     sms_code: smsCode

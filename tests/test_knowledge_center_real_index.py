@@ -1,5 +1,7 @@
 import json
 import sqlite3
+import sys
+import types
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -11,6 +13,7 @@ from web_api.services.knowledge_center_service import (
     _DoubaoEmbeddingClient,
     _FakeEmbeddingClient,
     _InMemoryVectorStore,
+    _PgVectorUpsertStore,
 )
 
 
@@ -271,6 +274,9 @@ def test_run_index_api_defaults_to_real_doubao_pgvector_and_reports_missing_conf
         assert payload["index_mode"] == "real"
         assert payload["error_type"] == "config_missing"
         assert payload["version"]["is_active"] == 0
+        error_summary = payload["index_job"].get("error_summary") or ""
+        assert "DOUBAO_EMBEDDING" in error_summary
+        assert "OLLAMA" not in error_summary
         assert "fastgpt" not in json.dumps(payload).lower()
     finally:
         app.dependency_overrides.clear()
@@ -356,3 +362,70 @@ def test_doubao_client_keeps_text_embedding_batch_endpoint(monkeypatch):
     assert [vector.vector for vector in vectors] == [[0.1, 0.2], [0.4, 0.5]]
     assert calls[0]["url"] == "https://ark.example/api/v3/embeddings"
     assert calls[0]["body"] == {"model": "doubao-embedding-text", "input": ["a", "b"]}
+
+
+def test_pgvector_schema_uses_flexible_vector_dimension():
+    schema = Path("deploy/sql/pgvector_knowledge_chunks.sql").read_text(encoding="utf-8")
+
+    assert "VECTOR(1024)" not in schema.upper()
+    assert "embedding VECTOR NOT NULL" in schema
+    assert "ALTER COLUMN embedding TYPE vector" in schema
+
+
+def test_pgvector_store_migrates_fixed_dimension_column(monkeypatch):
+    executed: list[tuple[str, tuple | None]] = []
+
+    class _Cursor:
+        def __init__(self, row=None):
+            self._row = row
+
+        def fetchone(self):
+            return self._row
+
+    class _Connection:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def execute(self, sql, params=None):
+            executed.append((" ".join(str(sql).split()), params))
+            if "format_type(a.atttypid" in str(sql):
+                return _Cursor(("vector(1024)",))
+            return _Cursor()
+
+    fake_psycopg = types.SimpleNamespace(
+        connect=lambda dsn: _Connection(),
+        types=types.SimpleNamespace(json=types.SimpleNamespace(Jsonb=lambda value: value)),
+    )
+    monkeypatch.setitem(sys.modules, "psycopg", fake_psycopg)
+    store = _PgVectorUpsertStore("postgresql://user:pass@127.0.0.1/db")
+
+    store.upsert(
+        type(
+            "Chunk",
+            (),
+            {
+                "validate": lambda self: [],
+                "chunk_id": "chunk-1",
+                "shop_id": "shop-1",
+                "domain": "product_catalog",
+                "source_type": "product",
+                "source_id": "goods-1",
+                "title": "title",
+                "content": "content",
+                "content_hash": "hash",
+                "version": "version-1",
+                "metadata": {},
+            },
+        )(),
+        [0.1, 0.2, 0.3],
+        embedding_model="doubao-embedding-vision-251215",
+    )
+
+    statements = "\n".join(sql for sql, _ in executed)
+    assert "ALTER TABLE knowledge_chunks ALTER COLUMN embedding TYPE vector USING embedding::vector" in statements
+    insert_params = executed[-1][1]
+    assert insert_params is not None
+    assert insert_params[-2] == 3

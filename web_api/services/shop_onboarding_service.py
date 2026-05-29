@@ -258,6 +258,27 @@ class ShopOnboardingService:
         finally:
             conn.close()
 
+    def get_latest_session(self) -> dict[str, Any]:
+        self.init_schema()
+        conn = self._connect()
+        try:
+            row = conn.execute(
+                """
+                SELECT *
+                FROM shop_login_sessions
+                WHERE status NOT IN ('cancelled')
+                ORDER BY
+                    updated_at DESC,
+                    created_at DESC
+                LIMIT 1
+                """
+            ).fetchone()
+            if row is None:
+                raise KeyError("latest_session_not_found")
+            return self._session_from_row(row)
+        finally:
+            conn.close()
+
     def _ensure_session_can_continue(self, session: dict[str, Any]) -> None:
         if session["status"] in {"cancelled", "succeeded"}:
             raise ValueError(f"session_{session['status']}")
