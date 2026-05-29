@@ -70,6 +70,7 @@ export function TracePanel({ trace }: TracePanelProps) {
 
 function TraceChunks({ trace }: { trace: Record<string, unknown> }) {
   const unavailable = trace.retrieved_chunks_unavailable === true;
+  const chunks = Array.isArray(trace.retrieved_chunks) ? trace.retrieved_chunks : [];
   return (
     <details className="trace-section" open>
       <summary>检索命中片段</summary>
@@ -79,9 +80,57 @@ function TraceChunks({ trace }: { trace: Record<string, unknown> }) {
           原因：{formatValue(trace.retrieved_chunks_unavailable_reason)}
         </div>
       ) : null}
-      <pre>{JSON.stringify(trace.retrieved_chunks ?? [], null, 2)}</pre>
+      {chunks.length === 0 ? (
+        <p className="muted">本次没有返回正式知识 chunk。若只看到临时商品上下文，说明真实 RAG 未命中或未启用。</p>
+      ) : (
+        <div className="trace-chunk-list">
+          {chunks.map((chunk, index) => (
+            <TraceChunkCard key={chunkKey(chunk, index)} chunk={chunk} index={index} />
+          ))}
+        </div>
+      )}
     </details>
   );
+}
+
+function TraceChunkCard({ chunk, index }: { chunk: unknown; index: number }) {
+  const data = asRecord(chunk);
+  const sourceType = String(data.source_type ?? data.source ?? "");
+  const isSessionContext = sourceType === "session_product_context";
+  const content = String(data.content ?? data.content_summary ?? data.approved_answer ?? "");
+  const metadata = asRecord(data.metadata);
+  return (
+    <article className={isSessionContext ? "trace-chunk-card trace-chunk-card-warning" : "trace-chunk-card"}>
+      <div className="trace-chunk-head">
+        <strong>#{index + 1} {String(data.domain ?? "unknown")}</strong>
+        <span>{isSessionContext ? "临时会话上下文" : "正式知识命中"}</span>
+      </div>
+      <dl className="kv-grid trace-chunk-meta">
+        <div><dt>chunk_id</dt><dd>{formatValue(data.chunk_id ?? data.id)}</dd></div>
+        <div><dt>score</dt><dd>{formatValue(data.score)}</dd></div>
+        <div><dt>source_type</dt><dd>{formatValue(sourceType)}</dd></div>
+        <div><dt>source_id</dt><dd>{formatValue(data.source_id)}</dd></div>
+        <div><dt>version</dt><dd>{formatValue(data.version)}</dd></div>
+        <div><dt>content_hash</dt><dd>{formatValue(data.content_hash)}</dd></div>
+      </dl>
+      <pre>{content}</pre>
+      {Object.keys(metadata).length ? (
+        <details>
+          <summary>metadata / 字段来源</summary>
+          <pre>{JSON.stringify(metadata, null, 2)}</pre>
+        </details>
+      ) : null}
+    </article>
+  );
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+
+function chunkKey(chunk: unknown, index: number) {
+  const data = asRecord(chunk);
+  return String(data.chunk_id ?? data.id ?? index);
 }
 
 function TraceSection({ title, value, json = false }: { title: string; value: unknown; json?: boolean }) {

@@ -330,6 +330,9 @@ def test_adapter_supplies_elapsed_latency_when_engine_trace_omits_it():
 
 def test_adapter_fills_missing_engine_chunks_from_readonly_debug_loader(monkeypatch):
     monkeypatch.setenv("AI_WORKFLOW_PGVECTOR_DSN", "postgresql://user:password@localhost:5432/db")
+    monkeypatch.setenv("WEB_KNOWLEDGE_EMBEDDING_PROVIDER", "doubao")
+    monkeypatch.setenv("DOUBAO_EMBEDDING_API_KEY", "configured")
+    monkeypatch.setenv("DOUBAO_EMBEDDING_MODEL", "doubao-embedding-vision-test")
 
     class FakeEngine:
         async def run(self, context):
@@ -387,6 +390,83 @@ def test_adapter_fills_missing_engine_chunks_from_readonly_debug_loader(monkeypa
     trace = response.json()["trace"]
     assert trace["retrieved_chunks"][0]["content"] == "price debug chunk"
     assert trace["retrieved_chunks_unavailable"] is False
+
+
+def test_real_rag_profile_uses_doubao_pgvector_without_ollama_env(monkeypatch):
+    for key in (
+        "AI_WORKFLOW_OLLAMA_BASE_URL",
+        "AI_WORKFLOW_EMBEDDING_MODEL",
+        "AI_WORKFLOW_LLM_BASE_URL",
+        "AI_WORKFLOW_LLM_MODEL",
+        "AI_WORKFLOW_LLM_API_KEY",
+    ):
+        monkeypatch.delenv(key, raising=False)
+    monkeypatch.setenv("WEB_API_PGVECTOR_DSN", "postgresql://user:password@localhost:5432/db")
+    monkeypatch.setenv("WEB_KNOWLEDGE_EMBEDDING_PROVIDER", "doubao")
+    monkeypatch.setenv("DOUBAO_EMBEDDING_API_KEY", "configured")
+    monkeypatch.setenv("DOUBAO_EMBEDDING_MODEL", "doubao-embedding-vision-test")
+
+    captured: list[WebEngineOptions] = []
+
+    class FakeEngine:
+        async def run(self, context):
+            del context
+            return SimpleNamespace(
+                action="reply",
+                reply_text="ok",
+                intent="product_basic",
+                reason="fake_engine",
+                trace={
+                    "selected_domain": "product_catalog",
+                    "rag_status": "hit",
+                    "rag_hit_count": 1,
+                    "retrieved_chunks": [
+                        {
+                            "chunk_id": "kc-product-1",
+                            "domain": "product_catalog",
+                            "source_type": "product",
+                            "source_id": "943269377110",
+                            "content": "价格：9.90",
+                            "score": 0.88,
+                        }
+                    ],
+                    "answer_generation_status": "ok",
+                    "guardrail_status": "safe",
+                },
+            )
+
+    def factory(options: WebEngineOptions):
+        captured.append(options)
+        return FakeEngine()
+
+    adapter = WebInternalEngineAdapter(engine_factory=factory)
+    service = LiveChatService(trace_service=TraceService(), engine_adapter=adapter)
+    client = _client(service)
+    session = client.post("/api/live-chat/sessions", json={"shop_id": "323473738"}).json()
+
+    response = client.post(
+        f"/api/live-chat/sessions/{session['session_id']}/messages",
+        json={
+            "shop_id": "323473738",
+            "message": "这个多少钱",
+            "metadata": {"goods_id": "943269377110", "goods_name": "test"},
+            "smoke_profile": "real_rag",
+            "no_send": True,
+        },
+    )
+
+    assert response.status_code == 200
+    assert captured and captured[0].use_real_pgvector is True
+    trace = response.json()["trace"]
+    assert trace["engine_adapter_status"] == "ok"
+    assert trace["provider_status"]["pgvector"] == "enabled"
+    assert trace["provider_status"]["embedding_provider"] == "doubao"
+    assert trace["provider_status"]["embedding"] == "enabled"
+    assert trace["provider_status"]["ollama"] == "disabled"
+    assert trace["calls_ollama"] is False
+    assert trace["connects_pgvector"] is True
+    assert trace["retrieved_chunks"][0]["content"] == "价格：9.90"
+    _assert_no_secret_values(response.text)
 
 
 def test_real_full_profile_forces_real_provider_flags_even_if_payload_flags_are_stale(monkeypatch):

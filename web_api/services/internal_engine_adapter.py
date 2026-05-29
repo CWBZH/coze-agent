@@ -127,13 +127,10 @@ class WebInternalEngineAdapter:
                 model=os.environ.get("AI_WORKFLOW_LLM_MODEL", ""),
                 api_key_env="AI_WORKFLOW_LLM_API_KEY",
             )
-        if options.use_real_pgvector and options.use_real_ollama:
+        if options.use_real_pgvector:
             rag_retriever = symbols["VectorStoreRAGRetriever"](
-                embedding_client=symbols["OllamaBgeM3EmbeddingClient"](
-                    base_url=os.environ.get("AI_WORKFLOW_OLLAMA_BASE_URL", ""),
-                    model=os.environ.get("AI_WORKFLOW_EMBEDDING_MODEL", ""),
-                ),
-                vector_store=symbols["PgVectorStore"](os.environ.get("AI_WORKFLOW_PGVECTOR_DSN", "")),
+                embedding_client=_build_rag_embedding_client(symbols),
+                vector_store=symbols["PgVectorStore"](_pgvector_dsn()),
                 top_k=max(1, int(options.rag_top_k or 3)),
             )
         return symbols["InternalWorkflowEngine"](
@@ -247,7 +244,7 @@ class WebInternalEngineAdapter:
             "answer_generation_status": str(base_trace.get("answer_generation_status") or base_trace.get("llm_answer_status") or ""),
             "guardrail_status": str(base_trace.get("guardrail_status") or "safe"),
             "calls_llm": bool(base_trace.get("calls_llm") or options.use_real_llm or options.use_real_intent_classifier or options.use_real_answer_generator),
-            "calls_ollama": bool(base_trace.get("calls_ollama") or options.use_real_ollama),
+            "calls_ollama": bool(base_trace.get("calls_ollama") or (options.use_real_ollama and _rag_embedding_provider() == "ollama")),
             "connects_pgvector": bool(base_trace.get("connects_pgvector") or options.use_real_pgvector),
             "sends_pdd": False,
             "no_send": True,
@@ -297,9 +294,22 @@ class WebInternalEngineAdapter:
     @staticmethod
     def _missing_environment(options: WebEngineOptions) -> list[str]:
         missing: list[str] = []
-        if options.use_real_pgvector and not os.environ.get("AI_WORKFLOW_PGVECTOR_DSN"):
-            missing.append("AI_WORKFLOW_PGVECTOR_DSN")
-        if options.use_real_ollama:
+        if options.use_real_pgvector and not _pgvector_dsn():
+            missing.append("WEB_API_PGVECTOR_DSN")
+        if options.use_real_pgvector:
+            provider = _rag_embedding_provider()
+            if provider in {"doubao", "ark"}:
+                if not _first_env("DOUBAO_EMBEDDING_API_KEY", "ARK_API_KEY"):
+                    missing.append("DOUBAO_EMBEDDING_API_KEY")
+                if not _first_env("DOUBAO_EMBEDDING_MODEL", "ARK_EMBEDDING_MODEL", "AI_WORKFLOW_EMBEDDING_MODEL"):
+                    missing.append("DOUBAO_EMBEDDING_MODEL")
+            elif provider == "ollama":
+                for key in ("AI_WORKFLOW_OLLAMA_BASE_URL", "AI_WORKFLOW_EMBEDDING_MODEL"):
+                    if not os.environ.get(key):
+                        missing.append(key)
+            else:
+                missing.append(f"UNSUPPORTED_EMBEDDING_PROVIDER:{provider}")
+        elif options.use_real_ollama:
             for key in ("AI_WORKFLOW_OLLAMA_BASE_URL", "AI_WORKFLOW_EMBEDDING_MODEL"):
                 if not os.environ.get(key):
                     missing.append(key)
@@ -364,6 +374,48 @@ class WebInternalEngineAdapter:
             "PgVectorStore": PgVectorStore,
             "action_value": action_value,
         }
+
+
+def _first_env(*keys: str) -> str:
+    for key in keys:
+        value = os.environ.get(key)
+        if value:
+            return value
+    return ""
+
+
+def _pgvector_dsn() -> str:
+    return _first_env("WEB_API_PGVECTOR_DSN", "AI_WORKFLOW_PGVECTOR_DSN")
+
+
+def _rag_embedding_provider() -> str:
+    provider = _first_env("WEB_KNOWLEDGE_EMBEDDING_PROVIDER", "AI_WORKFLOW_EMBEDDING_PROVIDER")
+    if provider:
+        return str(provider).strip().lower()
+    if _first_env("DOUBAO_EMBEDDING_API_KEY", "ARK_API_KEY"):
+        return "doubao"
+    if os.environ.get("AI_WORKFLOW_OLLAMA_BASE_URL"):
+        return "ollama"
+    return "doubao"
+
+
+def _build_rag_embedding_client(symbols: dict[str, Any]) -> Any:
+    provider = _rag_embedding_provider()
+    if provider in {"doubao", "ark"}:
+        from web_api.services.knowledge_center_service import _DoubaoEmbeddingClient
+
+        return _DoubaoEmbeddingClient(
+            base_url=_first_env("DOUBAO_EMBEDDING_BASE_URL", "ARK_BASE_URL") or "https://ark.cn-beijing.volces.com/api/v3",
+            api_key=_first_env("DOUBAO_EMBEDDING_API_KEY", "ARK_API_KEY"),
+            model=_first_env("DOUBAO_EMBEDDING_MODEL", "ARK_EMBEDDING_MODEL", "AI_WORKFLOW_EMBEDDING_MODEL"),
+            endpoint=_first_env("DOUBAO_EMBEDDING_ENDPOINT", "ARK_EMBEDDING_ENDPOINT") or "auto",
+        )
+    if provider == "ollama":
+        return symbols["OllamaBgeM3EmbeddingClient"](
+            base_url=os.environ.get("AI_WORKFLOW_OLLAMA_BASE_URL", ""),
+            model=os.environ.get("AI_WORKFLOW_EMBEDDING_MODEL", ""),
+        )
+    raise RuntimeError(f"unsupported embedding provider: {provider}")
 
 
 def _history_with_product_card(
@@ -498,12 +550,24 @@ def _profile_option_overrides(profile: str) -> dict[str, bool]:
 def _provider_status(status: str, real_engine_called: bool, options: WebEngineOptions, missing_env: list[str]) -> dict[str, str]:
     missing = set(missing_env)
     llm_missing = bool({"AI_WORKFLOW_LLM_BASE_URL", "AI_WORKFLOW_LLM_MODEL", "AI_WORKFLOW_LLM_API_KEY"} & missing)
-    pg_missing = "AI_WORKFLOW_PGVECTOR_DSN" in missing
+    pg_missing = bool({"WEB_API_PGVECTOR_DSN", "AI_WORKFLOW_PGVECTOR_DSN"} & missing)
     ollama_missing = bool({"AI_WORKFLOW_OLLAMA_BASE_URL", "AI_WORKFLOW_EMBEDDING_MODEL"} & missing)
+    embedding_provider = _rag_embedding_provider() if options.use_real_pgvector else ""
+    embedding_missing = bool(
+        {
+            "DOUBAO_EMBEDDING_API_KEY",
+            "DOUBAO_EMBEDDING_MODEL",
+            "AI_WORKFLOW_OLLAMA_BASE_URL",
+            "AI_WORKFLOW_EMBEDDING_MODEL",
+        }
+        & missing
+    )
     return {
         "real_engine": "ok" if real_engine_called else ("config_missing" if status == "config_missing" else "skipped"),
         "pgvector": "config_missing" if options.use_real_pgvector and pg_missing else ("enabled" if options.use_real_pgvector and real_engine_called else "disabled"),
-        "ollama": "config_missing" if options.use_real_ollama and ollama_missing else ("enabled" if options.use_real_ollama and real_engine_called else "disabled"),
+        "embedding_provider": embedding_provider or "disabled",
+        "embedding": "config_missing" if options.use_real_pgvector and embedding_missing else ("enabled" if options.use_real_pgvector and real_engine_called else "disabled"),
+        "ollama": "config_missing" if options.use_real_ollama and _rag_embedding_provider() == "ollama" and ollama_missing else ("enabled" if options.use_real_ollama and _rag_embedding_provider() == "ollama" and real_engine_called else "disabled"),
         "llm": "config_missing" if (options.use_real_llm or options.use_real_intent_classifier or options.use_real_answer_generator) and llm_missing else ("enabled" if (options.use_real_llm or options.use_real_intent_classifier or options.use_real_answer_generator) and real_engine_called else "disabled"),
         "intent_classifier": "config_missing" if options.use_real_intent_classifier and llm_missing else ("enabled" if options.use_real_intent_classifier and real_engine_called else "disabled"),
         "answer_generator": "config_missing" if options.use_real_answer_generator and llm_missing else ("enabled" if options.use_real_answer_generator and real_engine_called else "disabled"),
