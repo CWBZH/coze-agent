@@ -451,7 +451,7 @@ export function ShopOnboarding() {
     setLoading(true);
     setError(null);
     try {
-      const job = await createProductSyncJob(activeShopId, 10);
+      const job = await createProductSyncJob(activeShopId);
       setSyncJob(job);
       setCoverage(await getProductSyncCoverage(activeShopId));
       await refreshReadiness();
@@ -753,7 +753,7 @@ export function ShopOnboarding() {
           <>
             <div className="inline-form">
               <button type="button" onClick={handleStartSync} disabled={loading || !businessShopIdReady}>
-                开始同步商品（最多 10 个）
+                开始全量同步商品
               </button>
               {syncJob && (
                 <>
@@ -832,7 +832,7 @@ export function ShopOnboarding() {
         <div className="panel-header">
           <div>
             <h3>5. 接入验收</h3>
-            <p className="muted">启用 AI 前必须确认授权、商品同步、试聊验证和人工锁管理状态。默认不会调用真实 LLM/Ollama/pgvector。</p>
+            <p className="muted">启用 AI 前必须确认授权、商品同步、试聊验证和人工锁管理状态。验收调试会调用已配置的 LLM、Embedding 和 pgvector，但仍保持 no-send。</p>
           </div>
           <button type="button" onClick={refreshReadiness} disabled={!businessShopIdReady || loading}>刷新验收状态</button>
         </div>

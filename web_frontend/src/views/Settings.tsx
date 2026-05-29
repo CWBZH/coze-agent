@@ -43,14 +43,14 @@ export function Settings() {
         <div className="status-list">
           <StatusBadge tone="success">InternalEngine 就绪</StatusBadge>
           <StatusBadge tone={statusTone(providerStatus?.providers.pgvector?.status)}>{`PgVector ${providerStatus?.providers.pgvector?.status ?? "unknown"}`}</StatusBadge>
-          <StatusBadge tone={statusTone(providerStatus?.providers.ollama?.status)}>{`Ollama ${providerStatus?.providers.ollama?.status ?? "unknown"}`}</StatusBadge>
+          <StatusBadge tone={statusTone(providerStatus?.providers.embedding?.status)}>{`Embedding ${providerStatus?.providers.embedding?.status ?? "unknown"}`}</StatusBadge>
           <StatusBadge tone={statusTone(providerStatus?.providers.llm?.status)}>{`LLM ${providerStatus?.providers.llm?.status ?? "unknown"}`}</StatusBadge>
           <StatusBadge tone="info">no-send 已启用</StatusBadge>
           <StatusBadge tone="warning">PDD 真实发送已关闭</StatusBadge>
         </div>
         <div className="detail-grid">
           <ProviderDetail title="PgVector" data={providerStatus?.providers.pgvector?.safe_display} />
-          <ProviderDetail title="Ollama" data={providerStatus?.providers.ollama?.safe_display} />
+          <ProviderDetail title="Embedding" data={providerStatus?.providers.embedding?.safe_display} />
           <ProviderDetail title="LLM" data={providerStatus?.providers.llm?.safe_display} />
         </div>
       </section>

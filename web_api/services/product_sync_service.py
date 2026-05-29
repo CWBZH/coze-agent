@@ -226,7 +226,8 @@ class ProductSyncService:
     def _fetch_products(self, manager: Any, *, limit: int | None, retry_goods: list[str] | None) -> list[dict[str, Any]]:
         if retry_goods:
             return [{"goods_id": goods_id, "goods_name": ""} for goods_id in retry_goods]
-        first = manager.get_product_list(page=1, size=min(limit or 50, 50))
+        page_size = min(limit or 50, 50)
+        first = manager.get_product_list(page=1, size=page_size)
         if not first or not first.get("success"):
             raise RuntimeError(first.get("error_msg") if isinstance(first, dict) else "product_list_failed")
         products = list(first.get("products") or [])
@@ -235,13 +236,19 @@ class ProductSyncService:
             raise RuntimeError("product_list_parse_empty")
         if limit:
             return products[:limit]
-        total = int(first.get("total") or len(products))
         page = 2
-        while len(products) < total:
-            page_result = manager.get_product_list(page=page, size=50)
-            if not page_result or not page_result.get("success") or not page_result.get("products"):
+        while True:
+            if reported_total > 0 and len(products) >= reported_total:
                 break
-            products.extend(page_result.get("products") or [])
+            page_result = manager.get_product_list(page=page, size=50)
+            if not page_result or not page_result.get("success"):
+                break
+            next_products = list(page_result.get("products") or [])
+            if not next_products:
+                break
+            products.extend(next_products)
+            if not reported_total:
+                reported_total = int(page_result.get("total") or 0)
             page += 1
         return products
 

@@ -132,7 +132,7 @@ export function HumanLocks() {
           <StatusBadge tone="warning">PDD 真实发送已关闭</StatusBadge>
         </div>
         <div className="warning-banner">
-          解除操作只修改本地 pending_human 状态，不调用 LLM/Ollama/pgvector，也不会向买家发送消息。批量解除必须先确认当前店铺。
+          解除操作只修改本地 pending_human 状态，不调用 LLM/Embedding/pgvector，也不会向买家发送消息。批量解除必须先确认当前店铺。
         </div>
         <div className="human-lock-controls">
           <label>

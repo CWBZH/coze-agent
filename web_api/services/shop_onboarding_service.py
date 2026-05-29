@@ -767,7 +767,7 @@ class ShopOnboardingService:
             "服务配置可用",
             "passed",
             True,
-            "默认检查不调用 LLM/Ollama/pgvector；真实服务状态请查看服务状态页",
+            "默认检查不调用 LLM/Embedding/pgvector；真实服务状态请查看服务状态页",
         )
 
     def _check_human_lock_management(self, shop_id: str) -> dict[str, Any]:
@@ -892,7 +892,7 @@ class ShopOnboardingService:
             "服务配置可用",
             "passed",
             True,
-            "默认检查不调用 LLM/Ollama/pgvector；真实服务状态请查看服务状态页",
+            "默认检查不调用 LLM/Embedding/pgvector；真实服务状态请查看服务状态页",
         )
 
     def _check_human_lock_management(self, shop_id: str) -> dict[str, Any]:

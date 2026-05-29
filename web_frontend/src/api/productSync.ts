@@ -46,12 +46,13 @@ export type ProductSyncCoverage = {
   warning?: string | null;
 };
 
-export function createProductSyncJob(shopId: string, limit = 10) {
-  return apiPost<ProductSyncJob>(`/api/shops/${encodeURIComponent(shopId)}/product-sync/jobs`, {
+export function createProductSyncJob(shopId: string, limit?: number | null) {
+  const payload: { mode: string; operator: string; limit?: number } = {
     mode: "full",
-    operator: "local_admin",
-    limit
-  });
+    operator: "local_admin"
+  };
+  if (typeof limit === "number" && limit > 0) payload.limit = limit;
+  return apiPost<ProductSyncJob>(`/api/shops/${encodeURIComponent(shopId)}/product-sync/jobs`, payload);
 }
 
 export function listProductSyncJobs(shopId: string, limit = 20) {

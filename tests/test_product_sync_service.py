@@ -45,6 +45,43 @@ class FakeProductManager:
         }
 
 
+class FakePagedProductManager:
+    def __init__(self):
+        self.pages: list[tuple[int, int]] = []
+
+    def get_product_list(self, page=1, size=50):
+        self.pages.append((page, size))
+        if page == 1:
+            return {
+                "success": True,
+                "total": 3,
+                "products": [
+                    {"goods_id": "goods-1", "goods_name": "Product 1", "price": "19.70"},
+                    {"goods_id": "goods-2", "goods_name": "Product 2", "price": "29.90"},
+                ],
+            }
+        if page == 2:
+            return {
+                "success": True,
+                "total": 3,
+                "products": [
+                    {"goods_id": "goods-3", "goods_name": "Product 3", "price": "39.90"},
+                ],
+            }
+        return {"success": True, "total": 3, "products": []}
+
+    def get_product_detail(self, goods_id):
+        return {
+            "success": True,
+            "product_info": {
+                "goods_id": goods_id,
+                "goods_name": f"Detail {goods_id}",
+                "specifications": ["100ml"],
+                "usage": "Use safely.",
+            },
+        }
+
+
 def _service(db_path: Path, manager: FakeProductManager | None = None, auth_ok=True):
     return ProductSyncService(
         db_path=db_path,
@@ -75,6 +112,20 @@ def test_product_sync_writes_product_knowledge_and_coverage(tmp_path):
         assert raw["list_item"]["goods_id"] == "goods-1"
     finally:
         conn.close()
+
+
+def test_product_sync_without_limit_fetches_all_pages(tmp_path):
+    db_path = tmp_path / "sync.db"
+    manager = FakePagedProductManager()
+    service = _service(db_path, manager)
+
+    job = service.create_job("565617")
+
+    assert job["status"] == "succeeded"
+    assert job["total_count"] == 3
+    assert job["succeeded_count"] == 3
+    assert manager.pages[:2] == [(1, 50), (2, 50)]
+    assert service.coverage("565617")["total"] == 3
 
 
 def test_product_sync_partial_failure_and_retry_failed_items(tmp_path):

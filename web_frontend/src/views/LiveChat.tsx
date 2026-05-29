@@ -190,7 +190,7 @@ export function LiveChat() {
         ) : null}
         {config.smokeProfile === "real_full" ? (
           <div className="warning-banner">
-            real_full 会调用真实 LLM/Ollama/pgvector，但仍为 no-send，不会发送 PDD。
+            real_full 会调用真实 LLM、Embedding 和 pgvector，但仍为 no-send，不会发送 PDD。
           </div>
         ) : null}
         <label>
@@ -228,7 +228,7 @@ export function LiveChat() {
         <Toggle label="显示 Trace" checked={config.showTrace} onChange={(value) => setConfig({ ...config, showTrace: value })} />
         <Toggle label="使用真实 InternalEngine" checked={config.useRealEngine} onChange={(value) => setConfig({ ...config, useRealEngine: value })} />
         <Toggle label="使用真实 LLM" checked={config.useRealLlm} onChange={(value) => setConfig({ ...config, useRealLlm: value })} />
-        <Toggle label="使用真实 Ollama" checked={config.useRealOllama} onChange={(value) => setConfig({ ...config, useRealOllama: value })} />
+        <Toggle label="使用真实 Embedding 服务" checked={config.useRealOllama} onChange={(value) => setConfig({ ...config, useRealOllama: value })} />
         <Toggle label="使用真实 pgvector" checked={config.useRealPgvector} onChange={(value) => setConfig({ ...config, useRealPgvector: value })} />
         <Toggle label="使用真实意图分类器" checked={config.useRealIntentClassifier} onChange={(value) => setConfig({ ...config, useRealIntentClassifier: value })} />
         <Toggle label="使用真实回答生成器" checked={config.useRealAnswerGenerator} onChange={(value) => setConfig({ ...config, useRealAnswerGenerator: value })} />
@@ -239,7 +239,7 @@ export function LiveChat() {
         <div className="status-list">
           <StatusBadge tone="success">InternalEngine 就绪</StatusBadge>
           <StatusBadge tone={statusTone(providerStatus?.providers.pgvector?.status)}>{`PgVector ${providerStatus?.providers.pgvector?.status ?? "unknown"}`}</StatusBadge>
-          <StatusBadge tone={statusTone(providerStatus?.providers.ollama?.status)}>{`Ollama ${providerStatus?.providers.ollama?.status ?? "unknown"}`}</StatusBadge>
+          <StatusBadge tone={statusTone(providerStatus?.providers.embedding?.status)}>{`Embedding ${providerStatus?.providers.embedding?.status ?? "unknown"}`}</StatusBadge>
           <StatusBadge tone={statusTone(providerStatus?.providers.llm?.status)}>{`LLM ${providerStatus?.providers.llm?.status ?? "unknown"}`}</StatusBadge>
           <StatusBadge tone="info">no-send 已启用</StatusBadge>
           <StatusBadge tone="warning">PDD 真实发送已关闭</StatusBadge>
@@ -330,7 +330,7 @@ function profileConfig(profile: string, current: LiveChatConfig): LiveChatConfig
       ...base,
       useRealEngine: true,
       useRealPgvector: true,
-      useRealOllama: true,
+      useRealOllama: false,
       useRealLlm: false,
       useRealIntentClassifier: false,
       useRealAnswerGenerator: false
@@ -362,7 +362,7 @@ function profileConfig(profile: string, current: LiveChatConfig): LiveChatConfig
     ...base,
     useRealEngine: true,
     useRealPgvector: true,
-    useRealOllama: true,
+    useRealOllama: false,
     useRealLlm: true,
     useRealIntentClassifier: true,
     useRealAnswerGenerator: true
@@ -372,7 +372,7 @@ function profileConfig(profile: string, current: LiveChatConfig): LiveChatConfig
 function providerSummary(trace: Record<string, unknown>) {
   const status = trace.provider_status as Record<string, string> | undefined;
   if (!status) return "服务状态未知";
-  return `LLM ${status.llm ?? "unknown"} · 回答 ${status.answer_generator ?? "unknown"} · RAG ${status.pgvector ?? "unknown"}/${status.ollama ?? "unknown"}`;
+  return `LLM ${status.llm ?? "unknown"} · 回答 ${status.answer_generator ?? "unknown"} · RAG ${status.pgvector ?? "unknown"}/${status.embedding ?? status.embedding_provider ?? status.ollama ?? "unknown"}`;
 }
 
 function statusTone(status?: string): "success" | "warning" | "danger" | "info" | "neutral" {
@@ -385,5 +385,5 @@ function statusTone(status?: string): "success" | "warning" | "danger" | "info" 
 
 function hasMissingProvider(status: ProviderStatus | null) {
   if (!status) return true;
-  return ["pgvector", "ollama", "llm"].some((name) => status.providers[name]?.status !== "configured");
+  return ["pgvector", "embedding", "llm"].some((name) => status.providers[name]?.status !== "configured");
 }
