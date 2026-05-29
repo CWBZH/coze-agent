@@ -91,3 +91,53 @@ def test_schema_migrations_upgrade_legacy_sqlite_idempotently(tmp_path):
     assert warning is None
     assert len(shops) == 1
     assert shops[0].shop_id == "565617"
+
+
+def test_schema_migrations_backfill_real_shops_from_valid_shop_auth(tmp_path):
+    db_path = tmp_path / "auth_backfill.db"
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.executescript(
+            """
+            CREATE TABLE channels (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                channel_name TEXT NOT NULL UNIQUE
+            );
+            CREATE TABLE shops (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                channel_id INTEGER NOT NULL,
+                shop_id TEXT NOT NULL,
+                shop_name TEXT NOT NULL,
+                UNIQUE(channel_id, shop_id)
+            );
+            CREATE TABLE shop_auth (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                shop_id TEXT NOT NULL,
+                platform TEXT NOT NULL DEFAULT 'pdd',
+                account_name TEXT,
+                auth_status TEXT NOT NULL,
+                cookie_encrypted TEXT,
+                token_encrypted TEXT,
+                safe_display TEXT,
+                last_login_at TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                UNIQUE(shop_id, platform)
+            );
+            INSERT INTO shop_auth
+                (shop_id, platform, account_name, auth_status, cookie_encrypted, safe_display, created_at, updated_at)
+            VALUES
+                ('565617', 'pdd', 'seller', 'valid', 'encrypted-only', '135***888', '2026-05-29T00:00:00+00:00', '2026-05-29T00:00:00+00:00'),
+                ('remote-login-session', 'pdd', 'seller', 'valid', 'encrypted-only', '135***888', '2026-05-29T00:00:00+00:00', '2026-05-29T00:00:00+00:00');
+            """
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    SchemaMigrationService(db_path).migrate()
+    SchemaMigrationService(db_path).migrate()
+
+    shops, warning = ShopService(ReadOnlySqlite(db_path)).list_shops()
+    assert warning is None
+    assert [shop.shop_id for shop in shops] == ["565617"]

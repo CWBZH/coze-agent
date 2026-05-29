@@ -1,6 +1,7 @@
 from functools import lru_cache
 
 from web_api.services.ai_settings_service import AiSettingsService
+from web_api.services.dashboard_service import DashboardService
 from web_api.services.human_lock_service import HumanLockService
 from web_api.services.knowledge_center_service import KnowledgeCenterService
 from web_api.services.live_chat_service import LiveChatService
@@ -27,6 +28,12 @@ def get_schema_migration_service() -> SchemaMigrationService:
 def get_shop_service() -> ShopService:
     get_schema_migration_service()
     return ShopService()
+
+
+@lru_cache
+def get_dashboard_service() -> DashboardService:
+    get_schema_migration_service()
+    return DashboardService()
 
 
 @lru_cache

@@ -121,7 +121,9 @@ def test_shop_detail_counts_real_product_knowledge(tmp_path):
         payload = response.json()
         assert payload["shop_id"] == "shop-real-1"
         assert payload["product_knowledge_count"] == 1
-        assert payload["sop_coverage"]["logistics_policy"] == "mock"
+        assert payload["sop_coverage"]["product_catalog"] == "available"
+        assert payload["sop_coverage"]["logistics_policy"] == "missing"
+        assert payload["rag_index_status"]["status"] != "mock_until_pgvector_api"
     finally:
         _clear_overrides()
 
