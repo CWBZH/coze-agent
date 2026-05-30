@@ -100,6 +100,8 @@ def _extract_product_card_context(message: Dict[str, Any], buyer_text: Any) -> D
             parsed = {}
         if isinstance(parsed, dict):
             payload.update(parsed)
+    elif isinstance(buyer_text, str):
+        payload.update(_extract_product_anchor_from_text(buyer_text))
 
     raw_data = payload.get("raw_data")
     if isinstance(raw_data, str) and raw_data.strip().startswith("{"):
@@ -150,16 +152,16 @@ def _extract_product_anchor_from_text(content: Any) -> Dict[str, Any]:
     if goods_id:
         result["goods_id"] = goods_id.group(1).strip()
     goods_name = re.search(
-        r"(?:商品|商品名称|goods[_\s-]*name|goodsName|Product)\s*[:：=]\s*([^，,。;\n\r]{2,80})",
+        r"(?:商品|商品名称|goods[_\s-]*name|goodsName|Product)\s*[:：=]\s*([^，,。;；\n\r]{2,80})",
         text,
         flags=re.IGNORECASE,
     )
     if goods_name:
         result["goods_name"] = goods_name.group(1).strip()
-    goods_price = re.search(r"(?:价格|价钱|goodsPrice|Price)\s*[:：=]\s*([^，,。;\n\r]{1,40})", text, flags=re.IGNORECASE)
+    goods_price = re.search(r"(?:价格|价钱|goodsPrice|Price)\s*[:：=]\s*([^，,。;；\n\r]{1,40})", text, flags=re.IGNORECASE)
     if goods_price:
         result["goods_price"] = goods_price.group(1).strip()
-    spec = re.search(r"(?:规格|spec)\s*[:：=]\s*([^，,。;\n\r]{1,80})", text, flags=re.IGNORECASE)
+    spec = re.search(r"(?:规格|spec)\s*[:：=]\s*([^，,。;；\n\r]{1,80})", text, flags=re.IGNORECASE)
     if spec:
         result["spec"] = spec.group(1).strip()
     return result

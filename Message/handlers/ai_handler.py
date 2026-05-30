@@ -119,6 +119,29 @@ class AIReplyHandler(BaseHandler):
             "content_hash": str(content_hash or ""),
         }
 
+    def _build_pipeline_message(self, query: str, context: Context) -> Dict[str, Any]:
+        kwargs = getattr(context, "kwargs", None)
+        context_type = getattr(context, "type", None)
+        message_type = (
+            self._get_context_value(context, "message_type")
+            or (context_type.value if hasattr(context_type, "value") else str(context_type or ""))
+            or "text"
+        )
+        message: Dict[str, Any] = {
+            "buyer_id": str(self._get_context_value(context, "from_uid") or ""),
+            "shop_platform_id": str(self._get_context_value(context, "shop_id") or ""),
+            "content": query,
+            "user_id": str(self._get_context_value(context, "user_id") or ""),
+            "message_type": str(message_type or "text"),
+        }
+        for key in ("goods_id", "raw_data", "source_message_id", "queue_name"):
+            value = self._get_context_value(context, key)
+            if value not in (None, ""):
+                message[key] = value
+        if kwargs is not None:
+            message["context_type"] = context_type.value if hasattr(context_type, "value") else str(context_type or "")
+        return message
+
     @staticmethod
     def _trace_fields(trace: Dict[str, Any], **extra: Any) -> str:
         fields = {
@@ -664,13 +687,7 @@ class AIReplyHandler(BaseHandler):
         pipeline = self._get_pipeline()
         if pipeline:
             try:
-                kwargs = context.kwargs
-                message = {
-                    "buyer_id": str(getattr(kwargs, 'from_uid', '')),
-                    "shop_platform_id": str(getattr(kwargs, 'shop_id', '')),
-                    "content": query,
-                    "user_id": str(getattr(kwargs, 'user_id', '')),
-                }
+                message = self._build_pipeline_message(query, context)
                 self.logger.debug(
                     "event=pdd.pipeline.started "
                     + self._trace_fields(

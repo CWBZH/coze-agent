@@ -4,7 +4,7 @@ import time
 from types import SimpleNamespace
 
 import Session.session_manager as session_module
-from bridge.context import ContextType
+from bridge.context import Context, ContextType
 from Message.core.pipeline import MessagePipeline
 from Message.core.queue import queue_manager
 from Message.handlers.ai_handler import AIReplyHandler
@@ -178,6 +178,70 @@ class RecordingWorkflowEngine:
             reason="test",
             trace=dict(self.trace),
         )
+
+
+def test_ai_reply_handler_passes_pdd_context_metadata_to_pipeline():
+    class CapturingPipeline:
+        def __init__(self):
+            self.message = None
+            self.kwargs = None
+
+        async def process(self, message, **kwargs):
+            self.message = message
+            self.kwargs = kwargs
+            return {"action": "reply", "text": "ok", "session_id": "s1", "source": "internal"}
+
+    async def scenario():
+        pipeline = CapturingPipeline()
+        handler = AIReplyHandler()
+        handler._pipeline = pipeline
+        raw_data = {
+            "message": {
+                "info": {
+                    "data": {
+                        "goodsID": "773044930700",
+                        "goodsName": "YACN牡丹花素颜霜",
+                        "goodsPrice": "19.7",
+                    }
+                }
+            }
+        }
+        context = Context.create_pinduoduo_context(
+            content=json.dumps(
+                {
+                    "goods_id": "773044930700",
+                    "goods_name": "YACN牡丹花素颜霜",
+                    "goods_price": "19.7",
+                },
+                ensure_ascii=False,
+            ),
+            msg_id="msg-1",
+            from_uid="buyer-1",
+            user_msg_type=ContextType.GOODS_INQUIRY,
+            shop_id="565617",
+            user_id="713439",
+            goods_id="773044930700",
+            raw_data=raw_data,
+            source_message_id="msg-1",
+            queue_name="pdd_565617",
+        )
+
+        reply = await handler._get_ai_reply(
+            "商品：YACN牡丹花素颜霜；价格：19.7；商品ID：773044930700",
+            context,
+            {"trace_id": "trace-1", "queue_message_id": "queue-1"},
+        )
+
+        assert reply == "ok"
+        assert pipeline.message["content"] == "商品：YACN牡丹花素颜霜；价格：19.7；商品ID：773044930700"
+        assert pipeline.message["message_type"] == "goods_inquiry"
+        assert pipeline.message["goods_id"] == "773044930700"
+        assert pipeline.message["raw_data"] == raw_data
+        assert pipeline.kwargs["trace_id"] == "trace-1"
+        assert pipeline.kwargs["source_message_id"] == "msg-1"
+        assert pipeline.kwargs["queue_message_id"] == "queue-1"
+
+    asyncio.run(scenario())
 
 
 class FakeConfigDb:
@@ -851,6 +915,38 @@ def test_pipeline_inherits_product_context_across_messages_and_isolates_sessions
         assert workflow.contexts[1].metadata["product_context_age_messages"] == 1
         assert workflow.contexts[1].history
         assert workflow.contexts[2].goods_context in ({}, None)
+
+    asyncio.run(scenario())
+
+
+def test_pipeline_resolves_product_context_from_textual_product_card():
+    async def scenario():
+        session_mgr = FakePipelineSessionManager()
+        workflow = RecordingWorkflowEngine(reply="safe reply")
+        pipeline = MessagePipeline(
+            FakePipelineDb(),
+            session_mgr,
+            FakePipelineKeywordHandler(),
+            FakePipelineFastGpt(),
+            None,
+            workflow_engine=workflow,
+        )
+
+        await pipeline.process(
+            {
+                "buyer_id": "buyer-1",
+                "shop_platform_id": "shop-1",
+                "content": "商品：YACN牡丹花素颜霜；价格：19.7；商品ID：773044930700",
+                "user_id": "user-1",
+                "message_type": "goods_inquiry",
+            }
+        )
+
+        goods_context = workflow.contexts[0].goods_context
+        assert goods_context["goods_id"] == "773044930700"
+        assert goods_context["goods_name"] == "YACN牡丹花素颜霜"
+        assert goods_context["goods_price"] == "19.7"
+        assert workflow.contexts[0].metadata["product_context"]["goods_id"] == "773044930700"
 
     asyncio.run(scenario())
 
