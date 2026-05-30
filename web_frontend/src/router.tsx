@@ -10,7 +10,6 @@ import { Products } from "./views/Products";
 import { Settings } from "./views/Settings";
 import { ShopOnboarding } from "./views/ShopOnboarding";
 import { Shops } from "./views/Shops";
-import { SOP } from "./views/SOP";
 import { TraceLogs } from "./views/TraceLogs";
 
 export const router = createBrowserRouter([
@@ -24,7 +23,7 @@ export const router = createBrowserRouter([
       { path: "shops", element: <Shops /> },
       { path: "ai-settings", element: <AISettings /> },
       { path: "products", element: <Products /> },
-      { path: "sop", element: <SOP /> },
+      { path: "sop", element: <Navigate to="/knowledge-center" replace /> },
       { path: "knowledge-center", element: <KnowledgeCenter /> },
       { path: "human-locks", element: <HumanLocks /> },
       { path: "live-chat", element: <LiveChat /> },

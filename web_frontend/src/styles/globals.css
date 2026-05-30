@@ -194,12 +194,6 @@ pre {
   gap: 18px;
 }
 
-.sop-layout {
-  display: grid;
-  grid-template-columns: 230px minmax(0, 1fr) 380px;
-  gap: 18px;
-}
-
 .live-chat-layout {
   display: grid;
   grid-template-columns: 270px minmax(0, 1fr) 420px;
@@ -790,14 +784,6 @@ pre {
 .warning-text {
   color: #b45309;
   font-weight: 600;
-}
-
-.domain-list button {
-  display: block;
-  width: 100%;
-  margin: 8px 0;
-  background: #eef2ff;
-  color: #1e40af;
 }
 
 .chat-panel {
