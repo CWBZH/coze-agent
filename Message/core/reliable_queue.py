@@ -306,7 +306,12 @@ class ReliableQueueStore:
             rows = conn.execute(
                 """
                 SELECT * FROM pdd_reply_outbox
-                WHERE status IN ('reply_send_failed', 'reply_delivery_unknown')
+                WHERE status IN (
+                    'reply_send_failed',
+                    'reply_delivery_unknown',
+                    'transfer_send_failed',
+                    'transfer_delivery_unknown'
+                )
                   AND retry_count < max_retries
                   AND next_retry_at <= ?
                 ORDER BY updated_at ASC
@@ -330,7 +335,12 @@ class ReliableQueueStore:
             rows = conn.execute(
                 """
                 SELECT * FROM pdd_reply_outbox
-                WHERE status IN ('reply_send_failed', 'reply_delivery_unknown')
+                WHERE status IN (
+                    'reply_send_failed',
+                    'reply_delivery_unknown',
+                    'transfer_send_failed',
+                    'transfer_delivery_unknown'
+                )
                   AND retry_count < max_retries
                   AND next_retry_at <= ?
                 ORDER BY updated_at ASC
@@ -348,7 +358,12 @@ class ReliableQueueStore:
                         last_attempt_at = ?,
                         updated_at = ?
                     WHERE id IN ({placeholders})
-                      AND status IN ('reply_send_failed', 'reply_delivery_unknown')
+                      AND status IN (
+                          'reply_send_failed',
+                          'reply_delivery_unknown',
+                          'transfer_send_failed',
+                          'transfer_delivery_unknown'
+                      )
                     """,
                     (selected_now, selected_now, *row_ids),
                 )

@@ -303,7 +303,9 @@ def test_outbox_worker_blocks_repeated_40013(tmp_path, monkeypatch):
     asyncio.run(scenario())
 
 
-def test_outbox_worker_does_not_retry_transfer_send_failed_by_default(tmp_path):
+def test_outbox_worker_retries_transfer_send_failed_and_blocks_repeated_40013(tmp_path, monkeypatch):
+    monkeypatch.setenv("PDD_SENDING_ENABLED", "true")
+
     async def scenario():
         store = ReliableQueueStore(tmp_path / "queue.db")
         outbox = store.create_outbox(
@@ -319,16 +321,19 @@ def test_outbox_worker_does_not_retry_transfer_send_failed_by_default(tmp_path):
         )
         store.mark_outbox_failed(outbox.outbox_id, pdd_error_code="40013")
 
-        class FailIfCalled:
+        class FailingSender:
             def __init__(self, shop_id, user_id):
-                raise AssertionError("transfer send failures must not be retried as normal replies")
+                pass
 
-        worker = OutboxWorker(store=store, sender_factory=FailIfCalled)
+            def send_text(self, buyer_id, reply_text):
+                return {"success": True, "result": {"result": "fail", "error_code": 40013}}
+
+        worker = OutboxWorker(store=store, sender_factory=FailingSender)
         summary = await worker.run_due_retries(now=store._now() + 3600)
 
-        assert summary["retried"] == 0
-        assert summary["skipped"] == 0
-        assert store.get_outbox(outbox.outbox_id)["status"] == "transfer_send_failed"
+        assert summary["retried"] == 1
+        assert summary["failed"] == 1
+        assert store.get_outbox(outbox.outbox_id)["status"] == "blocked_by_platform_policy"
 
     asyncio.run(scenario())
 
