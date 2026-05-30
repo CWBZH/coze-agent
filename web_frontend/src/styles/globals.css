@@ -1253,7 +1253,7 @@ pre {
 
 .observability-page {
   display: grid;
-  gap: 18px;
+  gap: 14px;
 }
 
 .observability-toolbar {
@@ -1263,19 +1263,14 @@ pre {
   align-items: center;
 }
 
-.observability-layout {
-  display: grid;
-  grid-template-columns: 380px minmax(0, 1fr);
-  gap: 18px;
-  align-items: start;
+.observability-toolbar.compact {
+  grid-template-columns: minmax(220px, 1fr) 180px minmax(360px, 1.35fr) auto auto;
 }
 
-.observability-conversations,
 .observability-detail {
   min-width: 0;
 }
 
-.observability-conversation-list,
 .observability-message-list,
 .observability-node-list,
 .observability-chunk-list {
@@ -1283,40 +1278,7 @@ pre {
   gap: 12px;
 }
 
-.observability-conversation-list {
-  max-height: calc(100vh - 310px);
-  overflow: auto;
-  padding-right: 2px;
-}
-
-.conversation-row {
-  display: grid;
-  width: 100%;
-  gap: 8px;
-  border: 1px solid #e2e8f0;
-  border-radius: 10px;
-  background: #fff;
-  color: #172033;
-  padding: 12px;
-  text-align: left;
-}
-
-.conversation-row:hover,
-.conversation-row.selected {
-  border-color: #93c5fd;
-  background: #f8fbff;
-}
-
-.conversation-row p {
-  margin: 0;
-  color: #334155;
-  line-height: 1.45;
-}
-
-.conversation-row-head,
-.conversation-row-meta,
 .observability-selected-head,
-.observability-message-header,
 .observability-chunk header {
   display: flex;
   flex-wrap: wrap;
@@ -1325,21 +1287,46 @@ pre {
   justify-content: space-between;
 }
 
-.conversation-row-head strong,
-.observability-message-header strong,
 .observability-selected-head h3 {
   overflow-wrap: anywhere;
 }
 
-.conversation-row-meta {
+.observability-selected-strip,
+.observability-message-main,
+.observability-message-preview {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  align-items: center;
+}
+
+.observability-selected-strip {
+  border-top: 1px solid #edf2f7;
+  color: #64748b;
+  font-size: 13px;
+  margin-top: 12px;
+  padding-top: 10px;
+}
+
+.observability-message-main,
+.observability-message-preview {
   justify-content: flex-start;
   color: #64748b;
   font-size: 13px;
 }
 
+.observability-message-main strong {
+  color: #0f172a;
+}
+
+.observability-message-main span,
+.observability-selected-strip span {
+  overflow-wrap: anywhere;
+}
+
 .observability-selected-head {
   border-bottom: 1px solid #edf2f7;
-  margin-bottom: 14px;
+  margin-bottom: 10px;
   padding-bottom: 12px;
 }
 
@@ -1349,24 +1336,63 @@ pre {
   margin: 0;
 }
 
-.observability-message-card {
-  border: 1px solid #dbeafe;
-  border-radius: 12px;
-  background: #fff;
-  padding: 16px;
+.observability-detail.compact {
+  padding-bottom: 18px;
 }
 
-.observability-message-header {
-  border-bottom: 1px solid #edf2f7;
-  margin-bottom: 12px;
-  padding-bottom: 12px;
+.observability-message-details {
+  border: 1px solid #dbeafe;
+  border-radius: 10px;
+  background: #fff;
+  overflow: hidden;
+}
+
+.observability-message-details[open] {
+  border-color: #93c5fd;
+  box-shadow: 0 1px 8px rgba(15, 23, 42, 0.06);
+}
+
+.observability-message-details > summary {
+  cursor: pointer;
+  display: grid;
+  gap: 8px;
+  list-style: none;
+  padding: 12px 14px;
+}
+
+.observability-message-details > summary::-webkit-details-marker {
+  display: none;
+}
+
+.observability-message-details > summary::before {
+  color: #2563eb;
+  content: "展开日志";
+  font-size: 13px;
+  font-weight: 700;
+  justify-self: start;
+}
+
+.observability-message-details[open] > summary::before {
+  content: "收起日志";
+}
+
+.observability-message-summary-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: space-between;
+}
+
+.observability-message-expanded {
+  border-top: 1px solid #edf2f7;
+  padding: 12px 14px 14px;
 }
 
 .observability-message-summary {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 12px;
-  margin-bottom: 14px;
+  margin-bottom: 12px;
 }
 
 .observability-message-summary section,
@@ -1399,7 +1425,7 @@ pre {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-  margin: 10px 0 14px;
+  margin: 8px 0 12px;
 }
 
 .observability-node {
@@ -1460,6 +1486,15 @@ pre {
   font-size: 12px;
 }
 
+.observability-nested-details {
+  margin-top: 10px;
+}
+
+.observability-nested-details summary {
+  cursor: pointer;
+  font-weight: 700;
+}
+
 .observability-chunk {
   background: #f8fbff;
 }
@@ -1469,14 +1504,10 @@ pre {
 }
 
 @media (max-width: 1180px) {
-  .observability-layout,
   .observability-toolbar,
+  .observability-toolbar.compact,
   .observability-message-summary,
   .observability-two-up {
     grid-template-columns: 1fr;
-  }
-
-  .observability-conversation-list {
-    max-height: none;
   }
 }
