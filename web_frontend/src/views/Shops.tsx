@@ -12,7 +12,6 @@ import {
   WorkerCommand
 } from "../api/shops";
 import { DataTable } from "../components/DataTable";
-import { DrawerPanel } from "../components/DrawerPanel";
 import { StatusBadge } from "../components/StatusBadge";
 
 type LoadState = "idle" | "loading" | "loaded" | "error";
@@ -157,7 +156,7 @@ export function Shops() {
   const workerButtonsDisabled = !selected || workerAction !== null;
 
   return (
-    <div className="content-grid detail-layout">
+    <div className="page-stack">
       <section className="panel">
         <div className="panel-header">
           <div>
@@ -208,18 +207,38 @@ export function Shops() {
         ) : null}
       </section>
 
-      <DrawerPanel title="店铺详情">
+      <section className="panel">
+        <div className="panel-header">
+          <div>
+            <h3>店铺详情</h3>
+            <p className="muted">选择店铺后查看配置、Worker 控制指令、知识覆盖和调试摘要。</p>
+          </div>
+        </div>
         {detailState === "loading" ? <div className="state-card">正在加载店铺详情...</div> : null}
         {detailState === "error" ? <div className="state-card error-state">加载店铺详情失败：{detailError}</div> : null}
         {selected && detailState !== "loading" ? (
           <div className="detail-stack">
             {selected.warning ? <div className="warning-banner">详情提醒：{selected.warning}</div> : null}
-            <strong>{selected.shop_name}</strong>
-            <span>shop_id: {selected.shop_id}</span>
-            <span>渠道：{selected.channel}</span>
-            <span>商品知识数量：{selected.product_knowledge_count}</span>
+            <div className="shop-detail-summary">
+              <div>
+                <span className="muted">店铺名称</span>
+                <strong>{selected.shop_name}</strong>
+              </div>
+              <div>
+                <span className="muted">shop_id</span>
+                <strong>{selected.shop_id}</strong>
+              </div>
+              <div>
+                <span className="muted">渠道</span>
+                <strong>{selected.channel}</strong>
+              </div>
+              <div>
+                <span className="muted">商品知识数量</span>
+                <strong>{selected.product_knowledge_count}</strong>
+              </div>
+            </div>
 
-            <section>
+            <section className="worker-control-panel">
               <h4>Worker 控制</h4>
               <p className="muted">
                 这里仅写入启动、停止或重启指令；Worker Manager 读取指令后执行。未绑定真实店铺或授权无效时，后端会阻断启动。
@@ -245,41 +264,61 @@ export function Shops() {
                 <div className="state-card">暂无 Worker 控制指令。</div>
               ) : null}
               {workerCommands.length > 0 ? (
-                <DataTable<WorkerCommand>
-                  rows={workerCommands}
-                  emptyMessage="暂无 Worker 控制指令。"
-                  columns={[
-                    { key: "command", label: "指令", render: (row) => COMMAND_LABELS[row.command] ?? row.command },
-                    { key: "status", label: "状态", render: (row) => <StatusBadge tone={row.status === "succeeded" ? "success" : row.status === "failed" ? "danger" : "warning"}>{row.status}</StatusBadge> },
-                    { key: "requested_by", label: "操作人" },
-                    { key: "requested_at", label: "请求时间" },
-                    { key: "error_summary", label: "错误摘要" },
-                    { key: "trace_id", label: "trace_id" }
-                  ]}
-                />
+                <div className="worker-command-list">
+                  {workerCommands.map((command) => (
+                    <article className="worker-command-card" key={command.id}>
+                      <div className="worker-command-card-main">
+                        <strong>{COMMAND_LABELS[command.command] ?? command.command} Worker</strong>
+                        <StatusBadge tone={command.status === "succeeded" ? "success" : command.status === "failed" ? "danger" : "warning"}>{command.status}</StatusBadge>
+                      </div>
+                      <dl>
+                        <div>
+                          <dt>操作人</dt>
+                          <dd>{command.requested_by || "-"}</dd>
+                        </div>
+                        <div>
+                          <dt>请求时间</dt>
+                          <dd>{command.requested_at}</dd>
+                        </div>
+                        <div>
+                          <dt>trace_id</dt>
+                          <dd>{command.trace_id}</dd>
+                        </div>
+                        {command.error_summary ? (
+                          <div>
+                            <dt>错误摘要</dt>
+                            <dd>{command.error_summary}</dd>
+                          </div>
+                        ) : null}
+                      </dl>
+                    </article>
+                  ))}
+                </div>
               ) : null}
             </section>
 
-            <section>
-              <h4>InternalEngine 摘要</h4>
-              {renderRecord(selected.internal_engine_summary)}
-            </section>
-            <section>
-              <h4>SOP 覆盖</h4>
-              {renderRecord(selected.sop_coverage)}
-            </section>
-            <section>
-              <h4>RAG 索引状态</h4>
-              {renderRecord(selected.rag_index_status)}
-            </section>
-            <section>
-              <h4>近期调试摘要</h4>
-              {renderRecord(selected.recent_trace_summary)}
-            </section>
+            <div className="shop-detail-grid">
+              <section>
+                <h4>InternalEngine 摘要</h4>
+                {renderRecord(selected.internal_engine_summary)}
+              </section>
+              <section>
+                <h4>SOP 覆盖</h4>
+                {renderRecord(selected.sop_coverage)}
+              </section>
+              <section>
+                <h4>RAG 索引状态</h4>
+                {renderRecord(selected.rag_index_status)}
+              </section>
+              <section>
+                <h4>近期调试摘要</h4>
+                {renderRecord(selected.recent_trace_summary)}
+              </section>
+            </div>
           </div>
         ) : null}
         {!selected && detailState === "idle" ? <div className="state-card">请选择一个店铺查看详情。</div> : null}
-      </DrawerPanel>
+      </section>
     </div>
   );
 }

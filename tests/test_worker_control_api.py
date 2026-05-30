@@ -100,8 +100,12 @@ def test_worker_start_requires_valid_auth_and_real_shop_id(tmp_path):
     try:
         missing_auth = client.post("/api/shops/565617/worker/start", json={"operator": "local_admin"})
         assert missing_auth.status_code == 409
-        assert missing_auth.json()["error_type"] == "AUTH_REQUIRED"
-        assert missing_auth.json()["trace_id"]
+        missing_auth_payload = missing_auth.json()
+        assert missing_auth_payload["error_type"] == "AUTH_REQUIRED"
+        assert "店铺登录授权" in missing_auth_payload["error_summary"]
+        assert "远程浏览器登录授权" in missing_auth_payload["next_action"]
+        assert missing_auth_payload["trace_id"]
+        assert "redacted_sensitive_error" not in missing_auth.text
 
         remote_id = client.post("/api/shops/remote-login123/worker/start", json={"operator": "local_admin"})
         assert remote_id.status_code == 409

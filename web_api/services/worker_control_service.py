@@ -163,18 +163,18 @@ class WorkerControlService:
         except KeyError as exc:
             raise ApiError(
                 error_type="AUTH_REQUIRED",
-                error_summary="Worker cannot start before valid shop authorization is available.",
+                error_summary="Worker 启动前必须先完成有效的店铺登录授权。",
                 status_code=409,
                 retryable=True,
-                next_action="Complete remote browser authorization for this shop first.",
+                next_action="请先在店铺接入页重新完成远程浏览器登录授权。",
             ) from exc
         if str(auth.get("auth_status") or "") not in {"valid", "auth_valid"}:
             raise ApiError(
                 error_type="AUTH_REQUIRED",
-                error_summary="Worker cannot start because shop authorization is not valid.",
+                error_summary="当前店铺登录授权无效或已过期，Worker 启动已被阻断。",
                 status_code=409,
                 retryable=True,
-                next_action="Re-authorize the shop with the remote browser flow.",
+                next_action="请先在店铺接入页重新完成远程浏览器登录授权。",
             )
 
     def _record_event(
