@@ -59,6 +59,7 @@ def test_shop_auth_resolver_prefers_encrypted_shop_auth(tmp_path, monkeypatch):
     assert result.source == "shop_auth"
     assert result.cookies == {"new": "cookie"}
     assert result.user_id == "seller-user"
+    assert result.credential_mode == "browser_only"
 
 
 def test_shop_auth_resolver_falls_back_to_legacy_accounts_cookies(tmp_path):
@@ -93,6 +94,32 @@ def test_shop_auth_resolver_parses_browser_cookie_header(tmp_path, monkeypatch):
 
     assert result.status == "ok"
     assert result.cookies == {"api_uid": "abc", "mms_b84d1838": "xyz"}
+
+
+def test_shop_auth_resolver_exposes_password_available_credential_mode(tmp_path, monkeypatch):
+    monkeypatch.setenv("SHOP_AUTH_ENCRYPTION_KEY", "unit-test-key")
+    db_path = tmp_path / "auth.db"
+    _init_schema(db_path)
+    saved = ShopAuthService(db_path=db_path).save_auth(
+        AuthSavePayload(
+            shop_id="565617",
+            shop_name="test shop",
+            platform="pdd",
+            account_name="seller_account_10000000000",
+            user_id="seller-user",
+            cookie_value=json.dumps({"new": "cookie"}),
+            credential_mode="password_available",
+            auth_state_reason="manual_vnc_password_login",
+        )
+    )
+
+    result = ShopAuthResolver(db_path=db_path).get_cookies("565617")
+
+    assert saved["credential_mode"] == "password_available"
+    assert saved["auth_state_reason"] == "manual_vnc_password_login"
+    assert result.status == "ok"
+    assert result.credential_mode == "password_available"
+    assert result.auth_state_reason == "manual_vnc_password_login"
 
 
 def test_shop_auth_resolver_reports_decrypt_failure_without_fallback(tmp_path, monkeypatch):

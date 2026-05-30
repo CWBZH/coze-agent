@@ -65,6 +65,7 @@ class BaseRequest:
         
         # 初始化账户信息和cookies
         self.cookies = {}
+        self.auth_resolution = None
         self.account_name = "未知账号"
         
         if shop_id and user_id:
@@ -74,6 +75,7 @@ class BaseRequest:
         """初始化账户信息"""
         try:
             resolved_auth = self._resolve_auth_cookies()
+            self.auth_resolution = resolved_auth
             if resolved_auth is not None:
                 if resolved_auth.status == "ok" and resolved_auth.cookies:
                     self.cookies = resolved_auth.cookies
@@ -188,6 +190,29 @@ class BaseRequest:
 
         return username, password
 
+    def _is_playwright_relogin_allowed(self) -> bool:
+        """Only password-backed authorization may use Playwright renewal."""
+        resolved = self.auth_resolution
+        credential_mode = getattr(resolved, "credential_mode", "browser_only") if resolved is not None else "browser_only"
+        if credential_mode == "password_available":
+            return True
+        try:
+            from web_api.services.shop_auth_service import ShopAuthService
+
+            ShopAuthService().mark_auth_required(
+                str(self.shop_id),
+                platform="pdd",
+                reason="session_expired_browser_only_reauth_required",
+            )
+        except Exception as exc:
+            self.logger.warning(
+                f"mark auth_required failed: shop_id={self.shop_id}, user_id={self.user_id}, error_type={type(exc).__name__}"
+            )
+        self.logger.warning(
+            f"session expired for browser-only auth: shop_id={self.shop_id}, user_id={self.user_id}; noVNC reauth is required"
+        )
+        return False
+
     def _relogin_and_update_cookies(self) -> bool:
         """
         重新获取cookies并更新
@@ -197,6 +222,8 @@ class BaseRequest:
             是否重新获取cookies成功
         """
         try:
+            if not self._is_playwright_relogin_allowed():
+                return False
             credentials = self._get_account_credentials()
             if not credentials:
                 return False
@@ -634,6 +661,10 @@ class BaseRequest:
                     account_name=str(username or ""),
                     user_id=str(self.user_id or username or ""),
                     cookie_value=json.dumps(self.cookies, ensure_ascii=False),
+                    credential_mode=getattr(self.auth_resolution, "credential_mode", "browser_only")
+                    if self.auth_resolution is not None
+                    else "browser_only",
+                    auth_state_reason="playwright_cookie_refresh_succeeded",
                 )
             )
             self.logger.info(f"账号 {self.account_name} 会话凭据已加密保存到 shop_auth")

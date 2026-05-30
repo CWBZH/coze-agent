@@ -80,6 +80,15 @@ def test_schema_migrations_upgrade_legacy_sqlite_idempotently(tmp_path):
         assert "created_at" in _columns(conn, "product_knowledge")
         assert "usage" in _columns(conn, "product_knowledge")
         assert "shop_identity_status" in _columns(conn, "shop_login_sessions")
+        assert "worker_control_commands" in {
+            row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
+        }
+        assert "shop_worker_desired_state" in {
+            row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
+        }
+        assert "worker_events" in {
+            row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
+        }
         assert "remote-old-session" not in [
             row[0] for row in conn.execute("SELECT shop_id FROM shops").fetchall()
         ]
@@ -144,3 +153,51 @@ def test_schema_migrations_backfill_real_shops_from_valid_shop_auth(tmp_path):
     shops, warning = ShopService(ReadOnlySqlite(db_path)).list_shops()
     assert warning is None
     assert [shop.shop_id for shop in shops] == ["565617"]
+
+
+def test_schema_migrations_add_worker_control_and_auth_state_idempotently(tmp_path):
+    db_path = tmp_path / "worker_control.db"
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.executescript(
+            """
+            CREATE TABLE shop_auth (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                shop_id TEXT NOT NULL,
+                platform TEXT NOT NULL DEFAULT 'pdd',
+                account_name TEXT,
+                auth_status TEXT NOT NULL,
+                cookie_encrypted TEXT,
+                token_encrypted TEXT,
+                safe_display TEXT,
+                last_login_at TEXT,
+                expires_at TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                UNIQUE(shop_id, platform)
+            );
+            """
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    first = SchemaMigrationService(db_path).migrate()
+    second = SchemaMigrationService(db_path).migrate()
+
+    assert "006_worker_control_and_auth_state" in first["applied"]
+    assert second["applied"] == []
+
+    conn = sqlite3.connect(db_path)
+    try:
+        shop_auth_columns = _columns(conn, "shop_auth")
+        assert "credential_mode" in shop_auth_columns
+        assert "auth_state_reason" in shop_auth_columns
+        assert "last_auth_event_at" in shop_auth_columns
+        tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
+        assert {"worker_control_commands", "shop_worker_desired_state", "worker_events"}.issubset(tables)
+        indexes = {row[1] for row in conn.execute("PRAGMA index_list(worker_control_commands)").fetchall()}
+        assert "idx_worker_control_commands_status" in indexes
+        assert "idx_worker_control_commands_shop_status" in indexes
+    finally:
+        conn.close()

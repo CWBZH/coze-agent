@@ -18,6 +18,8 @@ class ShopAuthResolution:
     user_id: str | None = None
     account_name: str | None = None
     error_type: str | None = None
+    credential_mode: str = "browser_only"
+    auth_state_reason: str | None = None
 
 
 class ShopAuthResolver:
@@ -52,6 +54,8 @@ class ShopAuthResolver:
                             source="shop_auth",
                             account_name=auth["account_name"],
                             error_type="auth_decrypt_failed",
+                            credential_mode=str(auth["credential_mode"] or "browser_only"),
+                            auth_state_reason=str(auth["auth_state_reason"] or "") or None,
                         )
                     if cookies:
                         account = self._get_legacy_account(conn, str(shop_id), user_id, account_name=auth["account_name"])
@@ -61,6 +65,8 @@ class ShopAuthResolver:
                             source="shop_auth",
                             user_id=str(account["user_id"]) if account is not None and account["user_id"] is not None else None,
                             account_name=str(auth["account_name"] or "") or None,
+                            credential_mode=str(auth["credential_mode"] or "browser_only"),
+                            auth_state_reason=str(auth["auth_state_reason"] or "") or None,
                         )
                     return ShopAuthResolution(
                         status="auth_invalid",
@@ -68,6 +74,8 @@ class ShopAuthResolver:
                         source="shop_auth",
                         account_name=auth["account_name"],
                         error_type="auth_cookie_empty",
+                        credential_mode=str(auth["credential_mode"] or "browser_only"),
+                        auth_state_reason=str(auth["auth_state_reason"] or "") or None,
                     )
             return self._resolve_legacy(conn, str(shop_id), user_id)
         finally:
@@ -83,7 +91,8 @@ class ShopAuthResolver:
             return None
         return conn.execute(
             """
-            SELECT shop_id, platform, account_name, auth_status, cookie_encrypted
+            SELECT shop_id, platform, account_name, auth_status, cookie_encrypted,
+                   credential_mode, auth_state_reason, last_auth_event_at
             FROM shop_auth
             WHERE shop_id=? AND platform=?
             """,

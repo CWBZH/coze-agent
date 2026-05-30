@@ -70,6 +70,9 @@ CREATE TABLE IF NOT EXISTS shop_auth (
     last_login_at TEXT,
     expires_at TEXT,
     shop_binding_status TEXT NOT NULL DEFAULT 'bound',
+    credential_mode TEXT NOT NULL DEFAULT 'browser_only',
+    auth_state_reason TEXT,
+    last_auth_event_at TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     UNIQUE(shop_id, platform)
@@ -77,6 +80,43 @@ CREATE TABLE IF NOT EXISTS shop_auth (
 
 CREATE INDEX IF NOT EXISTS idx_shop_auth_shop_id ON shop_auth(shop_id);
 CREATE INDEX IF NOT EXISTS idx_shop_auth_status ON shop_auth(auth_status);
+
+CREATE TABLE IF NOT EXISTS worker_control_commands (
+    id TEXT PRIMARY KEY,
+    shop_id TEXT NOT NULL,
+    command TEXT NOT NULL,
+    status TEXT NOT NULL,
+    requested_by TEXT,
+    requested_at TEXT NOT NULL,
+    started_at TEXT,
+    finished_at TEXT,
+    error_type TEXT,
+    error_summary TEXT,
+    trace_id TEXT
+);
+
+CREATE TABLE IF NOT EXISTS shop_worker_desired_state (
+    shop_id TEXT PRIMARY KEY,
+    desired_state TEXT NOT NULL,
+    updated_by TEXT,
+    updated_at TEXT NOT NULL,
+    reason TEXT
+);
+
+CREATE TABLE IF NOT EXISTS worker_events (
+    id TEXT PRIMARY KEY,
+    shop_id TEXT,
+    event_type TEXT NOT NULL,
+    status TEXT,
+    summary TEXT,
+    metadata_json TEXT,
+    created_at TEXT NOT NULL,
+    trace_id TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_worker_control_commands_status ON worker_control_commands(status);
+CREATE INDEX IF NOT EXISTS idx_worker_control_commands_shop_status ON worker_control_commands(shop_id, status);
+CREATE INDEX IF NOT EXISTS idx_worker_events_shop_created ON worker_events(shop_id, created_at);
 
 CREATE TABLE IF NOT EXISTS onboarding_validation_runs (
     id TEXT PRIMARY KEY,

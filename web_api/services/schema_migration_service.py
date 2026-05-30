@@ -31,6 +31,7 @@ class SchemaMigrationService:
                 ("003_shop_identity_pending_auth", self._migration_shop_identity_pending_auth),
                 ("004_quarantine_temporary_shop_ids", self._migration_quarantine_temporary_shop_ids),
                 ("005_backfill_real_shops_from_runtime_tables", self._migration_backfill_real_shops),
+                ("006_worker_control_and_auth_state", self._migration_worker_control_and_auth_state),
             ]
             for version, handler in migrations:
                 if self._is_applied(conn, version):
@@ -39,6 +40,7 @@ class SchemaMigrationService:
                 self._record(conn, version)
                 applied.append(version)
             self._ensure_compat_columns(conn)
+            self._ensure_worker_control_schema(conn)
             self._backfill_real_shops_from_runtime_tables(conn)
             conn.commit()
             return {"applied": applied}
@@ -110,6 +112,10 @@ class SchemaMigrationService:
 
     def _migration_backfill_real_shops(self, conn: sqlite3.Connection) -> None:
         self._backfill_real_shops_from_runtime_tables(conn)
+
+    def _migration_worker_control_and_auth_state(self, conn: sqlite3.Connection) -> None:
+        self._ensure_compat_columns(conn)
+        self._ensure_worker_control_schema(conn)
 
     def _ensure_migration_table(self, conn: sqlite3.Connection) -> None:
         conn.execute(
@@ -205,6 +211,9 @@ class SchemaMigrationService:
                 "shop_auth",
                 {
                     "shop_binding_status": "TEXT NOT NULL DEFAULT 'bound'",
+                    "credential_mode": "TEXT NOT NULL DEFAULT 'browser_only'",
+                    "auth_state_reason": "TEXT",
+                    "last_auth_event_at": "TEXT",
                 },
             )
         if self._table_exists(conn, "knowledge_index_jobs"):
@@ -227,6 +236,55 @@ class SchemaMigrationService:
                     "finished_at": "TEXT",
                 },
             )
+
+    def _ensure_worker_control_schema(self, conn: sqlite3.Connection) -> None:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS worker_control_commands (
+                id TEXT PRIMARY KEY,
+                shop_id TEXT NOT NULL,
+                command TEXT NOT NULL,
+                status TEXT NOT NULL,
+                requested_by TEXT,
+                requested_at TEXT NOT NULL,
+                started_at TEXT,
+                finished_at TEXT,
+                error_type TEXT,
+                error_summary TEXT,
+                trace_id TEXT
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS shop_worker_desired_state (
+                shop_id TEXT PRIMARY KEY,
+                desired_state TEXT NOT NULL,
+                updated_by TEXT,
+                updated_at TEXT NOT NULL,
+                reason TEXT
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS worker_events (
+                id TEXT PRIMARY KEY,
+                shop_id TEXT,
+                event_type TEXT NOT NULL,
+                status TEXT,
+                summary TEXT,
+                metadata_json TEXT,
+                created_at TEXT NOT NULL,
+                trace_id TEXT
+            )
+            """
+        )
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_worker_control_commands_status ON worker_control_commands(status)")
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_worker_control_commands_shop_status ON worker_control_commands(shop_id, status)"
+        )
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_worker_events_shop_created ON worker_events(shop_id, created_at)")
 
     def _table_exists(self, conn: sqlite3.Connection, table_name: str) -> bool:
         row = conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name=?", (table_name,)).fetchone()

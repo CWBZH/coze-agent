@@ -1,4 +1,4 @@
-import { apiGet } from "./client";
+import { apiGet, apiPost } from "./client";
 
 export type Shop = {
   shop_id: string;
@@ -28,10 +28,52 @@ export type ShopDetail = {
   warning?: string | null;
 };
 
+export type WorkerCommandStatus = "pending" | "running" | "succeeded" | "failed";
+
+export type WorkerCommand = {
+  id: string;
+  shop_id: string;
+  command: "start" | "stop" | "restart";
+  status: WorkerCommandStatus;
+  requested_by: string | null;
+  requested_at: string;
+  started_at: string | null;
+  finished_at: string | null;
+  error_type: string | null;
+  error_summary: string | null;
+  trace_id: string;
+};
+
+export type WorkerCommandRequest = {
+  operator?: string;
+  reason?: string | null;
+};
+
+export type WorkerCommandListResponse = {
+  items: WorkerCommand[];
+  total: number;
+};
+
 export function getShops() {
   return apiGet<{ items: Shop[]; total: number; warning?: string }>("/api/shops");
 }
 
 export function getShop(shopId: string) {
   return apiGet<ShopDetail>(`/api/shops/${encodeURIComponent(shopId)}`);
+}
+
+export function requestWorkerStart(shopId: string, body: WorkerCommandRequest = {}) {
+  return apiPost<WorkerCommand>(`/api/shops/${encodeURIComponent(shopId)}/worker/start`, body);
+}
+
+export function requestWorkerStop(shopId: string, body: WorkerCommandRequest = {}) {
+  return apiPost<WorkerCommand>(`/api/shops/${encodeURIComponent(shopId)}/worker/stop`, body);
+}
+
+export function requestWorkerRestart(shopId: string, body: WorkerCommandRequest = {}) {
+  return apiPost<WorkerCommand>(`/api/shops/${encodeURIComponent(shopId)}/worker/restart`, body);
+}
+
+export function getWorkerCommands(shopId: string, limit = 10) {
+  return apiGet<WorkerCommandListResponse>(`/api/shops/${encodeURIComponent(shopId)}/worker/commands?limit=${limit}`);
 }

@@ -15,6 +15,7 @@ from web_api.services.shop_service import ShopService
 from web_api.services.shop_onboarding_service import ShopOnboardingService
 from web_api.services.sop_service import SopService
 from web_api.services.trace_service import TraceService
+from web_api.services.worker_control_service import WorkerControlService
 
 
 @lru_cache
@@ -101,5 +102,13 @@ def get_shop_onboarding_service() -> ShopOnboardingService:
 def get_product_sync_service() -> ProductSyncService:
     get_schema_migration_service()
     service = ProductSyncService()
+    service.init_schema()
+    return service
+
+
+@lru_cache
+def get_worker_control_service() -> WorkerControlService:
+    get_schema_migration_service()
+    service = WorkerControlService()
     service.init_schema()
     return service

@@ -1,11 +1,28 @@
 import { useEffect, useMemo, useState } from "react";
 
-import { getShop, getShops, Shop, ShopDetail } from "../api/shops";
+import {
+  getShop,
+  getShops,
+  getWorkerCommands,
+  requestWorkerRestart,
+  requestWorkerStart,
+  requestWorkerStop,
+  Shop,
+  ShopDetail,
+  WorkerCommand
+} from "../api/shops";
 import { DataTable } from "../components/DataTable";
 import { DrawerPanel } from "../components/DrawerPanel";
 import { StatusBadge } from "../components/StatusBadge";
 
 type LoadState = "idle" | "loading" | "loaded" | "error";
+type WorkerAction = "start" | "stop" | "restart";
+
+const COMMAND_LABELS: Record<WorkerAction, string> = {
+  start: "启动",
+  stop: "停止",
+  restart: "重启"
+};
 
 function renderRecord(record: Record<string, boolean | string | number>) {
   const entries = Object.entries(record);
@@ -25,11 +42,16 @@ function renderRecord(record: Record<string, boolean | string | number>) {
 export function Shops() {
   const [shops, setShops] = useState<Shop[]>([]);
   const [selected, setSelected] = useState<ShopDetail | null>(null);
+  const [workerCommands, setWorkerCommands] = useState<WorkerCommand[]>([]);
   const [warning, setWarning] = useState<string | null>(null);
   const [listState, setListState] = useState<LoadState>("idle");
   const [detailState, setDetailState] = useState<LoadState>("idle");
+  const [workerCommandState, setWorkerCommandState] = useState<LoadState>("idle");
   const [error, setError] = useState<string | null>(null);
   const [detailError, setDetailError] = useState<string | null>(null);
+  const [workerCommandError, setWorkerCommandError] = useState<string | null>(null);
+  const [workerCommandMessage, setWorkerCommandMessage] = useState<string | null>(null);
+  const [workerAction, setWorkerAction] = useState<WorkerAction | null>(null);
   const [search, setSearch] = useState("");
   const [accountStatus, setAccountStatus] = useState("");
   const [websocketStatus, setWebsocketStatus] = useState("");
@@ -53,6 +75,21 @@ export function Shops() {
       });
   }, []);
 
+  function loadWorkerCommands(shopId: string) {
+    setWorkerCommandState("loading");
+    setWorkerCommandError(null);
+    getWorkerCommands(shopId)
+      .then((data) => {
+        setWorkerCommands(data.items);
+        setWorkerCommandState("loaded");
+      })
+      .catch((err: Error) => {
+        setWorkerCommands([]);
+        setWorkerCommandError(err.message);
+        setWorkerCommandState("error");
+      });
+  }
+
   function loadShopDetail(shopId: string) {
     setDetailState("loading");
     setDetailError(null);
@@ -60,18 +97,54 @@ export function Shops() {
       .then((data) => {
         setSelected(data);
         setDetailState("loaded");
+        loadWorkerCommands(shopId);
       })
       .catch((err: Error) => {
         setSelected(null);
+        setWorkerCommands([]);
         setDetailError(err.message);
         setDetailState("error");
+      });
+  }
+
+  function submitWorkerAction(action: WorkerAction) {
+    if (!selected) return;
+    setWorkerAction(action);
+    setWorkerCommandError(null);
+    setWorkerCommandMessage(null);
+    const payload = {
+      operator: "local_admin",
+      reason: `web_admin_${action}`
+    };
+    const request =
+      action === "start"
+        ? requestWorkerStart
+        : action === "stop"
+          ? requestWorkerStop
+          : requestWorkerRestart;
+
+    request(selected.shop_id, payload)
+      .then((command) => {
+        setWorkerCommandMessage(
+          `已记录 ${COMMAND_LABELS[action]} Worker 指令，command_id=${command.id}。Worker Manager 会读取并执行，Web API 不直接启动子进程。`
+        );
+        loadWorkerCommands(selected.shop_id);
+      })
+      .catch((err: Error) => {
+        setWorkerCommandError(err.message);
+      })
+      .finally(() => {
+        setWorkerAction(null);
       });
   }
 
   const filteredShops = useMemo(() => {
     const needle = search.trim().toLowerCase();
     return shops.filter((shop) => {
-      const matchesSearch = !needle || shop.shop_id.toLowerCase().includes(needle) || shop.shop_name.toLowerCase().includes(needle);
+      const matchesSearch =
+        !needle ||
+        shop.shop_id.toLowerCase().includes(needle) ||
+        shop.shop_name.toLowerCase().includes(needle);
       const matchesAccount = !accountStatus || shop.account_status === accountStatus;
       const matchesWebsocket = !websocketStatus || shop.websocket_status === websocketStatus;
       const matchesInternal = !internalEnabled || String(shop.internal_enabled) === internalEnabled;
@@ -81,6 +154,7 @@ export function Shops() {
 
   const accountOptions = Array.from(new Set(shops.map((shop) => shop.account_status))).filter(Boolean);
   const websocketOptions = Array.from(new Set(shops.map((shop) => shop.websocket_status))).filter(Boolean);
+  const workerButtonsDisabled = !selected || workerAction !== null;
 
   return (
     <div className="content-grid detail-layout">
@@ -89,7 +163,7 @@ export function Shops() {
           <div>
             <h2>店铺管理</h2>
             <p className="muted">
-              用于查看已有店铺、AI 配置、商品数量和运行状态。当前不是完整新店接入流程，新增店铺接入流程将在后续版本提供。
+              查看已接入店铺、AI 配置、商品知识数量和运行状态。Worker 启停在这里下发控制指令，由服务器上的 Worker Manager 执行。
             </p>
           </div>
           <div className="filters filter-grid">
@@ -119,15 +193,15 @@ export function Shops() {
             emptyMessage="当前筛选条件下没有店铺。"
             onRowClick={(shop) => loadShopDetail(shop.shop_id)}
             columns={[
-              { key: "shop_id", label: "店铺ID shop_id" },
+              { key: "shop_id", label: "店铺 ID" },
               { key: "shop_name", label: "店铺名称" },
               { key: "channel", label: "渠道" },
               { key: "internal_enabled", label: "InternalEngine", render: (row) => <StatusBadge tone={row.internal_enabled ? "success" : "neutral"}>{row.internal_enabled}</StatusBadge> },
               { key: "rag_enabled", label: "RAG", render: (row) => <StatusBadge tone={row.rag_enabled ? "success" : "neutral"}>{row.rag_enabled}</StatusBadge> },
               { key: "llm_enabled", label: "LLM", render: (row) => <StatusBadge tone={row.llm_enabled ? "success" : "neutral"}>{row.llm_enabled}</StatusBadge> },
               { key: "account_status", label: "账号状态", render: (row) => <StatusBadge tone={row.account_status === "active" ? "success" : "neutral"}>{row.account_status}</StatusBadge> },
-              { key: "websocket_status", label: "WebSocket 状态" },
-              { key: "no_send", label: "不发送模式", render: (row) => <StatusBadge tone="info">{row.no_send}</StatusBadge> },
+              { key: "websocket_status", label: "WebSocket" },
+              { key: "no_send", label: "no-send", render: (row) => <StatusBadge tone="info">{row.no_send}</StatusBadge> },
               { key: "last_activity", label: "最近活动" }
             ]}
           />
@@ -144,6 +218,48 @@ export function Shops() {
             <span>shop_id: {selected.shop_id}</span>
             <span>渠道：{selected.channel}</span>
             <span>商品知识数量：{selected.product_knowledge_count}</span>
+
+            <section>
+              <h4>Worker 控制</h4>
+              <p className="muted">
+                这里仅写入启动、停止或重启指令；Worker Manager 读取指令后执行。未绑定真实店铺或授权无效时，后端会阻断启动。
+              </p>
+              {workerCommandMessage ? <div className="state-card">{workerCommandMessage}</div> : null}
+              {workerCommandError ? <div className="warning-banner error-state">{workerCommandError}</div> : null}
+              <div className="button-row">
+                <button disabled={workerButtonsDisabled} onClick={() => submitWorkerAction("start")}>
+                  {workerAction === "start" ? "正在记录..." : "请求启动 Worker"}
+                </button>
+                <button disabled={workerButtonsDisabled} onClick={() => submitWorkerAction("stop")}>
+                  {workerAction === "stop" ? "正在记录..." : "请求停止 Worker"}
+                </button>
+                <button disabled={workerButtonsDisabled} onClick={() => submitWorkerAction("restart")}>
+                  {workerAction === "restart" ? "正在记录..." : "请求重启 Worker"}
+                </button>
+                <button disabled={!selected || workerCommandState === "loading"} onClick={() => loadWorkerCommands(selected.shop_id)}>
+                  刷新命令
+                </button>
+              </div>
+              {workerCommandState === "loading" ? <div className="state-card">正在加载 Worker 指令...</div> : null}
+              {workerCommands.length === 0 && workerCommandState !== "loading" ? (
+                <div className="state-card">暂无 Worker 控制指令。</div>
+              ) : null}
+              {workerCommands.length > 0 ? (
+                <DataTable<WorkerCommand>
+                  rows={workerCommands}
+                  emptyMessage="暂无 Worker 控制指令。"
+                  columns={[
+                    { key: "command", label: "指令", render: (row) => COMMAND_LABELS[row.command] ?? row.command },
+                    { key: "status", label: "状态", render: (row) => <StatusBadge tone={row.status === "succeeded" ? "success" : row.status === "failed" ? "danger" : "warning"}>{row.status}</StatusBadge> },
+                    { key: "requested_by", label: "操作人" },
+                    { key: "requested_at", label: "请求时间" },
+                    { key: "error_summary", label: "错误摘要" },
+                    { key: "trace_id", label: "trace_id" }
+                  ]}
+                />
+              ) : null}
+            </section>
+
             <section>
               <h4>InternalEngine 摘要</h4>
               {renderRecord(selected.internal_engine_summary)}

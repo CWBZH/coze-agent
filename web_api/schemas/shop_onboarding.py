@@ -133,3 +133,25 @@ class WorkerStatusResponse(BaseModel):
     consistency_status: str = "unknown"
     attention_required: bool = False
     recommended_action: str | None = None
+
+
+class WorkerCommandRequest(BaseModel):
+    operator: str = "local_admin"
+    reason: str = ""
+
+
+class WorkerCommandResponse(BaseModel):
+    id: str
+    shop_id: str
+    command: str
+    status: str
+    requested_by: str | None = None
+    requested_at: str
+    trace_id: str
+    desired_state: str
+    summary: str
+
+
+class WorkerCommandListResponse(BaseModel):
+    items: list[WorkerCommandResponse]
+    total: int

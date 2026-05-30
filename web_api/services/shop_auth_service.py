@@ -87,6 +87,8 @@ class AuthSavePayload:
     cookie_value: str
     token_value: str | None = None
     expires_at: str | None = None
+    credential_mode: str = "browser_only"
+    auth_state_reason: str | None = None
 
 
 class ShopAuthService:
@@ -99,6 +101,12 @@ class ShopAuthService:
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
         return conn
+
+    @staticmethod
+    def _normalize_credential_mode(value: str | None) -> str:
+        if value in {"browser_only", "password_available"}:
+            return value
+        return "browser_only"
 
     def _ensure_channel_and_shop(self, conn: sqlite3.Connection, payload: AuthSavePayload) -> int:
         now = utc_now_iso()
@@ -136,6 +144,8 @@ class ShopAuthService:
         cookie_encrypted = self.cipher.encrypt(payload.cookie_value)
         token_encrypted = self.cipher.encrypt(payload.token_value or "") if payload.token_value else None
         expires_at = payload.expires_at or (datetime.now(timezone.utc) + timedelta(days=7)).isoformat()
+        credential_mode = self._normalize_credential_mode(payload.credential_mode)
+        auth_state_reason = payload.auth_state_reason or "auth_saved"
         conn = self._connect()
         try:
             shop_pk = self._ensure_channel_and_shop(conn, payload)
@@ -163,8 +173,9 @@ class ShopAuthService:
                 """
                 INSERT INTO shop_auth
                     (shop_id, platform, account_name, auth_status, cookie_encrypted, token_encrypted,
-                     safe_display, last_login_at, expires_at, created_at, updated_at)
-                VALUES (?, ?, ?, 'auth_valid', ?, ?, ?, ?, ?, ?, ?)
+                     safe_display, last_login_at, expires_at, credential_mode, auth_state_reason,
+                     last_auth_event_at, created_at, updated_at)
+                VALUES (?, ?, ?, 'auth_valid', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(shop_id, platform) DO UPDATE SET
                     account_name=excluded.account_name,
                     auth_status='auth_valid',
@@ -173,6 +184,9 @@ class ShopAuthService:
                     safe_display=excluded.safe_display,
                     last_login_at=excluded.last_login_at,
                     expires_at=excluded.expires_at,
+                    credential_mode=excluded.credential_mode,
+                    auth_state_reason=excluded.auth_state_reason,
+                    last_auth_event_at=excluded.last_auth_event_at,
                     updated_at=excluded.updated_at
                 """,
                 (
@@ -184,6 +198,9 @@ class ShopAuthService:
                     safe_display,
                     now,
                     expires_at,
+                    credential_mode,
+                    auth_state_reason,
+                    now,
                     now,
                     now,
                 ),
@@ -198,7 +215,8 @@ class ShopAuthService:
         try:
             row = conn.execute(
                 """
-                SELECT shop_id, platform, account_name, auth_status, safe_display, last_login_at, expires_at
+                SELECT shop_id, platform, account_name, auth_status, safe_display, last_login_at,
+                       expires_at, credential_mode, auth_state_reason, last_auth_event_at
                 FROM shop_auth WHERE shop_id=? AND platform=?
                 """,
                 (shop_id, platform),
@@ -210,3 +228,43 @@ class ShopAuthService:
             return result
         finally:
             conn.close()
+
+    def update_auth_state(
+        self,
+        shop_id: str,
+        platform: str = "pdd",
+        *,
+        auth_status: str,
+        auth_state_reason: str,
+        credential_mode: str | None = None,
+    ) -> bool:
+        now = utc_now_iso()
+        assignments = [
+            "auth_status=?",
+            "auth_state_reason=?",
+            "last_auth_event_at=?",
+            "updated_at=?",
+        ]
+        values: list[object] = [auth_status, auth_state_reason, now, now]
+        if credential_mode is not None:
+            assignments.append("credential_mode=?")
+            values.append(self._normalize_credential_mode(credential_mode))
+        values.extend([shop_id, platform])
+        conn = self._connect()
+        try:
+            cur = conn.execute(
+                f"UPDATE shop_auth SET {', '.join(assignments)} WHERE shop_id=? AND platform=?",
+                values,
+            )
+            conn.commit()
+            return cur.rowcount > 0
+        finally:
+            conn.close()
+
+    def mark_auth_required(self, shop_id: str, platform: str = "pdd", reason: str = "session_expired") -> bool:
+        return self.update_auth_state(
+            shop_id,
+            platform,
+            auth_status="auth_required",
+            auth_state_reason=reason,
+        )

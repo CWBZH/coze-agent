@@ -16,7 +16,6 @@ from web_api.schemas.shop_onboarding import (
     SmsCodeSubmitRequest,
     ValidationMarkPassedRequest,
     ValidationRunResponse,
-    WorkerStatusResponse,
 )
 from web_api.services.shop_onboarding_service import ChecklistNotReadyError, ShopOnboardingService
 
@@ -209,11 +208,3 @@ def get_shop_ai_status(
     service: ShopOnboardingService = Depends(get_shop_onboarding_service),
 ) -> dict:
     return service.get_ai_status(shop_id)
-
-
-@router.get("/shops/{shop_id}/worker-status", response_model=WorkerStatusResponse)
-def get_shop_worker_status(
-    shop_id: str,
-    service: ShopOnboardingService = Depends(get_shop_onboarding_service),
-) -> dict:
-    return service.get_worker_status(shop_id)
