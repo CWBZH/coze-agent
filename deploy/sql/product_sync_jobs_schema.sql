@@ -82,6 +82,9 @@ CREATE TABLE IF NOT EXISTS product_knowledge (
     manual_notes TEXT,
     raw_detail_json TEXT,
     knowledge_status TEXT DEFAULT 'synced',
+    archived_at TEXT,
+    archive_reason TEXT,
+    archived_by TEXT,
     created_at TEXT,
     updated_at TEXT,
     UNIQUE(shop_id, goods_id)

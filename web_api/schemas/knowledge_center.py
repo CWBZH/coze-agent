@@ -28,6 +28,11 @@ class ProductOverrideUpdate(BaseModel):
     expected_content_hash: str | None = None
 
 
+class ProductArchiveRequest(BaseModel):
+    operator: str = "local_admin"
+    reason: str = "manual_archive"
+
+
 class KnowledgeListResponse(BaseModel):
     items: list[dict[str, Any]]
     total: int

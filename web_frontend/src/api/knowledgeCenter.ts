@@ -123,6 +123,9 @@ export type EffectiveProduct = {
   shop_id: string;
   goods_id: string;
   goods_name: string;
+  knowledge_status?: string;
+  archived_at?: string;
+  archive_reason?: string;
   fields: Record<string, EffectiveField>;
   raw: Record<string, unknown>;
   override: ProductOverride | Record<string, unknown>;
@@ -244,9 +247,29 @@ export function saveProductOverride(goodsId: string, shopId: string, payload: Pr
   );
 }
 
+export function clearProductOverride(goodsId: string, shopId: string) {
+  return apiDelete<ProductOverride>(
+    `/api/knowledge/products/${encodeURIComponent(goodsId)}/overrides${buildQuery({ shop_id: shopId })}`
+  );
+}
+
 export function getEffectiveProduct(goodsId: string, shopId: string) {
   return apiGet<EffectiveProduct>(
     `/api/knowledge/products/${encodeURIComponent(goodsId)}/effective${buildQuery({ shop_id: shopId })}`
+  );
+}
+
+export function archiveProduct(goodsId: string, shopId: string, reason = "manual_archive") {
+  return apiPost<{ status: string; raw: Record<string, unknown>; effective: EffectiveProduct }>(
+    `/api/knowledge/products/${encodeURIComponent(goodsId)}/archive${buildQuery({ shop_id: shopId })}`,
+    { operator: "local_admin", reason }
+  );
+}
+
+export function restoreProduct(goodsId: string, shopId: string) {
+  return apiPost<{ status: string; raw: Record<string, unknown>; effective: EffectiveProduct }>(
+    `/api/knowledge/products/${encodeURIComponent(goodsId)}/restore${buildQuery({ shop_id: shopId })}`,
+    { operator: "local_admin", reason: "manual_restore" }
   );
 }
 

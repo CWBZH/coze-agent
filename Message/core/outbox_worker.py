@@ -8,6 +8,7 @@ import contextlib
 from typing import Any, Callable
 
 from utils.logger_loguru import get_logger
+from utils.pdd_send_policy import is_pdd_sending_enabled
 
 from .reliable_queue import ReliableQueueStore, get_reliable_queue_store
 
@@ -156,6 +157,8 @@ class OutboxWorker:
         return sender.send_text(buyer_id, reply_text)
 
     def _suppression_status(self, row: dict[str, Any], now: float) -> str:
+        if not is_pdd_sending_enabled():
+            return "pdd_sending_disabled"
         stats_fn = getattr(self.store, "recent_reply_stats", None)
         if not callable(stats_fn):
             return ""

@@ -29,6 +29,7 @@ from database.redis_manager import redis_manager
 from core.config import FALLBACK_SECOND_REMINDER_BEFORE_EXPIRY, HUMAN_LOCK_TTL, INFERENCE_LOCK_TTL
 from core.constants import IMAGE_INTERCEPT_REPLY, FALLBACK_REPLY_POOL
 from Message.workflow.private_trace import write_private_trace
+from utils.pdd_send_policy import is_pdd_sending_enabled
 import random
 
 
@@ -920,6 +921,58 @@ class AIReplyHandler(BaseHandler):
                     )
                 )
                 self.logger.warning(f"缺少发送信息: shop_id={shop_id}, user_id={user_id}, from_uid={from_uid}")
+                return False
+
+            if not is_pdd_sending_enabled():
+                duration_ms = int((time.perf_counter() - send_started_at) * 1000)
+                if outbox_store and outbox_id:
+                    outbox_store.mark_outbox_suppressed(
+                        outbox_id,
+                        "pdd_sending_disabled",
+                        error_summary_hash="pdd_sending_disabled",
+                    )
+                self.logger.warning(
+                    "event=pdd.reply.send.suppressed "
+                    + self._trace_fields(
+                        trace,
+                        send_request_id=send_request_id,
+                        action="send_text",
+                        reply_action=reply_action,
+                        reply_source=reply_source,
+                        duration_ms=duration_ms,
+                        pdd_result="not_called",
+                        pdd_send_status="pdd_sending_disabled",
+                        reply_length=reply_length,
+                        reply_hash=reply_hash,
+                    )
+                )
+                self._write_send_private_trace(
+                    trace,
+                    "send_completed",
+                    send_request_id=send_request_id,
+                    final_status="reply_suppressed",
+                    duration_ms=duration_ms,
+                    pdd_send_status="pdd_sending_disabled",
+                    pdd_result="not_called",
+                    reply_action=reply_action,
+                    reply_source=reply_source,
+                    reply_text=reply,
+                    reply_length=reply_length,
+                    reply_hash=reply_hash,
+                )
+                self.logger.info(
+                    "event=pdd.message.completed "
+                    + self._trace_fields(
+                        trace,
+                        send_request_id=send_request_id,
+                        final_status="reply_suppressed",
+                        duration_ms=duration_ms,
+                        pdd_result="not_called",
+                        pdd_send_status="pdd_sending_disabled",
+                        reply_length=reply_length,
+                        reply_hash=reply_hash,
+                    )
+                )
                 return False
 
             # 尝试发送消息

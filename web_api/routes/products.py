@@ -14,11 +14,12 @@ def list_products(
     q: str | None = None,
     version: str | None = None,
     indexed_status: str | None = None,
+    include_archived: bool = False,
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=100),
     service: ProductService = Depends(get_product_service),
 ) -> dict:
-    items, total, warning = service.list_products(shop_id, q, version, indexed_status, page, page_size)
+    items, total, warning = service.list_products(shop_id, q, version, indexed_status, page, page_size, include_archived)
     payload = {"items": [item.model_dump() for item in items], "total": total, "page": page, "page_size": page_size}
     if warning:
         payload["warning"] = warning
@@ -62,5 +63,10 @@ def get_product_chunks(
 
 
 @router.get("/{goods_id}")
-def get_product(goods_id: str, shop_id: str | None = None, service: ProductService = Depends(get_product_service)) -> dict:
-    return service.get_product(goods_id, shop_id=shop_id).model_dump()
+def get_product(
+    goods_id: str,
+    shop_id: str | None = None,
+    include_archived: bool = False,
+    service: ProductService = Depends(get_product_service),
+) -> dict:
+    return service.get_product(goods_id, shop_id=shop_id, include_archived=include_archived).model_dump()

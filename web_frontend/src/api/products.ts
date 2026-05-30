@@ -9,6 +9,8 @@ export type Product = {
   version: string;
   knowledge_status: string;
   indexed_status: string;
+  archived_at?: string;
+  archive_reason?: string;
   updated_at: string;
   price: string;
   specs: string[];
@@ -64,6 +66,7 @@ export type ProductQuery = {
   q?: string;
   version?: string;
   indexed_status?: string;
+  include_archived?: boolean;
   page?: number;
   page_size?: number;
 };
@@ -85,8 +88,11 @@ export function getProducts(params: ProductQuery = {}) {
   );
 }
 
-export function getProduct(goodsId: string, shopId?: string) {
-  const query = shopId ? `?shop_id=${encodeURIComponent(shopId)}` : "";
+export function getProduct(goodsId: string, shopId?: string, includeArchived = false) {
+  const params = new URLSearchParams();
+  if (shopId) params.set("shop_id", shopId);
+  if (includeArchived) params.set("include_archived", "true");
+  const query = params.toString() ? `?${params.toString()}` : "";
   return apiGet<ProductDetail>(`/api/products/${encodeURIComponent(goodsId)}${query}`);
 }
 

@@ -5,6 +5,8 @@ import { getProducts, Product, ProductDetail, getProduct } from "../api/products
 import { getShops, Shop } from "../api/shops";
 import {
   archiveSop,
+  archiveProduct,
+  clearProductOverride,
   createSop,
   EffectiveProduct,
   getEffectiveProduct,
@@ -20,6 +22,7 @@ import {
   ProductOverride,
   publishProduct,
   publishSop,
+  restoreProduct,
   retryIndexJob,
   runIndexJob,
   saveProductOverride,
@@ -593,12 +596,58 @@ function ProductsTab({
 
   function publishSelectedProduct() {
     if (!selectedProduct) return;
+    if (selectedProduct.knowledge_status === "archived" || effective?.knowledge_status === "archived") {
+      setError("商品知识已归档，恢复后才能发布索引。");
+      return;
+    }
     publishProduct(selectedProduct.goods_id, selectedProduct.shop_id)
       .then((result) => {
         setEffective(result.effective);
         setLastJob(result.index_job);
         setMessage(`商品知识已发布并执行真实索引。当前版本状态：${result.version.status}。`);
         onPublished(result.version, result.index_job);
+      })
+      .catch((err: Error) => setError(err.message));
+  }
+
+  function clearSelectedOverride() {
+    if (!selectedProduct) return;
+    if (!window.confirm("确认清空该商品的人工增强字段吗？原始商品同步数据不会被删除。")) {
+      return;
+    }
+    clearProductOverride(selectedProduct.goods_id, selectedProduct.shop_id)
+      .then((emptyOverride) => {
+        setOverride(emptyOverride);
+        setMessage("人工增强字段已清空。");
+        return loadEffective(selectedProduct.goods_id, selectedProduct.shop_id);
+      })
+      .catch((err: Error) => setError(err.message));
+  }
+
+  function archiveSelectedProduct() {
+    if (!selectedProduct) return;
+    const reason = window.prompt("请输入归档原因。归档后该商品不会进入商品列表和 RAG 当前知识。", "manual_archive");
+    if (!reason) return;
+    archiveProduct(selectedProduct.goods_id, selectedProduct.shop_id, reason)
+      .then((result) => {
+        setEffective(result.effective);
+        setMessage("商品知识已归档，已从当前商品知识列表和 RAG 生效版本中排除。");
+        setProducts((items) => items.filter((item) => !(item.goods_id === selectedProduct.goods_id && item.shop_id === selectedProduct.shop_id)));
+        setSelectedProduct(null);
+        setDetail(null);
+        setOverride(null);
+      })
+      .catch((err: Error) => setError(err.message));
+  }
+
+  function restoreSelectedProduct() {
+    if (!selectedProduct) return;
+    restoreProduct(selectedProduct.goods_id, selectedProduct.shop_id)
+      .then((result) => {
+        setEffective(result.effective);
+        setMessage("商品知识已恢复。请重新发布并索引后再用于 AI。");
+        loadProducts();
+        return loadEffective(selectedProduct.goods_id, selectedProduct.shop_id);
       })
       .catch((err: Error) => setError(err.message));
   }
@@ -638,19 +687,43 @@ function ProductsTab({
         </div>
         {state === "loading" ? <div className="state-card">正在加载商品...</div> : null}
         {state === "error" ? <div className="state-card error-state">{error}</div> : null}
-        <DataTable<Product>
-          rows={products}
-          emptyMessage="暂无商品。"
-          onRowClick={selectProduct}
-          columns={[
-            { key: "goods_id", label: "goods_id" },
-            { key: "goods_name", label: "商品名 goods_name" },
-            { key: "product_title", label: "商品标题 product_title" },
-            { key: "shop_id", label: "shop_id" },
-            { key: "price", label: "价格 price" },
-            { key: "knowledge_status", label: "知识状态" }
-          ]}
-        />
+        {products.length === 0 && state !== "loading" ? (
+          <div className="state-card">暂无商品。请先在店铺接入页完成商品同步。</div>
+        ) : (
+          <div className="product-knowledge-list">
+            {products.map((product) => (
+              <button
+                className={selectedProduct?.goods_id === product.goods_id && selectedProduct?.shop_id === product.shop_id ? "product-knowledge-row selected" : "product-knowledge-row"}
+                key={`${product.shop_id}:${product.goods_id}`}
+                onClick={() => selectProduct(product)}
+                type="button"
+              >
+                <div className="product-row-main">
+                  <div className="product-row-title-line">
+                    <strong>{product.product_title || product.goods_name || "未命名商品"}</strong>
+                    <StatusBadge tone={statusTone(product.knowledge_status)}>{product.knowledge_status || "unknown"}</StatusBadge>
+                  </div>
+                  <div className="product-row-meta">
+                    <span>goods_id: {product.goods_id}</span>
+                    <span>shop_id: {product.shop_id}</span>
+                    <span>商品名: {product.goods_name || "空"}</span>
+                  </div>
+                  <p className="product-row-note">
+                    原始商品字段由商品同步写入，只读；人工修改会保存为人工增强字段，发布并真实索引成功后才成为 AI 当前使用知识。
+                  </p>
+                </div>
+                <div className="product-row-side">
+                  <div className="product-row-facts">
+                    <span><b>价格</b>{product.price || "空"}</span>
+                    <span><b>同步状态</b>{product.knowledge_status || "unknown"}</span>
+                    <span><b>当前版本</b>{product.version || "未发布"}</span>
+                    <span><b>更新时间</b>{product.updated_at || "未知"}</span>
+                  </div>
+                </div>
+              </button>
+            ))}
+          </div>
+        )}
       </section>
 
       <section className="panel">
@@ -695,8 +768,14 @@ function ProductsTab({
             <span className="muted">content_hash: {override.content_hash || "新草稿"}</span>
             <div className="button-row">
               <button type="button" onClick={saveOverride}>保存人工知识</button>
-              <button type="button" onClick={publishSelectedProduct}>发布商品知识并真实索引</button>
+              <button type="button" onClick={publishSelectedProduct} disabled={selectedProduct?.knowledge_status === "archived" || effective?.knowledge_status === "archived"}>发布商品知识并真实索引</button>
               <button type="button" onClick={runLastJob} disabled={!lastJob || !["pending", "retrying", "failed"].includes(lastJob.status)}>重新执行真实索引</button>
+              <button type="button" className="secondary-button" onClick={clearSelectedOverride}>清空人工增强</button>
+              {selectedProduct?.knowledge_status === "archived" || effective?.knowledge_status === "archived" ? (
+                <button type="button" onClick={restoreSelectedProduct}>恢复商品知识</button>
+              ) : (
+                <button type="button" className="danger-button" onClick={archiveSelectedProduct}>归档商品知识</button>
+              )}
             </div>
             <div className="warning-banner">当前生效版本才是 InternalEngine 会检索的知识。草稿修改不会立即生效，必须发布并索引成功。真实索引会调用 embedding 服务并写入 pgvector，但不会发送 PDD 消息。</div>
             <ActiveVersionSummary

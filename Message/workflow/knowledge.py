@@ -24,9 +24,9 @@ class KnowledgeRetriever(Protocol):
 class ProductKnowledgeRetriever:
     """Simple shop-scoped product retriever.
 
-    The MVP intentionally uses deterministic keyword scoring only. It accepts
-    injected records so tests can run without DB access and production can wire a
-    read-only repository later.
+    This retriever uses deterministic keyword scoring over injected records. It
+    remains read-only and shop-scoped, so tests can run without DB access and
+    production can provide records from a repository without side effects.
     """
 
     PRODUCT_DOMAINS = {"product_basic", "product_catalog"}

@@ -36,7 +36,9 @@ def test_shops_list_is_internal_only_and_safe():
     _assert_no_secret_values(response.text)
 
 
-def test_ai_settings_force_no_send_and_has_no_backend_selector():
+def test_ai_settings_force_no_send_and_has_no_backend_selector(monkeypatch):
+    monkeypatch.delenv("PDD_SENDING_ENABLED", raising=False)
+
     get_response = client.get("/api/shops/323473738/ai-settings")
     assert get_response.status_code == 200
     settings = get_response.json()
@@ -54,7 +56,7 @@ def test_ai_settings_force_no_send_and_has_no_backend_selector():
     updated = put_response.json()
     assert updated["send_enabled"] is False
     assert updated["no_send_mode"] is True
-    assert updated["warning"] == "real PDD sending is disabled in MVP"
+    assert updated["warning"] == "PDD 真实发送未启用：需要配置 PDD_SENDING_ENABLED=true 后才能开启发送。"
 
 
 def test_products_list_and_detail_return_full_business_fields():

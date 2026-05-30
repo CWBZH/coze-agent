@@ -13,6 +13,7 @@ from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 from uuid import uuid4
 
+from web_api.errors import ApiError
 from web_api.services.sqlite_readonly import DEFAULT_DB_PATH, parse_json_list_or_text, parse_json_object, pick_text
 
 
@@ -196,6 +197,12 @@ class KnowledgeCenterRepository:
             raise RuntimeError("override_upsert_failed")
         return result
 
+    def clear_override(self, shop_id: str, goods_id: str) -> dict[str, Any]:
+        with self._connect() as conn:
+            conn.execute("DELETE FROM product_manual_overrides WHERE shop_id=? AND goods_id=?", (shop_id, goods_id))
+            conn.commit()
+        return empty_product_override(shop_id, goods_id)
+
     def get_product_raw(self, shop_id: str, goods_id: str, *, conn: sqlite3.Connection | None = None) -> dict[str, Any]:
         row = self._fetch_one(
             "SELECT * FROM product_knowledge WHERE shop_id=? AND goods_id=? ORDER BY updated_at DESC, id DESC LIMIT 1",
@@ -218,6 +225,46 @@ class KnowledgeCenterRepository:
         if not row:
             raise KeyError(f"product_not_found:{shop_id}:{goods_id}")
         return row
+
+    def archive_product(self, shop_id: str, goods_id: str, *, actor: str = "local_admin", reason: str = "") -> dict[str, Any]:
+        now = _now()
+        with self._connect() as conn:
+            self._ensure_product_archive_columns(conn)
+            raw = self.get_product_raw(shop_id, goods_id, conn=conn)
+            conn.execute(
+                """
+                UPDATE product_knowledge
+                SET knowledge_status='archived', archived_at=?, archived_by=?, archive_reason=?, updated_at=?
+                WHERE id=?
+                """,
+                (now, actor, reason, now, raw["id"]),
+            )
+            conn.execute(
+                """
+                UPDATE knowledge_versions
+                SET is_active=0, status=CASE WHEN status='active' THEN 'archived' ELSE status END, retired_at=?
+                WHERE shop_id=? AND source_type='product' AND source_id=?
+                """,
+                (now, shop_id, goods_id),
+            )
+            conn.commit()
+            return self.get_product_raw(shop_id, goods_id, conn=conn)
+
+    def restore_product(self, shop_id: str, goods_id: str, *, actor: str = "local_admin") -> dict[str, Any]:
+        now = _now()
+        with self._connect() as conn:
+            self._ensure_product_archive_columns(conn)
+            raw = self.get_product_raw(shop_id, goods_id, conn=conn)
+            conn.execute(
+                """
+                UPDATE product_knowledge
+                SET knowledge_status='synced', archived_at=NULL, archived_by=NULL, archive_reason=NULL, updated_at=?
+                WHERE id=?
+                """,
+                (now, raw["id"]),
+            )
+            conn.commit()
+            return self.get_product_raw(shop_id, goods_id, conn=conn)
 
     def create_version_and_job(
         self,
@@ -533,6 +580,20 @@ class KnowledgeCenterRepository:
         with self._connect() as local_conn:
             return local_conn.execute(sql, (table_name,)).fetchone() is not None
 
+    def _ensure_product_archive_columns(self, conn: sqlite3.Connection) -> None:
+        if not self._table_exists("product_knowledge", conn=conn):
+            return
+        existing = {row[1] for row in conn.execute("PRAGMA table_info(product_knowledge)").fetchall()}
+        for column, column_type in {
+            "knowledge_status": "TEXT DEFAULT 'synced'",
+            "archived_at": "TEXT",
+            "archive_reason": "TEXT",
+            "archived_by": "TEXT",
+            "updated_at": "TEXT",
+        }.items():
+            if column not in existing:
+                conn.execute(f"ALTER TABLE product_knowledge ADD COLUMN {column} {column_type}")
+
 
 class KnowledgeCenterService:
     def __init__(
@@ -575,6 +636,25 @@ class KnowledgeCenterService:
     def upsert_override(self, shop_id: str, goods_id: str, **fields: Any) -> dict[str, Any]:
         return self.repository.upsert_override(shop_id, goods_id, **fields)
 
+    def clear_override(self, shop_id: str, goods_id: str) -> dict[str, Any]:
+        return self.repository.clear_override(shop_id, goods_id)
+
+    def archive_product(self, shop_id: str, goods_id: str, *, actor: str = "local_admin", reason: str = "") -> dict[str, Any]:
+        raw = self.repository.archive_product(shop_id, goods_id, actor=actor, reason=reason)
+        return {
+            "status": "archived",
+            "raw": _product_raw_payload(raw),
+            "effective": self.build_effective_product_knowledge(shop_id, goods_id),
+        }
+
+    def restore_product(self, shop_id: str, goods_id: str, *, actor: str = "local_admin") -> dict[str, Any]:
+        raw = self.repository.restore_product(shop_id, goods_id, actor=actor)
+        return {
+            "status": "restored",
+            "raw": _product_raw_payload(raw),
+            "effective": self.build_effective_product_knowledge(shop_id, goods_id),
+        }
+
     def build_effective_product_knowledge(self, shop_id: str, goods_id: str) -> dict[str, Any]:
         raw = self.repository.get_product_raw(shop_id, goods_id)
         override = self.repository.get_override(shop_id, goods_id) or {}
@@ -601,6 +681,9 @@ class KnowledgeCenterService:
             "goods_id": goods_id,
             "goods_name": fields["goods_name"]["value"],
             "domain": "product_catalog",
+            "knowledge_status": raw_payload.get("knowledge_status") or "synced",
+            "archived_at": raw_payload.get("archived_at") or "",
+            "archive_reason": raw_payload.get("archive_reason") or "",
             "fields": fields,
             "raw": raw_payload,
             "override": _override_payload(override, shop_id=shop_id, goods_id=goods_id),
@@ -639,6 +722,14 @@ class KnowledgeCenterService:
 
     def publish_product(self, shop_id: str, goods_id: str, actor: str = "local_admin", *, run_index: bool = True) -> dict[str, Any]:
         snapshot = self.build_effective_product_knowledge(shop_id, goods_id)
+        if snapshot.get("knowledge_status") == "archived":
+            raise ApiError(
+                "PRODUCT_ARCHIVED",
+                "商品知识已归档，恢复后才能发布索引。",
+                status_code=409,
+                retryable=False,
+                next_action="restore_product_knowledge",
+            )
         result = self.repository.create_version_and_job(
             shop_id=shop_id,
             source_type="product",
@@ -998,6 +1089,9 @@ def _product_raw_payload(raw: dict[str, Any]) -> dict[str, Any]:
         "price": str(raw.get("price") or raw_detail.get("price") or ""),
         "specifications": raw.get("specifications") or raw_detail.get("specifications") or raw_detail.get("sku_options") or "",
         "knowledge_status": str(raw.get("knowledge_status") or ""),
+        "archived_at": str(raw.get("archived_at") or ""),
+        "archive_reason": str(raw.get("archive_reason") or ""),
+        "archived_by": str(raw.get("archived_by") or ""),
         "updated_at": str(raw.get("updated_at") or ""),
         "raw_detail_json": raw_detail,
     }

@@ -209,7 +209,13 @@ class ReliableQueueStore:
         self._update_outbox_status(outbox_id, status, pdd_error_code=pdd_error_code, error_summary_hash=error_summary_hash)
 
     def mark_outbox_suppressed(self, outbox_id: str, status: str, *, error_summary_hash: str = "") -> None:
-        allowed = {"suppressed_duplicate", "suppressed_repeated_40013", "blocked_by_platform_policy", "dead_letter"}
+        allowed = {
+            "suppressed_duplicate",
+            "suppressed_repeated_40013",
+            "blocked_by_platform_policy",
+            "pdd_sending_disabled",
+            "dead_letter",
+        }
         safe_status = status if status in allowed else "dead_letter"
         self._update_outbox_status(outbox_id, safe_status, error_summary_hash=error_summary_hash)
 

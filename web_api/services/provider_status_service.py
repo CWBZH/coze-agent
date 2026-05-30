@@ -4,6 +4,7 @@ import os
 from urllib.parse import urlparse
 
 from web_api.schemas.provider_status import ProviderState, ProviderStatusResponse
+from utils.pdd_send_policy import is_pdd_sending_enabled, pdd_sending_status
 
 
 PGVECTOR_ENVS = ("AI_WORKFLOW_PGVECTOR_DSN", "WEB_API_PGVECTOR_DSN")
@@ -11,22 +12,24 @@ EMBEDDING_PROVIDER_ENV = "WEB_KNOWLEDGE_EMBEDDING_PROVIDER"
 DOUBAO_ENVS = ("DOUBAO_EMBEDDING_BASE_URL", "DOUBAO_EMBEDDING_MODEL", "DOUBAO_EMBEDDING_API_KEY")
 OLLAMA_ENVS = ("AI_WORKFLOW_OLLAMA_BASE_URL", "AI_WORKFLOW_EMBEDDING_MODEL")
 LLM_ENVS = ("AI_WORKFLOW_LLM_BASE_URL", "AI_WORKFLOW_LLM_MODEL", "AI_WORKFLOW_LLM_API_KEY")
+PDD_SENDING_ENV = "PDD_SENDING_ENABLED"
 
 
 class ProviderStatusService:
     """Read provider configuration state without contacting providers."""
 
     def get_status(self) -> ProviderStatusResponse:
+        pdd_enabled = is_pdd_sending_enabled()
         providers = {
             "pgvector": self._pgvector_status(),
             "embedding": self._embedding_status(),
             "ollama": self._ollama_status(),
             "llm": self._llm_status(),
             "pdd_sending": ProviderState(
-                configured=False,
-                env_keys_present=[],
-                status="disabled",
-                safe_display={"state": "disabled"},
+                configured=pdd_enabled,
+                env_keys_present=[PDD_SENDING_ENV] if os.environ.get(PDD_SENDING_ENV) else [],
+                status=pdd_sending_status(),
+                safe_display={"state": pdd_sending_status()},
             ),
         }
         warnings = [
@@ -34,7 +37,7 @@ class ProviderStatusService:
             for name, state in providers.items()
             if state.status in {"config_missing", "invalid_config"} and name in {"pgvector", "embedding", "llm"}
         ]
-        return ProviderStatusResponse(engine="internal", no_send=True, providers=providers, warnings=warnings)
+        return ProviderStatusResponse(engine="internal", no_send=not pdd_enabled, providers=providers, warnings=warnings)
 
     def _pgvector_status(self) -> ProviderState:
         env_name = next((key for key in PGVECTOR_ENVS if os.environ.get(key, "").strip()), PGVECTOR_ENVS[0])

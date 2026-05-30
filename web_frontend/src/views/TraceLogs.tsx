@@ -103,7 +103,7 @@ export function TraceLogs() {
         <div className="page-intro">
           <h2>调试日志</h2>
           <p>
-            实时查看 InternalEngine no-send 链路状态，包括 LLM 调用证据、Embedding、pgvector RAG 命中、意图、风控和最终回复。
+            实时查看 InternalEngine no-send 链路状态，包括 LLM 调用证据、Embedding、pgvector RAG 命中、意图、安全和最终回复。
             这里只展示排查用业务信息，不展示密钥、cookie、token 或密码。
           </p>
         </div>

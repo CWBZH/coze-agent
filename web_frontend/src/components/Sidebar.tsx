@@ -10,7 +10,7 @@ const navItems = [
   ["人工锁管理", "/human-locks"],
   ["试聊调试", "/live-chat"],
   ["调试日志", "/trace-logs"],
-  ["系统设置", "/settings"]
+  ["系统设置", "/settings"],
 ];
 
 export function Sidebar() {

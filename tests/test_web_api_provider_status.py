@@ -20,6 +20,7 @@ def test_provider_status_missing_environment_is_config_missing(monkeypatch):
         "AI_WORKFLOW_LLM_BASE_URL",
         "AI_WORKFLOW_LLM_MODEL",
         "AI_WORKFLOW_LLM_API_KEY",
+        "PDD_SENDING_ENABLED",
     ):
         monkeypatch.delenv(key, raising=False)
 
@@ -48,6 +49,7 @@ def test_provider_status_configured_doubao_environment_returns_safe_summary(monk
     monkeypatch.setenv("AI_WORKFLOW_LLM_BASE_URL", "https://llm.example.test/v1")
     monkeypatch.setenv("AI_WORKFLOW_LLM_MODEL", "test-model")
     monkeypatch.setenv("AI_WORKFLOW_LLM_API_KEY", "ark-test-secret-value")
+    monkeypatch.delenv("PDD_SENDING_ENABLED", raising=False)
 
     response = _client().get("/api/provider-status")
 
@@ -67,6 +69,7 @@ def test_provider_status_configured_doubao_environment_returns_safe_summary(monk
     assert payload["providers"]["llm"]["status"] == "configured"
     assert payload["providers"]["llm"]["safe_display"]["base_url"] == "configured"
     assert payload["providers"]["llm"]["safe_display"]["model"] == "test-model"
+    assert payload["providers"]["pdd_sending"]["status"] == "disabled"
     assert "ollama" not in payload["warnings"]
     assert "super-secret" not in response.text
     assert "doubao-secret-value" not in response.text
@@ -84,6 +87,7 @@ def test_provider_status_configured_ollama_embedding_returns_safe_summary(monkey
     monkeypatch.setenv("AI_WORKFLOW_LLM_BASE_URL", "https://llm.example.test/v1")
     monkeypatch.setenv("AI_WORKFLOW_LLM_MODEL", "test-model")
     monkeypatch.setenv("AI_WORKFLOW_LLM_API_KEY", "ark-test-secret-value")
+    monkeypatch.delenv("PDD_SENDING_ENABLED", raising=False)
 
     response = _client().get("/api/provider-status")
 
@@ -94,8 +98,33 @@ def test_provider_status_configured_ollama_embedding_returns_safe_summary(monkey
     assert payload["providers"]["embedding"]["safe_display"]["model"] == "bge-m3"
     assert payload["providers"]["ollama"]["status"] == "configured"
     assert payload["providers"]["ollama"]["safe_display"]["model"] == "bge-m3"
+    assert payload["providers"]["pdd_sending"]["status"] == "disabled"
     assert "super-secret" not in response.text
     assert "ark-test-secret-value" not in response.text
+
+
+def test_provider_status_pdd_sending_enabled_is_explicit(monkeypatch):
+    monkeypatch.setenv("PDD_SENDING_ENABLED", "true")
+    monkeypatch.delenv("AI_WORKFLOW_PGVECTOR_DSN", raising=False)
+    monkeypatch.delenv("WEB_API_PGVECTOR_DSN", raising=False)
+    monkeypatch.delenv("WEB_KNOWLEDGE_EMBEDDING_PROVIDER", raising=False)
+    monkeypatch.delenv("DOUBAO_EMBEDDING_BASE_URL", raising=False)
+    monkeypatch.delenv("DOUBAO_EMBEDDING_MODEL", raising=False)
+    monkeypatch.delenv("DOUBAO_EMBEDDING_API_KEY", raising=False)
+    monkeypatch.delenv("AI_WORKFLOW_OLLAMA_BASE_URL", raising=False)
+    monkeypatch.delenv("AI_WORKFLOW_EMBEDDING_MODEL", raising=False)
+    monkeypatch.delenv("AI_WORKFLOW_LLM_BASE_URL", raising=False)
+    monkeypatch.delenv("AI_WORKFLOW_LLM_MODEL", raising=False)
+    monkeypatch.delenv("AI_WORKFLOW_LLM_API_KEY", raising=False)
+
+    response = _client().get("/api/provider-status")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["no_send"] is False
+    assert payload["providers"]["pdd_sending"]["status"] == "enabled"
+    assert payload["providers"]["pdd_sending"]["configured"] is True
+    assert payload["providers"]["pdd_sending"]["safe_display"] == {"state": "enabled"}
 
 
 def test_provider_status_invalid_pgvector_dsn_is_sanitized(monkeypatch):

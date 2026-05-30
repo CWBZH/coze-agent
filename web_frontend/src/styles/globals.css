@@ -236,7 +236,7 @@ pre {
 .product-knowledge-row {
   display: grid;
   width: 100%;
-  grid-template-columns: minmax(0, 1fr) minmax(260px, 34%);
+  grid-template-columns: minmax(360px, 1fr) minmax(300px, 34%);
   gap: 16px;
   align-items: stretch;
   border: 1px solid #e2e8f0;
@@ -245,6 +245,10 @@ pre {
   color: #172033;
   padding: 14px;
   text-align: left;
+}
+
+.product-knowledge-row button {
+  align-self: start;
 }
 
 .product-knowledge-row:hover,
@@ -308,6 +312,18 @@ pre {
 .product-row-facts b {
   color: #64748b;
   font-size: 12px;
+}
+
+.product-row-side {
+  display: grid;
+  align-content: start;
+  gap: 8px;
+}
+
+.product-row-note {
+  color: #475569;
+  font-size: 13px;
+  line-height: 1.45;
 }
 
 .warning-banner,
@@ -507,6 +523,14 @@ pre {
   flex-wrap: wrap;
   gap: 10px;
   margin: 10px 0;
+}
+
+.secondary-button {
+  background: #334155;
+}
+
+.danger-button {
+  background: #b91c1c;
 }
 
 .compact-button {
@@ -1008,6 +1032,27 @@ pre {
   max-height: calc(100vh - 140px);
 }
 
+.trace-evidence-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 10px 0 14px;
+}
+
+.trace-evidence-pill {
+  border-radius: 999px;
+  background: #e2e8f0;
+  color: #334155;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 4px 9px;
+}
+
+.trace-evidence-pill.active {
+  background: #dcfce7;
+  color: #166534;
+}
+
 .trace-field-group {
   border-top: 1px solid #edf2f7;
   padding-top: 10px;
@@ -1028,8 +1073,8 @@ pre {
 
 .trace-kv-row {
   display: grid;
-  grid-template-columns: minmax(150px, 42%) minmax(0, 1fr);
-  gap: 12px;
+  grid-template-columns: minmax(170px, 240px) minmax(0, 1fr);
+  column-gap: 18px;
   border-bottom: 1px solid #edf2f7;
   padding: 8px 0;
   align-items: start;
@@ -1037,12 +1082,17 @@ pre {
 
 .trace-kv-row dt {
   color: #64748b;
+  font-size: 13px;
   font-weight: 700;
+  line-height: 1.35;
   min-width: 0;
   overflow-wrap: anywhere;
 }
 
 .trace-kv-row dd {
+  color: #0f172a;
+  font-size: 13px;
+  line-height: 1.45;
   margin: 0;
   min-width: 0;
   overflow-wrap: anywhere;

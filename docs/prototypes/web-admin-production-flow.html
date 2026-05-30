@@ -1,0 +1,782 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Web Admin 生产上线流程原型</title>
+  <style>
+    :root {
+      --nav: #101827;
+      --nav-soft: #172238;
+      --bg: #f4f7fb;
+      --panel: #ffffff;
+      --line: #d9e2ef;
+      --text: #0b1733;
+      --muted: #587093;
+      --blue: #2563eb;
+      --blue-soft: #eaf2ff;
+      --green: #16a34a;
+      --green-soft: #eaf8ef;
+      --yellow: #b7791f;
+      --yellow-soft: #fff7dd;
+      --red: #dc2626;
+      --red-soft: #fff0f0;
+      --gray: #64748b;
+      --gray-soft: #eef2f7;
+      --radius: 8px;
+      --shadow: 0 12px 30px rgba(15, 23, 42, 0.08);
+      font-family: "Microsoft YaHei", "PingFang SC", Arial, sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.55;
+    }
+
+    .app {
+      display: grid;
+      grid-template-columns: 248px 1fr;
+      min-height: 100vh;
+    }
+
+    aside {
+      background: var(--nav);
+      color: #dbeafe;
+      padding: 24px 18px;
+      position: sticky;
+      top: 0;
+      height: 100vh;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 28px;
+    }
+
+    .brand-mark {
+      width: 42px;
+      height: 42px;
+      border-radius: 10px;
+      display: grid;
+      place-items: center;
+      background: var(--blue);
+      color: #fff;
+      font-weight: 800;
+    }
+
+    .brand-title {
+      font-size: 18px;
+      font-weight: 800;
+      color: #fff;
+    }
+
+    .brand-subtitle {
+      font-size: 12px;
+      color: #9fb3d4;
+    }
+
+    nav a {
+      display: block;
+      color: #dbeafe;
+      text-decoration: none;
+      padding: 12px 14px;
+      border-radius: var(--radius);
+      margin-bottom: 6px;
+      font-weight: 700;
+    }
+
+    nav a.active,
+    nav a:hover {
+      background: var(--nav-soft);
+      color: #fff;
+    }
+
+    main {
+      min-width: 0;
+    }
+
+    header {
+      background: #fff;
+      border-bottom: 1px solid var(--line);
+      padding: 22px 28px;
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      align-items: center;
+      position: sticky;
+      top: 0;
+      z-index: 5;
+    }
+
+    h1, h2, h3, p { margin-top: 0; }
+
+    h1 {
+      margin-bottom: 4px;
+      font-size: 26px;
+    }
+
+    .header-note {
+      color: var(--muted);
+      margin-bottom: 0;
+    }
+
+    .badges {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 10px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 800;
+      white-space: nowrap;
+    }
+
+    .blue { background: var(--blue-soft); color: var(--blue); }
+    .green { background: var(--green-soft); color: var(--green); }
+    .yellow { background: var(--yellow-soft); color: var(--yellow); }
+    .red { background: var(--red-soft); color: var(--red); }
+    .gray { background: var(--gray-soft); color: var(--gray); }
+
+    .content {
+      padding: 26px 28px 48px;
+      max-width: 1500px;
+    }
+
+    .hero {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      padding: 24px;
+      box-shadow: var(--shadow);
+      margin-bottom: 20px;
+    }
+
+    .hero-grid {
+      display: grid;
+      grid-template-columns: 1.5fr 1fr;
+      gap: 18px;
+      align-items: stretch;
+    }
+
+    .callout {
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      padding: 14px 16px;
+      background: #f8fbff;
+      margin-top: 14px;
+    }
+
+    .callout strong {
+      color: var(--blue);
+    }
+
+    .flow {
+      display: grid;
+      grid-template-columns: repeat(7, minmax(120px, 1fr));
+      gap: 10px;
+      margin-top: 18px;
+    }
+
+    .step {
+      border: 1px solid #bfdbfe;
+      background: var(--blue-soft);
+      border-radius: var(--radius);
+      padding: 14px;
+      min-height: 118px;
+    }
+
+    .step-number {
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      display: grid;
+      place-items: center;
+      background: var(--blue);
+      color: white;
+      font-weight: 800;
+      margin-bottom: 8px;
+    }
+
+    .step-title {
+      font-weight: 800;
+      margin-bottom: 6px;
+    }
+
+    .step-desc {
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .section {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      padding: 22px;
+      margin-top: 18px;
+    }
+
+    .section-title {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+
+    .section h2 {
+      font-size: 22px;
+      margin-bottom: 4px;
+    }
+
+    .section-subtitle {
+      color: var(--muted);
+      margin-bottom: 0;
+    }
+
+    .grid-2 {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+    }
+
+    .grid-3 {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 14px;
+    }
+
+    .card {
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      padding: 16px;
+      background: #fff;
+    }
+
+    .card h3 {
+      margin-bottom: 10px;
+      font-size: 17px;
+    }
+
+    .card p {
+      color: var(--muted);
+      margin-bottom: 10px;
+    }
+
+    ul {
+      margin: 0;
+      padding-left: 20px;
+      color: var(--muted);
+    }
+
+    li + li {
+      margin-top: 6px;
+    }
+
+    .timeline {
+      display: grid;
+      gap: 10px;
+    }
+
+    .timeline-row {
+      display: grid;
+      grid-template-columns: 170px 1fr 170px;
+      gap: 12px;
+      align-items: start;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      padding: 12px;
+      background: #fbfdff;
+    }
+
+    .timeline-label {
+      font-weight: 800;
+      color: var(--text);
+    }
+
+    .timeline-text {
+      color: var(--muted);
+    }
+
+    .button-row {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin-top: 12px;
+    }
+
+    .btn {
+      border: 0;
+      border-radius: 7px;
+      padding: 10px 14px;
+      font-weight: 800;
+      color: #fff;
+      background: var(--blue);
+    }
+
+    .btn.secondary { background: #334155; }
+    .btn.warning { background: #d97706; }
+    .btn.danger { background: #dc2626; }
+    .btn.disabled {
+      background: #94a3b8;
+      cursor: not-allowed;
+    }
+
+    .table {
+      width: 100%;
+      border-collapse: collapse;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      font-size: 14px;
+    }
+
+    .table th,
+    .table td {
+      border-bottom: 1px solid var(--line);
+      padding: 12px;
+      text-align: left;
+      vertical-align: top;
+    }
+
+    .table th {
+      background: #f8fafc;
+      color: var(--muted);
+    }
+
+    .table tr:last-child td {
+      border-bottom: 0;
+    }
+
+    .annotation {
+      border-left: 4px solid var(--blue);
+      background: var(--blue-soft);
+      padding: 12px 14px;
+      border-radius: 0 var(--radius) var(--radius) 0;
+      margin: 12px 0;
+      color: #1e3a8a;
+      font-weight: 700;
+    }
+
+    .danger-note {
+      border-left-color: var(--red);
+      background: var(--red-soft);
+      color: #991b1b;
+    }
+
+    .warning-note {
+      border-left-color: var(--yellow);
+      background: var(--yellow-soft);
+      color: #92400e;
+    }
+
+    .footer {
+      margin-top: 18px;
+      color: var(--muted);
+      font-size: 13px;
+      text-align: center;
+    }
+
+    @media (max-width: 1200px) {
+      .app { grid-template-columns: 1fr; }
+      aside { position: static; height: auto; }
+      nav { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+      .hero-grid, .grid-2, .grid-3 { grid-template-columns: 1fr; }
+      .flow { grid-template-columns: repeat(2, 1fr); }
+      .timeline-row { grid-template-columns: 1fr; }
+    }
+
+    @media (max-width: 640px) {
+      header { display: block; }
+      .badges { justify-content: flex-start; margin-top: 12px; }
+      .flow { grid-template-columns: 1fr; }
+      .content { padding: 18px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <aside>
+      <div class="brand">
+        <div class="brand-mark">IE</div>
+        <div>
+          <div class="brand-title">InternalEngine</div>
+          <div class="brand-subtitle">生产上线流程原型</div>
+        </div>
+      </div>
+      <nav>
+        <a class="active" href="#onboarding">店铺接入</a>
+        <a href="#shop-management">店铺管理</a>
+        <a href="#product-sync">商品同步</a>
+        <a href="#knowledge">知识中心</a>
+        <a href="#sop">SOP 管理</a>
+        <a href="#validation">验收与启用 AI</a>
+        <a href="#safety">安全边界</a>
+      </nav>
+    </aside>
+
+    <main>
+      <header>
+        <div>
+          <h1>Web Admin 生产上线流程原型</h1>
+          <p class="header-note">用于确认最终后台操作路径、阻断规则和运营提示。此页面是静态原型，不连接真实 API。</p>
+        </div>
+        <div class="badges">
+          <span class="badge blue">真实索引 only</span>
+          <span class="badge green">不发送 PDD</span>
+          <span class="badge yellow">启用 AI 需确认</span>
+          <span class="badge gray">敏感信息不展示</span>
+        </div>
+      </header>
+
+      <div class="content">
+        <section class="hero" id="onboarding">
+          <div class="hero-grid">
+            <div>
+              <h2>新店铺接入主流程</h2>
+              <p class="section-subtitle">运营从这里完成新店铺授权、商品同步、知识上线、no-send 验收，最后才允许启用 AI。</p>
+              <div class="callout">
+                <strong>流程原则：</strong> 未识别真实 PDD 店铺 ID / mall_id 前，商品同步、知识发布、AI 启用、worker 启用全部阻断。
+              </div>
+            </div>
+            <div class="callout">
+              <strong>运营提示：</strong>
+              <p style="margin: 8px 0 0;">远程浏览器登录只用于用户本人完成 PDD 登录、短信验证码、滑块、扫码或安全验证。系统只保存加密授权，不保存密码。</p>
+            </div>
+          </div>
+
+          <div class="flow">
+            <div class="step">
+              <div class="step-number">1</div>
+              <div class="step-title">填写店铺信息</div>
+              <div class="step-desc">店铺名称、PDD 账号、负责人。密码只用于本次登录。</div>
+            </div>
+            <div class="step">
+              <div class="step-number">2</div>
+              <div class="step-title">远程浏览器登录</div>
+              <div class="step-desc">在 noVNC 窗口完成平台验证，不绕过验证码。</div>
+            </div>
+            <div class="step">
+              <div class="step-number">3</div>
+              <div class="step-title">绑定真实店铺 ID</div>
+              <div class="step-desc">自动解析 mall_id；失败时允许人工绑定并审计。</div>
+            </div>
+            <div class="step">
+              <div class="step-number">4</div>
+              <div class="step-title">同步商品</div>
+              <div class="step-desc">只读拉取商品列表和详情，写入本地商品知识。</div>
+            </div>
+            <div class="step">
+              <div class="step-number">5</div>
+              <div class="step-title">发布知识</div>
+              <div class="step-desc">商品人工知识和 SOP 发布版本并真实索引。</div>
+            </div>
+            <div class="step">
+              <div class="step-number">6</div>
+              <div class="step-title">no-send 验收</div>
+              <div class="step-desc">验证价格、规格、用法、售后、敏感和转人工。</div>
+            </div>
+            <div class="step">
+              <div class="step-number">7</div>
+              <div class="step-title">启用 AI</div>
+              <div class="step-desc">Checklist 通过后，二次确认启用配置。</div>
+            </div>
+          </div>
+        </section>
+
+        <section class="section" id="shop-management">
+          <div class="section-title">
+            <div>
+              <h2>店铺管理</h2>
+              <p class="section-subtitle">接入完成后，日常运营从店铺管理进入。第一期不允许删除店铺，只允许归档。</p>
+            </div>
+            <span class="badge green">生产入口</span>
+          </div>
+
+          <table class="table">
+            <thead>
+              <tr>
+                <th>模块</th>
+                <th>运营可见内容</th>
+                <th>允许操作</th>
+                <th>阻断规则</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><strong>店铺列表</strong></td>
+                <td>真实 shop_id、店铺名称、授权状态、商品同步状态、知识状态、AI 状态、worker 只读状态</td>
+                <td>进入详情、重新授权、同步商品、进入知识中心、进入试聊、归档</td>
+                <td>没有真实 shop_id 时显示“身份待绑定”，不允许正式业务操作</td>
+              </tr>
+              <tr>
+                <td><strong>店铺详情</strong></td>
+                <td>授权状态、最近同步任务、商品覆盖率、active 知识版本、人工锁数量、审计记录</td>
+                <td>清除授权、关闭 AI、重新同步、查看审计</td>
+                <td>清除授权、关闭 AI、归档必须二次确认</td>
+              </tr>
+              <tr>
+                <td><strong>归档店铺</strong></td>
+                <td>归档原因、操作者、归档时间</td>
+                <td>归档，不物理删除</td>
+                <td>归档前必须关闭 AI，并确认不再接收运营操作</td>
+              </tr>
+            </tbody>
+          </table>
+
+          <div class="annotation danger-note">
+            危险操作必须拆开：清空接入流程不等于清除授权；清除授权不等于删除店铺；归档不等于物理删除。
+          </div>
+        </section>
+
+        <section class="section" id="product-sync">
+          <div class="section-title">
+            <div>
+              <h2>商品同步</h2>
+              <p class="section-subtitle">使用加密授权读取 PDD 商品列表和详情，写入本地 product_knowledge，不发送 PDD 消息。</p>
+            </div>
+            <span class="badge blue">只读 PDD</span>
+          </div>
+
+          <div class="grid-3">
+            <div class="card">
+              <h3>同步前检查</h3>
+              <ul>
+                <li>shop_auth 有效</li>
+                <li>真实 mall_id 已绑定</li>
+                <li>没有 remote-* 正式 shop_id</li>
+                <li>当前店铺未归档</li>
+              </ul>
+            </div>
+            <div class="card">
+              <h3>同步过程</h3>
+              <ul>
+                <li>创建 product_sync_job</li>
+                <li>拉取商品列表</li>
+                <li>逐个拉取详情</li>
+                <li>记录成功、失败、跳过</li>
+              </ul>
+            </div>
+            <div class="card">
+              <h3>同步后展示</h3>
+              <ul>
+                <li>商品总数</li>
+                <li>价格覆盖</li>
+                <li>规格覆盖</li>
+                <li>失败商品和重试入口</li>
+              </ul>
+            </div>
+          </div>
+
+          <div class="button-row">
+            <button class="btn">开始同步商品</button>
+            <button class="btn secondary">刷新同步状态</button>
+            <button class="btn warning">重试失败商品</button>
+            <button class="btn disabled">未绑定店铺时置灰</button>
+          </div>
+
+          <div class="annotation warning-note">
+            商品同步成功后，店铺接入页必须能恢复最近一次同步任务和覆盖率，不能因为跳转页面而丢失状态。
+          </div>
+        </section>
+
+        <section class="section" id="knowledge">
+          <div class="section-title">
+            <div>
+              <h2>商品知识上线</h2>
+              <p class="section-subtitle">PDD 原始商品数据只读，运营只编辑人工补充知识。发布后真实索引，索引成功后生效。</p>
+            </div>
+            <span class="badge green">真实索引</span>
+          </div>
+
+          <div class="timeline">
+            <div class="timeline-row">
+              <div class="timeline-label">1. 编辑人工知识</div>
+              <div class="timeline-text">补充卖点、用法、禁忌、售后口径、FAQ、客服话术。PDD 原始字段只读展示。</div>
+              <span class="badge gray">草稿</span>
+            </div>
+            <div class="timeline-row">
+              <div class="timeline-label">2. 保存草稿</div>
+              <div class="timeline-text">只保存运营编辑内容，不影响 AI 当前知识。</div>
+              <span class="badge blue">不生效</span>
+            </div>
+            <div class="timeline-row">
+              <div class="timeline-label">3. 发布版本</div>
+              <div class="timeline-text">生成版本快照，自动创建真实索引任务。</div>
+              <span class="badge yellow">待索引</span>
+            </div>
+            <div class="timeline-row">
+              <div class="timeline-label">4. 豆包 embedding</div>
+              <div class="timeline-text">调用服务器全局 Doubao API Key 生成向量，写入 pgvector。</div>
+              <span class="badge blue">真实索引</span>
+            </div>
+            <div class="timeline-row">
+              <div class="timeline-label">5. 生效切换</div>
+              <div class="timeline-text">索引成功后才切换 active version。失败时旧版本继续生效。</div>
+              <span class="badge green">Active</span>
+            </div>
+          </div>
+
+          <div class="annotation danger-note">
+            生产 UI 不展示 Fake 索引。Fake 只能保留在测试环境或自动化测试，不作为运营功能入口。
+          </div>
+        </section>
+
+        <section class="section" id="sop">
+          <div class="section-title">
+            <div>
+              <h2>SOP 管理</h2>
+              <p class="section-subtitle">SOP 与商品人工知识走同一套上线机制：草稿、发布、真实索引、生效、归档。</p>
+            </div>
+            <span class="badge yellow">需修复交互</span>
+          </div>
+
+          <div class="grid-2">
+            <div class="card">
+              <h3>左侧 SOP 列表</h3>
+              <ul>
+                <li>按店铺和业务场景筛选</li>
+                <li>显示状态：草稿、待索引、索引中、已生效、索引失败、已归档</li>
+                <li>点击一条 SOP 后，右侧编辑器明确加载该内容</li>
+                <li>新建 SOP 必须打开清晰表单，不能看起来无反应</li>
+              </ul>
+            </div>
+            <div class="card">
+              <h3>右侧 SOP 编辑器</h3>
+              <ul>
+                <li>显示当前正在编辑的 SOP 名称</li>
+                <li>未选择时显示空状态</li>
+                <li>必填：店铺、场景、标题、正文</li>
+                <li>发布后自动真实索引，成功后 active</li>
+              </ul>
+            </div>
+          </div>
+
+          <div class="button-row">
+            <button class="btn">新建 SOP</button>
+            <button class="btn secondary">保存草稿</button>
+            <button class="btn">发布并真实索引</button>
+            <button class="btn warning">打开试聊验证</button>
+            <button class="btn danger">归档 SOP</button>
+          </div>
+        </section>
+
+        <section class="section" id="validation">
+          <div class="section-title">
+            <div>
+              <h2>接入验收与启用 AI</h2>
+              <p class="section-subtitle">启用 AI 前必须完成 checklist。启用 AI 只改配置，不直接启动 worker，不发送 PDD。</p>
+            </div>
+            <span class="badge red">二次确认</span>
+          </div>
+
+          <table class="table">
+            <thead>
+              <tr>
+                <th>检查项</th>
+                <th>通过条件</th>
+                <th>失败时前端展示</th>
+                <th>是否阻断启用 AI</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>店铺授权有效</td>
+                <td>shop_auth valid，真实 shop_id 已绑定</td>
+                <td>请重新授权或绑定真实店铺 ID</td>
+                <td>是</td>
+              </tr>
+              <tr>
+                <td>商品同步完成</td>
+                <td>最近同步任务成功或部分成功，商品总数大于 0</td>
+                <td>请先同步商品并处理失败项</td>
+                <td>是</td>
+              </tr>
+              <tr>
+                <td>知识索引生效</td>
+                <td>商品知识或 SOP 至少存在 active version</td>
+                <td>请发布知识并等待真实索引成功</td>
+                <td>是</td>
+              </tr>
+              <tr>
+                <td>no-send 验收</td>
+                <td>价格、规格、用法、物流、售后、敏感、转人工测试通过</td>
+                <td>请打开试聊调试完成验收</td>
+                <td>是</td>
+              </tr>
+              <tr>
+                <td>人工锁管理可用</td>
+                <td>Human Locks API 正常，按 shop_id 隔离</td>
+                <td>人工接管管理不可用，不能上线</td>
+                <td>是</td>
+              </tr>
+              <tr>
+                <td>Worker 状态</td>
+                <td>只读展示，不自动启动</td>
+                <td>当前版本不自动管理 worker</td>
+                <td>否，警告</td>
+              </tr>
+            </tbody>
+          </table>
+
+          <div class="annotation danger-note">
+            启用 AI 弹窗文案：开启后，系统可能会对真实买家消息自动回复。请确认已完成商品同步、知识索引、试聊验证和人工锁检查。
+          </div>
+        </section>
+
+        <section class="section" id="safety">
+          <div class="section-title">
+            <div>
+              <h2>错误处理与安全标准</h2>
+              <p class="section-subtitle">所有失败都要让运营知道“为什么失败、能不能重试、下一步做什么”。</p>
+            </div>
+            <span class="badge gray">上线必备</span>
+          </div>
+
+          <div class="grid-2">
+            <div class="card">
+              <h3>标准错误结构</h3>
+              <ul>
+                <li>error_type：机器可识别错误类型</li>
+                <li>error_summary：中文错误摘要</li>
+                <li>trace_id：便于排查</li>
+                <li>retryable：是否可重试</li>
+                <li>next_action：下一步处理建议</li>
+              </ul>
+            </div>
+            <div class="card">
+              <h3>敏感信息边界</h3>
+              <ul>
+                <li>前端不展示 cookie/token/password</li>
+                <li>日志不打印授权明文</li>
+                <li>文档和提交不包含真实凭证</li>
+                <li>accounts.cookies 不写明文</li>
+              </ul>
+            </div>
+          </div>
+
+          <div class="annotation">
+            生产验收重点：页面不是“看起来能点”，而是每个按钮都有明确后端能力、失败提示、阻断规则和审计记录。
+          </div>
+        </section>
+
+        <div class="footer">
+          静态原型文件：docs/prototypes/web-admin-production-flow.html。此页面只用于产品和交互验收，不连接真实服务。
+        </div>
+      </div>
+    </main>
+  </div>
+</body>
+</html>

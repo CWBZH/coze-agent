@@ -8,6 +8,7 @@ from web_api.schemas.knowledge_center import (
     IndexRunRequest,
     IndexRunResponse,
     KnowledgeListResponse,
+    ProductArchiveRequest,
     ProductOverrideUpdate,
     ProductPublishResponse,
     SopCreate,
@@ -110,6 +111,15 @@ def upsert_product_override(
     return service.upsert_override(shop_id, goods_id, **data)
 
 
+@router.delete("/products/{goods_id}/overrides")
+def clear_product_override(
+    goods_id: str,
+    shop_id: str,
+    service: KnowledgeCenterService = Depends(get_knowledge_center_service),
+) -> dict[str, Any]:
+    return service.clear_override(shop_id, goods_id)
+
+
 @router.get("/products/{goods_id}/effective")
 def get_effective_product(
     goods_id: str,
@@ -118,6 +128,40 @@ def get_effective_product(
 ) -> dict[str, Any]:
     try:
         return service.build_effective_product_knowledge(shop_id, goods_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail={"status": "not_found"}) from exc
+
+
+@router.post("/products/{goods_id}/archive")
+def archive_product(
+    goods_id: str,
+    shop_id: str,
+    payload: ProductArchiveRequest | None = None,
+    service: KnowledgeCenterService = Depends(get_knowledge_center_service),
+) -> dict[str, Any]:
+    try:
+        assert_real_shop_id_bound(shop_id)
+        options = payload or ProductArchiveRequest()
+        return service.archive_product(shop_id, goods_id, actor=options.operator, reason=options.reason)
+    except ApiError as exc:
+        return api_error_response(exc)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail={"status": "not_found"}) from exc
+
+
+@router.post("/products/{goods_id}/restore")
+def restore_product(
+    goods_id: str,
+    shop_id: str,
+    payload: ProductArchiveRequest | None = None,
+    service: KnowledgeCenterService = Depends(get_knowledge_center_service),
+) -> dict[str, Any]:
+    try:
+        assert_real_shop_id_bound(shop_id)
+        options = payload or ProductArchiveRequest(reason="manual_restore")
+        return service.restore_product(shop_id, goods_id, actor=options.operator)
+    except ApiError as exc:
+        return api_error_response(exc)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail={"status": "not_found"}) from exc
 

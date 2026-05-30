@@ -12,6 +12,8 @@ class ProductSummary(BaseModel):
     version: str
     knowledge_status: str
     indexed_status: str
+    archived_at: str = ""
+    archive_reason: str = ""
     updated_at: str
     price: str
     specs: list[str]

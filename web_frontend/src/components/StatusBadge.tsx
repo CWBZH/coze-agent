@@ -23,7 +23,7 @@ const STATUS_LABELS: Record<string, string> = {
   safe: "安全 safe",
   blocked: "已拦截 blocked",
   true: "是 true",
-  false: "否 false"
+  false: "否 false",
 };
 
 export function StatusBadge({ children, tone = "neutral" }: StatusBadgeProps) {

@@ -16,6 +16,7 @@ class ProductService:
         indexed_status: str | None = None,
         page: int = 1,
         page_size: int = 20,
+        include_archived: bool = False,
     ) -> tuple[list[ProductSummary], int, str | None]:
         where: list[str] = []
         params: list[object] = []
@@ -26,6 +27,9 @@ class ProductService:
             where.append("(pk.goods_id LIKE ? OR pk.goods_name LIKE ? OR pk.raw_detail_json LIKE ?)")
             like = f"%{q}%"
             params.extend([like, like, like])
+        archive_filter = self._archive_filter_sql(include_archived)
+        if archive_filter:
+            where.append(archive_filter)
         where_sql = f"WHERE {' AND '.join(where)}" if where else ""
         offset = max(page - 1, 0) * page_size
         result = self._db.query(
@@ -59,12 +63,15 @@ class ProductService:
             products = [item for item in products if item.indexed_status == indexed_status]
         return products, total, result.warning or count_result.warning
 
-    def get_product(self, goods_id: str, shop_id: str | None = None) -> ProductDetail:
+    def get_product(self, goods_id: str, shop_id: str | None = None, include_archived: bool = False) -> ProductDetail:
         where = ["pk.goods_id = ?"]
         params: list[object] = [goods_id]
         if shop_id:
             where.append("s.shop_id = ?")
             params.append(shop_id)
+        archive_filter = self._archive_filter_sql(include_archived)
+        if archive_filter:
+            where.append(archive_filter)
         result = self._db.query(
             f"""
             SELECT
@@ -90,8 +97,15 @@ class ProductService:
         return self._row_to_detail(result.rows[0], warning=warning)
 
     def coverage(self, shop_id: str | None = None) -> tuple[ProductCoverage, str | None]:
-        where = "WHERE s.shop_id = ?" if shop_id else ""
-        params: tuple[object, ...] = (shop_id,) if shop_id else ()
+        where_items = []
+        archive_filter = self._archive_filter_sql(False)
+        if archive_filter:
+            where_items.append(archive_filter)
+        params_list: list[object] = []
+        if shop_id:
+            where_items.append("s.shop_id = ?")
+            params_list.append(shop_id)
+        where = f"WHERE {' AND '.join(where_items)}" if where_items else ""
         result = self._db.query(
             f"""
             SELECT
@@ -104,7 +118,7 @@ class ProductService:
             LEFT JOIN shops s ON s.id = pk.shop_id
             {where}
             """,
-            params,
+            tuple(params_list),
             required_tables=("product_knowledge",),
         )
         counters = {
@@ -135,6 +149,17 @@ class ProductService:
                 counters["has_manual_notes"] += 1
         return ProductCoverage(**counters), result.warning
 
+    def _archive_filter_sql(self, include_archived: bool) -> str:
+        if include_archived:
+            return ""
+        result = self._db.query("PRAGMA table_info(product_knowledge)", required_tables=("product_knowledge",))
+        if result.warning:
+            return ""
+        column_names = {str(row.get("name") or "") for row in result.rows}
+        if "knowledge_status" not in column_names:
+            return ""
+        return "COALESCE(pk.knowledge_status, 'synced') != 'archived'"
+
     def _row_to_summary(self, row: dict, *, version: str | None = None, indexed_status: str | None = None) -> ProductSummary:
         raw = parse_json_object(row.get("raw_detail_json"))
         specs = parse_json_list_or_text(row.get("specifications") or raw.get("specifications") or raw.get("sku_options"))
@@ -144,9 +169,11 @@ class ProductService:
             product_title=str(row.get("goods_name") or raw.get("title") or raw.get("product_title") or ""),
             shop_id=str(row.get("platform_shop_id") or row.get("shop_id") or ""),
             shop_name=str(row.get("shop_name") or ""),
-            version=version or "real-product-v1",
+            version=version or str(row.get("version") or "real-product-v1"),
             knowledge_status=str(row.get("knowledge_status") or "unknown"),
-            indexed_status=indexed_status or "unknown",
+            indexed_status=indexed_status or str(row.get("indexed_status") or "unknown"),
+            archived_at=str(row.get("archived_at") or ""),
+            archive_reason=str(row.get("archive_reason") or ""),
             updated_at=str(row.get("updated_at") or ""),
             price=_price(row, raw),
             specs=specs,

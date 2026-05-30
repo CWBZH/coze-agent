@@ -99,7 +99,9 @@ def test_simple_message_queue_rehydrates_persisted_pending(tmp_path):
     asyncio.run(scenario())
 
 
-def test_outbox_worker_retries_due_reply_and_marks_sent(tmp_path):
+def test_outbox_worker_retries_due_reply_and_marks_sent(tmp_path, monkeypatch):
+    monkeypatch.setenv("PDD_SENDING_ENABLED", "true")
+
     async def scenario():
         store = ReliableQueueStore(tmp_path / "queue.db")
         outbox = store.create_outbox(
@@ -132,6 +134,38 @@ def test_outbox_worker_retries_due_reply_and_marks_sent(tmp_path):
         assert summary["retried"] == 1
         assert sent == [("shop-1", "user-1", "buyer-1", "safe reply")]
         assert store.get_outbox(outbox.outbox_id)["status"] == "sent"
+
+    asyncio.run(scenario())
+
+
+def test_outbox_worker_suppresses_when_pdd_sending_disabled(tmp_path, monkeypatch):
+    monkeypatch.delenv("PDD_SENDING_ENABLED", raising=False)
+
+    async def scenario():
+        store = ReliableQueueStore(tmp_path / "queue.db")
+        outbox = store.create_outbox(
+            trace_id="trace-disabled",
+            inbound_record_id="in-disabled",
+            shop_id="shop-1",
+            user_id="user-1",
+            buyer_id="buyer-1",
+            session_id="session-1",
+            reply_action="reply",
+            reply_text="safe reply",
+            reply_source="internal",
+        )
+        store.mark_outbox_failed(outbox.outbox_id, pdd_error_code="40013")
+
+        class FailIfCalled:
+            def __init__(self, shop_id, user_id):
+                raise AssertionError("PDD sender must not be created while sending is disabled")
+
+        worker = OutboxWorker(store=store, sender_factory=FailIfCalled)
+        summary = await worker.run_due_retries(now=store._now() + 3600)
+
+        assert summary["retried"] == 0
+        assert summary["suppressed"] == 1
+        assert store.get_outbox(outbox.outbox_id)["status"] == "pdd_sending_disabled"
 
     asyncio.run(scenario())
 
@@ -188,7 +222,9 @@ def test_outbox_recovers_stale_sending_records(tmp_path):
     assert row["next_retry_at"] == now
 
 
-def test_outbox_worker_suppresses_recent_duplicate_reply(tmp_path):
+def test_outbox_worker_suppresses_recent_duplicate_reply(tmp_path, monkeypatch):
+    monkeypatch.setenv("PDD_SENDING_ENABLED", "true")
+
     async def scenario():
         store = ReliableQueueStore(tmp_path / "queue.db")
         sent = store.create_outbox(
@@ -232,7 +268,9 @@ def test_outbox_worker_suppresses_recent_duplicate_reply(tmp_path):
     asyncio.run(scenario())
 
 
-def test_outbox_worker_blocks_repeated_40013(tmp_path):
+def test_outbox_worker_blocks_repeated_40013(tmp_path, monkeypatch):
+    monkeypatch.setenv("PDD_SENDING_ENABLED", "true")
+
     async def scenario():
         store = ReliableQueueStore(tmp_path / "queue.db")
         outbox = store.create_outbox(
@@ -295,7 +333,9 @@ def test_outbox_worker_does_not_retry_transfer_send_failed_by_default(tmp_path):
     asyncio.run(scenario())
 
 
-def test_outbox_retry_loop_retries_due_records_until_stopped(tmp_path):
+def test_outbox_retry_loop_retries_due_records_until_stopped(tmp_path, monkeypatch):
+    monkeypatch.setenv("PDD_SENDING_ENABLED", "true")
+
     async def scenario():
         store = ReliableQueueStore(tmp_path / "queue.db")
         outbox = store.create_outbox(
