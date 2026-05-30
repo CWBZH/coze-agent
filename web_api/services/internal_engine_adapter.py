@@ -246,6 +246,7 @@ class WebInternalEngineAdapter:
             "calls_llm": bool(base_trace.get("calls_llm") or options.use_real_llm or options.use_real_intent_classifier or options.use_real_answer_generator),
             "calls_ollama": bool(base_trace.get("calls_ollama") or (options.use_real_ollama and _rag_embedding_provider() == "ollama")),
             "connects_pgvector": bool(base_trace.get("connects_pgvector") or options.use_real_pgvector),
+            "embedding_provider": str(base_trace.get("embedding_provider") or (_rag_embedding_provider() if options.use_real_pgvector else "")),
             "sends_pdd": False,
             "no_send": True,
             **self._trace_patch("ok", "", True, options, extra={"latency_ms": latency_ms}),

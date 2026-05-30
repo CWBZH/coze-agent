@@ -6,6 +6,7 @@ default retriever returns no hits and never connects to external services.
 from __future__ import annotations
 
 import hashlib
+import time
 from typing import Any, Protocol
 
 from .embedding_client import EmbeddingClient, FakeEmbeddingClient
@@ -114,6 +115,7 @@ class VectorStoreRAGRetriever:
         )
 
     def retrieve(self, context: Any, intent: str, domain: str, query: str, top_k: int = 3) -> list[RetrievalHit]:
+        total_started_at = time.perf_counter()
         shop_id = str(getattr(context, "shop_id", "") or "").strip()
         domain = str(domain or "").strip()
         query = str(query or "").strip()
@@ -127,8 +129,12 @@ class VectorStoreRAGRetriever:
                 retrieval_source="vector_store",
             )
             return []
+        embedding_latency_ms = 0
+        query_latency_ms = 0
         try:
+            embedding_started_at = time.perf_counter()
             vector_obj = _embed_one(self.embedding_client, query)
+            embedding_latency_ms = _elapsed_ms(embedding_started_at)
             effective_top_k = self.top_k or top_k
             retrieval_query = RetrievalQuery(
                 shop_id=shop_id,
@@ -138,6 +144,7 @@ class VectorStoreRAGRetriever:
                 version=self.version,
                 filters=_rag_filters(context),
             )
+            query_started_at = time.perf_counter()
             hybrid = getattr(self.vector_store, "search_hybrid", None)
             if callable(hybrid):
                 hits = hybrid(retrieval_query, vector_obj.vector)
@@ -147,8 +154,14 @@ class VectorStoreRAGRetriever:
                     hits = product_hybrid(retrieval_query, vector_obj.vector)
                 else:
                     hits = self.vector_store.search(retrieval_query, vector_obj.vector)
+            query_latency_ms = _elapsed_ms(query_started_at)
         except Exception as exc:  # noqa: BLE001 - sanitize provider/store errors.
-            self._last_stats = _error_stats(exc, vector_store=vector_store, embedding_model=embedding_model)
+            self._last_stats = _error_stats(
+                exc,
+                vector_store=vector_store,
+                embedding_model=embedding_model,
+                timing_stats=_timing_stats(embedding_latency_ms, query_latency_ms, _elapsed_ms(total_started_at)),
+            )
             return []
         self._last_stats = _hit_stats(
             hits,
@@ -158,6 +171,7 @@ class VectorStoreRAGRetriever:
             version=self.version,
             product_domain=True,
             hybrid_counts=_hybrid_counts(self.vector_store),
+            timing_stats=_timing_stats(embedding_latency_ms, query_latency_ms, _elapsed_ms(total_started_at)),
         )
         return hits
 
@@ -181,7 +195,9 @@ def _base_stats(
     vector_store: str = "",
     embedding_model: str = "",
     retrieval_source: str = "",
+    timing_stats: dict[str, int] | None = None,
 ) -> dict[str, Any]:
+    timings = dict(timing_stats or {})
     return {
         "rag_enabled": status != "disabled",
         "rag_status": status,
@@ -198,6 +214,12 @@ def _base_stats(
         "vector_store": vector_store,
         "embedding_model": embedding_model,
         "retrieval_source": retrieval_source,
+        "embedding_ms": int(timings.get("embedding_latency_ms", 0)),
+        "vector_search_ms": int(timings.get("pgvector_query_latency_ms", 0)),
+        "rag_total_ms": int(timings.get("rag_total_latency_ms", 0)),
+        "embedding_latency_ms": int(timings.get("embedding_latency_ms", 0)),
+        "pgvector_query_latency_ms": int(timings.get("pgvector_query_latency_ms", 0)),
+        "rag_total_latency_ms": int(timings.get("rag_total_latency_ms", 0)),
     }
 
 
@@ -210,7 +232,9 @@ def _hit_stats(
     version: str = "",
     product_domain: bool = False,
     hybrid_counts: dict[str, int] | None = None,
+    timing_stats: dict[str, int] | None = None,
 ) -> dict[str, Any]:
+    timings = dict(timing_stats or {})
     stats = {
         "rag_enabled": True,
         "rag_status": "hit" if hits else "empty",
@@ -227,6 +251,12 @@ def _hit_stats(
         "vector_store": vector_store,
         "embedding_model": embedding_model,
         "retrieval_source": retrieval_source,
+        "embedding_ms": int(timings.get("embedding_latency_ms", 0)),
+        "vector_search_ms": int(timings.get("pgvector_query_latency_ms", 0)),
+        "rag_total_ms": int(timings.get("rag_total_latency_ms", 0)),
+        "embedding_latency_ms": int(timings.get("embedding_latency_ms", 0)),
+        "pgvector_query_latency_ms": int(timings.get("pgvector_query_latency_ms", 0)),
+        "rag_total_latency_ms": int(timings.get("rag_total_latency_ms", 0)),
     }
     if product_domain:
         matches = [str((hit.metadata or {}).get("retrieval_match") or "") for hit in hits]
@@ -247,16 +277,29 @@ def _hit_stats(
     return stats
 
 
-def _error_stats(exc: Exception, *, vector_store: str, embedding_model: str) -> dict[str, Any]:
+def _error_stats(exc: Exception, *, vector_store: str, embedding_model: str, timing_stats: dict[str, int] | None = None) -> dict[str, Any]:
     return {
         **_base_stats(
             status="error",
             vector_store=vector_store,
             embedding_model=embedding_model,
             retrieval_source="vector_store" if vector_store != "in_memory" else "in_memory",
+            timing_stats=timing_stats,
         ),
         "error_type": type(exc).__name__,
         "error_summary": _sanitize_error(str(exc)),
+    }
+
+
+def _elapsed_ms(started_at: float) -> int:
+    return max(0, int((time.perf_counter() - started_at) * 1000))
+
+
+def _timing_stats(embedding_latency_ms: int, query_latency_ms: int, total_latency_ms: int) -> dict[str, int]:
+    return {
+        "embedding_latency_ms": max(0, int(embedding_latency_ms or 0)),
+        "pgvector_query_latency_ms": max(0, int(query_latency_ms or 0)),
+        "rag_total_latency_ms": max(0, int(total_latency_ms or 0)),
     }
 
 

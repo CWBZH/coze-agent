@@ -7,6 +7,7 @@ import json
 import os
 import re
 import socket
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -46,8 +47,13 @@ class AnswerDraft:
     raw_error_summary: str = ""
     http_status: int | None = None
     provider_host: str = ""
+    provider_model: str = ""
     timeout_ms: int = 0
     response_length: int = 0
+    latency_ms: int = 0
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    total_tokens: int = 0
 
 
 class AnswerGenerator:
@@ -159,6 +165,7 @@ class OpenAICompatibleAnswerGenerator(AnswerGenerator):
         url = f"{self.base_url}/chat/completions"
         provider_host = _safe_provider_host(self.base_url)
         timeout_ms = int(self.timeout_seconds * 1000)
+        started_at = time.perf_counter()
         try:
             if self.transport is not None:
                 response = self.transport(
@@ -167,10 +174,16 @@ class OpenAICompatibleAnswerGenerator(AnswerGenerator):
                     body=body,
                     timeout_seconds=self.timeout_seconds,
                 )
+                http_status = _usage_int(response, "http_status") or 200
             else:
-                response = self._post_json(url, api_key, body)
+                response, http_status = self._post_json(url, api_key, body)
             text = self._extract_text(response)
             raw_response_length = len(json.dumps(response, ensure_ascii=False))
+            usage = response.get("usage") if isinstance(response, Mapping) else {}
+            usage = usage if isinstance(usage, Mapping) else {}
+            prompt_tokens = _usage_int(usage, "prompt_tokens", "input_tokens")
+            completion_tokens = _usage_int(usage, "completion_tokens", "output_tokens", "output_tokens_total")
+            total_tokens = _usage_int(usage, "total_tokens") or (prompt_tokens + completion_tokens)
             return AnswerDraft(
                 text=text,
                 confidence=0.78 if text else 0.0,
@@ -178,9 +191,15 @@ class OpenAICompatibleAnswerGenerator(AnswerGenerator):
                 used_history_count=len(context.history_window or []),
                 raw_error_type="" if text else "empty_answer",
                 raw_error_summary="" if text else "provider returned no answer text",
+                http_status=http_status,
                 provider_host=provider_host,
+                provider_model=self.model,
                 timeout_ms=timeout_ms,
                 response_length=raw_response_length,
+                latency_ms=max(0, int((time.perf_counter() - started_at) * 1000)),
+                prompt_tokens=prompt_tokens,
+                completion_tokens=completion_tokens,
+                total_tokens=total_tokens,
             )
         except urllib.error.HTTPError as exc:
             return self._error(
@@ -239,7 +258,7 @@ class OpenAICompatibleAnswerGenerator(AnswerGenerator):
             "stream": False,
         }
 
-    def _post_json(self, url: str, api_key: str, body: Mapping[str, Any]) -> Mapping[str, Any]:
+    def _post_json(self, url: str, api_key: str, body: Mapping[str, Any]) -> tuple[Mapping[str, Any], int]:
         request = urllib.request.Request(
             url,
             data=json.dumps(body, ensure_ascii=False).encode("utf-8"),
@@ -250,7 +269,8 @@ class OpenAICompatibleAnswerGenerator(AnswerGenerator):
             method="POST",
         )
         with urllib.request.urlopen(request, timeout=self.timeout_seconds) as response:
-            return json.loads(response.read().decode("utf-8"))
+            status = int(getattr(response, "status", 0) or response.getcode() or 0)
+            return json.loads(response.read().decode("utf-8")), status
 
     @staticmethod
     def _extract_text(response: Mapping[str, Any]) -> str:
@@ -272,6 +292,7 @@ class OpenAICompatibleAnswerGenerator(AnswerGenerator):
             raw_error_summary=_sanitize_text(summary),
             http_status=http_status,
             provider_host=_safe_provider_host(self.base_url),
+            provider_model=self.model,
             timeout_ms=int(self.timeout_seconds * 1000),
         )
 
@@ -349,6 +370,21 @@ def _format_knowledge_results(items: list[dict[str, Any]]) -> str:
 def _safe_provider_host(base_url: str) -> str:
     parsed = urllib.parse.urlparse(str(base_url or ""))
     return parsed.hostname or ""
+
+
+def _usage_int(source: Mapping[str, Any], *keys: str) -> int:
+    for key in keys:
+        try:
+            value = source.get(key)
+        except AttributeError:
+            value = None
+        if value is None or isinstance(value, bool):
+            continue
+        try:
+            return max(0, int(value))
+        except (TypeError, ValueError):
+            continue
+    return 0
 
 
 def _sanitize_error_type(value: str) -> str:
