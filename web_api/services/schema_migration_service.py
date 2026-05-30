@@ -140,6 +140,9 @@ class SchemaMigrationService:
                 "shops",
                 {
                     "shop_name": "TEXT",
+                    "shop_logo": "TEXT",
+                    "description": "TEXT",
+                    "fastgpt_dataset_id": "TEXT",
                     "created_at": "TEXT",
                     "updated_at": "TEXT",
                     "archived_at": "TEXT",

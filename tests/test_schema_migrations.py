@@ -73,6 +73,9 @@ def test_schema_migrations_upgrade_legacy_sqlite_idempotently(tmp_path):
             row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
         }
         assert "status" in _columns(conn, "accounts")
+        assert "fastgpt_dataset_id" in _columns(conn, "shops")
+        assert "shop_logo" in _columns(conn, "shops")
+        assert "description" in _columns(conn, "shops")
         assert "updated_at" in _columns(conn, "conversations")
         assert "created_at" in _columns(conn, "product_knowledge")
         assert "usage" in _columns(conn, "product_knowledge")
