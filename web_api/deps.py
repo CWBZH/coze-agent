@@ -5,6 +5,7 @@ from web_api.services.dashboard_service import DashboardService
 from web_api.services.human_lock_service import HumanLockService
 from web_api.services.knowledge_center_service import KnowledgeCenterService
 from web_api.services.live_chat_service import LiveChatService
+from web_api.services.observability_service import ObservabilityService
 from web_api.services.product_service import ProductService
 from web_api.services.product_sync_service import ProductSyncService
 from web_api.services.provider_status_service import ProviderStatusService
@@ -112,3 +113,9 @@ def get_worker_control_service() -> WorkerControlService:
     service = WorkerControlService()
     service.init_schema()
     return service
+
+
+@lru_cache
+def get_observability_service() -> ObservabilityService:
+    get_schema_migration_service()
+    return ObservabilityService()

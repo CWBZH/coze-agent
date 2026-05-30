@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from web_api.routes import ai_settings, dashboard, health, human_locks, knowledge_center, live_chat, product_sync, products, provider_status, rag_debug, rag_jobs, shop_onboarding, shops, sop, traces, worker_control
+from web_api.routes import ai_settings, dashboard, health, human_locks, knowledge_center, live_chat, observability, product_sync, products, provider_status, rag_debug, rag_jobs, shop_onboarding, shops, sop, traces, worker_control
 
 
 app = FastAPI(title="InternalEngine Web Admin API", version="mvp")
@@ -30,3 +30,4 @@ app.include_router(rag_debug.router, prefix="/api")
 app.include_router(live_chat.router, prefix="/api")
 app.include_router(traces.router, prefix="/api")
 app.include_router(worker_control.router, prefix="/api")
+app.include_router(observability.router, prefix="/api")

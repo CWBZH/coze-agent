@@ -1250,3 +1250,233 @@ pre {
   border-radius: 8px;
   background: #0f172a;
 }
+
+.observability-page {
+  display: grid;
+  gap: 18px;
+}
+
+.observability-toolbar {
+  display: grid;
+  grid-template-columns: minmax(320px, 1fr) 220px auto auto;
+  gap: 10px;
+  align-items: center;
+}
+
+.observability-layout {
+  display: grid;
+  grid-template-columns: 380px minmax(0, 1fr);
+  gap: 18px;
+  align-items: start;
+}
+
+.observability-conversations,
+.observability-detail {
+  min-width: 0;
+}
+
+.observability-conversation-list,
+.observability-message-list,
+.observability-node-list,
+.observability-chunk-list {
+  display: grid;
+  gap: 12px;
+}
+
+.observability-conversation-list {
+  max-height: calc(100vh - 310px);
+  overflow: auto;
+  padding-right: 2px;
+}
+
+.conversation-row {
+  display: grid;
+  width: 100%;
+  gap: 8px;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  background: #fff;
+  color: #172033;
+  padding: 12px;
+  text-align: left;
+}
+
+.conversation-row:hover,
+.conversation-row.selected {
+  border-color: #93c5fd;
+  background: #f8fbff;
+}
+
+.conversation-row p {
+  margin: 0;
+  color: #334155;
+  line-height: 1.45;
+}
+
+.conversation-row-head,
+.conversation-row-meta,
+.observability-selected-head,
+.observability-message-header,
+.observability-chunk header {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: flex-start;
+  justify-content: space-between;
+}
+
+.conversation-row-head strong,
+.observability-message-header strong,
+.observability-selected-head h3 {
+  overflow-wrap: anywhere;
+}
+
+.conversation-row-meta {
+  justify-content: flex-start;
+  color: #64748b;
+  font-size: 13px;
+}
+
+.observability-selected-head {
+  border-bottom: 1px solid #edf2f7;
+  margin-bottom: 14px;
+  padding-bottom: 12px;
+}
+
+.observability-selected-head h3,
+.observability-selected-head p,
+.observability-message-card p {
+  margin: 0;
+}
+
+.observability-message-card {
+  border: 1px solid #dbeafe;
+  border-radius: 12px;
+  background: #fff;
+  padding: 16px;
+}
+
+.observability-message-header {
+  border-bottom: 1px solid #edf2f7;
+  margin-bottom: 12px;
+  padding-bottom: 12px;
+}
+
+.observability-message-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.observability-message-summary section,
+.observability-node,
+.observability-chunk,
+.observability-content {
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  background: #f8fafc;
+  padding: 12px;
+}
+
+.observability-message-summary span {
+  display: block;
+  color: #64748b;
+  font-size: 13px;
+  font-weight: 700;
+  margin-bottom: 6px;
+}
+
+.observability-message-summary p,
+.observability-content {
+  color: #0f172a;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.observability-tab-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 10px 0 14px;
+}
+
+.observability-node {
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  align-items: flex-start;
+}
+
+.observability-node p {
+  color: #475569;
+  margin-top: 6px;
+}
+
+.observability-two-up {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 14px;
+}
+
+.observability-two-up h4,
+.observability-chunk h4 {
+  margin: 0 0 10px;
+}
+
+.observability-kv {
+  display: grid;
+  gap: 0;
+  margin: 0;
+}
+
+.observability-kv div {
+  display: grid;
+  grid-template-columns: 180px minmax(0, 1fr);
+  gap: 12px;
+  border-bottom: 1px solid #edf2f7;
+  padding: 8px 0;
+}
+
+.observability-kv.compact div {
+  grid-template-columns: 120px minmax(0, 1fr);
+}
+
+.observability-kv dt {
+  color: #64748b;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.observability-kv dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.observability-json {
+  max-height: 360px;
+  font-size: 12px;
+}
+
+.observability-chunk {
+  background: #f8fbff;
+}
+
+.observability-chunk header {
+  margin-bottom: 10px;
+}
+
+@media (max-width: 1180px) {
+  .observability-layout,
+  .observability-toolbar,
+  .observability-message-summary,
+  .observability-two-up {
+    grid-template-columns: 1fr;
+  }
+
+  .observability-conversation-list {
+    max-height: none;
+  }
+}
