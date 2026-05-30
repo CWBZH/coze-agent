@@ -2,6 +2,7 @@ import pytest
 
 import Session.session_manager  # Import order avoids existing core/logger circular import in tests.
 from Message.workflow.embedding_client import (
+    DoubaoEmbeddingClient,
     EmbeddingError,
     FakeEmbeddingClient,
     OllamaBgeM3EmbeddingClient,
@@ -39,6 +40,42 @@ def test_ollama_error_does_not_leak_text():
         raise RuntimeError("provider failed for SECRET_SYNTHETIC_TEXT")
 
     client = OllamaBgeM3EmbeddingClient(base_url="http://localhost:11434", transport=transport)
+
+    with pytest.raises(EmbeddingError) as exc:
+        client.embed("SECRET_SYNTHETIC_TEXT")
+
+    assert "SECRET_SYNTHETIC_TEXT" not in str(exc.value)
+
+
+def test_doubao_multimodal_response_shape_with_fake_transport():
+    def transport(payload, timeout):
+        assert payload["model"] == "doubao-embedding-vision-test"
+        assert payload["input"][0]["type"] == "text"
+        return {"data": {"embedding": [0.1, 0.2, 0.3]}}
+
+    client = DoubaoEmbeddingClient(
+        base_url="https://ark.example/api/v3",
+        api_key="test-key",
+        model="doubao-embedding-vision-test",
+        transport=transport,
+    )
+
+    vector = client.embed("synthetic text")
+
+    assert vector.dimension == 3
+    assert vector.vector_hash
+
+
+def test_doubao_error_does_not_leak_text():
+    def transport(payload, timeout):
+        raise RuntimeError("provider failed for SECRET_SYNTHETIC_TEXT")
+
+    client = DoubaoEmbeddingClient(
+        base_url="https://ark.example/api/v3",
+        api_key="test-key",
+        model="doubao-embedding-vision-test",
+        transport=transport,
+    )
 
     with pytest.raises(EmbeddingError) as exc:
         client.embed("SECRET_SYNTHETIC_TEXT")

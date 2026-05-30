@@ -18,7 +18,7 @@ from .knowledge import KnowledgeHit, KnowledgeRetriever, ProductKnowledgeRetriev
 from .knowledge_repository import ProductKnowledgeRepository
 from .prompt_builder import PromptPayload, build_prompt_payload
 from .rag_types import EmbeddingVector, KnowledgeChunk, RetrievalHit, RetrievalQuery
-from .embedding_client import FakeEmbeddingClient, OllamaBgeM3EmbeddingClient
+from .embedding_client import DoubaoEmbeddingClient, FakeEmbeddingClient, OllamaBgeM3EmbeddingClient
 from .vector_store import InMemoryVectorStore, PgVectorStore
 from .sop_provider import SOPProvider
 from .router import create_ai_workflow_engine, get_ai_workflow_backend
@@ -50,6 +50,7 @@ __all__ = [
     "AnswerGenerationContext",
     "FORBIDDEN_RAW_TRACE_FIELDS",
     "DomainPolicyResponder",
+    "DoubaoEmbeddingClient",
     "FakeLLMIntentClassifier",
     "FakeAnswerGenerator",
     "FakeEmbeddingClient",

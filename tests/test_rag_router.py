@@ -3,6 +3,7 @@ import Session.session_manager  # Import order avoids existing core/logger circu
 from Message.workflow.fastgpt_engine import FastGPTWorkflowEngine
 from Message.workflow.internal_engine import InternalWorkflowEngine
 from Message.workflow.rag_retriever import InMemoryRAGRetriever, NullRAGRetriever
+import Message.workflow.router as router_module
 from Message.workflow.router import create_ai_workflow_engine
 
 
@@ -51,3 +52,25 @@ def test_router_internal_rag_enabled_without_pg_config_is_safe(monkeypatch):
     engine = create_ai_workflow_engine(fastgpt_handler=FakeFastGPT())
 
     assert isinstance(engine.rag_retriever, NullRAGRetriever)
+
+
+def test_router_internal_rag_uses_doubao_and_web_pgvector_dsn(monkeypatch):
+    class FakePgVectorStore:
+        def __init__(self, dsn):
+            self.dsn = dsn
+
+    monkeypatch.setattr(router_module, "PgVectorStore", FakePgVectorStore)
+    monkeypatch.setenv("AI_WORKFLOW_BACKEND", "internal")
+    monkeypatch.setenv("AI_WORKFLOW_RAG_ENABLED", "true")
+    monkeypatch.setenv("AI_WORKFLOW_VECTOR_STORE", "pgvector")
+    monkeypatch.delenv("AI_WORKFLOW_PGVECTOR_DSN", raising=False)
+    monkeypatch.setenv("WEB_API_PGVECTOR_DSN", "postgresql://user:pass@127.0.0.1:5432/db")
+    monkeypatch.setenv("WEB_KNOWLEDGE_EMBEDDING_PROVIDER", "doubao")
+    monkeypatch.setenv("DOUBAO_EMBEDDING_API_KEY", "test-key")
+    monkeypatch.setenv("DOUBAO_EMBEDDING_MODEL", "doubao-embedding-vision-test")
+
+    engine = create_ai_workflow_engine(fastgpt_handler=FakeFastGPT())
+
+    assert engine.rag_retriever is not None
+    assert engine.rag_retriever.embedding_client.__class__.__name__ == "DoubaoEmbeddingClient"
+    assert engine.rag_retriever.vector_store.dsn == "postgresql://user:pass@127.0.0.1:5432/db"

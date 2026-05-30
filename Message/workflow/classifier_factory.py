@@ -72,6 +72,8 @@ def get_intent_classifier_name(
     """Return a normalized classifier name, falling back to ``null``."""
 
     source = os.environ if env is None else env
+    if _truthy(source.get("AI_WORKFLOW_USE_REAL_INTENT_CLASSIFIER")) and not source.get(INTENT_CLASSIFIER_ENV_VAR):
+        return OPENAI_COMPATIBLE_INTENT_CLASSIFIER
     value = str(source.get(INTENT_CLASSIFIER_ENV_VAR) or default or DEFAULT_INTENT_CLASSIFIER)
     normalized = value.strip().lower()
     if normalized not in VALID_INTENT_CLASSIFIERS:
@@ -119,4 +121,8 @@ def _normalize_classifier(value: str) -> str:
     if normalized not in VALID_INTENT_CLASSIFIERS:
         return NULL_INTENT_CLASSIFIER
     return normalized
+
+
+def _truthy(value: str | None) -> bool:
+    return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
 

@@ -633,7 +633,8 @@ class MessagePipeline:
 
             chat_id = f"{shop_platform_id}_{buyer_id}_{session_id}"
             dataset_id = (shop.get("fastgpt_dataset_id") or "").strip()
-            if not dataset_id:
+            is_fastgpt_workflow = self.workflow_engine.__class__.__name__ == "FastGPTWorkflowEngine"
+            if is_fastgpt_workflow and not dataset_id:
                 logger.error(
                     f"[FastGPTRoute] missing dataset_id: shop_id={shop.get('shop_id')}, "
                     f"shop_name={shop.get('shop_name')}, buyer_id={buyer_id}"
@@ -668,16 +669,17 @@ class MessagePipeline:
                 }
 
             t0 = datetime.now()
+            workflow_call_action = "fastgpt_call" if is_fastgpt_workflow else "internal_call"
             logger.debug(
                 "event=pdd.ai.request.started "
                 + _trace_fields(
                     trace,
-                    action="fastgpt_call",
+                    action=workflow_call_action,
                     duration_ms=0,
                     content_length=content_length,
                     content_hash=content_hash,
-                    )
                 )
+            )
             workflow_result = await self.workflow_engine.run(
                 # Product card metadata is only consumed by the explicit internal
                 # workflow path; FastGPT default behavior remains unchanged.

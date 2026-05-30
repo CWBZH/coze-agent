@@ -8,6 +8,7 @@ from bridge.context import ContextType
 from Message.core.pipeline import MessagePipeline
 from Message.core.queue import queue_manager
 from Message.handlers.ai_handler import AIReplyHandler
+from Message.workflow.fastgpt_engine import FastGPTWorkflowEngine
 from Message.workflow.types import WorkflowAction, WorkflowResult
 from Session.session_manager import SessionManager
 from ui.auto_reply.manager import AutoReplyManager
@@ -692,7 +693,14 @@ def test_pipeline_missing_dataset_notification_metadata_includes_action():
     async def scenario():
         notifier = FakeNotificationService()
         _install_notification_service(notifier)
-        pipeline = MessagePipeline(FakeDb(), FakeSessionManager(), FakeKeywordHandler(), FakeFastGpt(), None)
+        pipeline = MessagePipeline(
+            FakeDb(),
+            FakeSessionManager(),
+            FakeKeywordHandler(),
+            FakeFastGpt(),
+            None,
+            workflow_engine=FastGPTWorkflowEngine(FakeFastGpt()),
+        )
         try:
             result = await pipeline.process(
                 {
@@ -725,6 +733,72 @@ def test_pipeline_missing_dataset_notification_metadata_includes_action():
         assert metadata["content_hash"]
         assert metadata["reply_length"] > 0
         assert metadata["reply_hash"]
+
+    asyncio.run(scenario())
+
+
+def test_pipeline_internal_workflow_does_not_require_fastgpt_dataset_id():
+    class FakeDb:
+        def get_shop_by_platform_id(self, platform, shop_platform_id):
+            return {
+                "id": "db-shop-1",
+                "shop_id": shop_platform_id,
+                "shop_name": "shop",
+                "fastgpt_dataset_id": "",
+            }
+
+    class FakeSessionManager:
+        def __init__(self):
+            self.messages = []
+            self.statuses = {}
+
+        async def get_or_create_conversation(self, shop_id, buyer_id, user_id):
+            return SimpleNamespace(session_id="session-1", status="active")
+
+        def add_message(self, session_id, role, content):
+            self.messages.append((session_id, role, content))
+
+        def set_status(self, session_id, status):
+            self.statuses[session_id] = status
+
+        def reset_fallback_state(self, session_id):
+            pass
+
+        def build_context_messages(self, *args, **kwargs):
+            return []
+
+        async def check_and_compress(self, *args, **kwargs):
+            return None
+
+    class FakeKeywordHandler:
+        def check(self, shop_id, text):
+            return {"matched": False}
+
+    async def scenario():
+        session_mgr = FakeSessionManager()
+        workflow = RecordingWorkflowEngine(reply="internal reply")
+        pipeline = MessagePipeline(
+            FakeDb(),
+            session_mgr,
+            FakeKeywordHandler(),
+            FakePipelineFastGpt(),
+            None,
+            workflow_engine=workflow,
+        )
+        result = await pipeline.process(
+            {
+                "buyer_id": "buyer-1",
+                "shop_platform_id": "shop-1",
+                "content": "buyer question",
+                "user_id": "user-1",
+                "message_type": "text",
+            }
+        )
+
+        assert result["action"] == "reply"
+        assert result["text"] == "internal reply"
+        assert workflow.contexts[0].dataset_id == ""
+        assert session_mgr.statuses == {}
 
     asyncio.run(scenario())
 

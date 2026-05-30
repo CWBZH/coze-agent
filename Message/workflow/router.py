@@ -11,7 +11,7 @@ from .active_version import ActiveVersionResolver
 from .answer_generator import OpenAICompatibleAnswerGenerator
 from .classifier_factory import IntentClassifierFactoryConfig, create_intent_classifier, get_intent_classifier_name
 from .fastgpt_engine import FastGPTWorkflowEngine
-from .embedding_client import FakeEmbeddingClient, OllamaBgeM3EmbeddingClient
+from .embedding_client import DoubaoEmbeddingClient, FakeEmbeddingClient, OllamaBgeM3EmbeddingClient
 from .internal_engine import InternalWorkflowEngine
 from .knowledge_repository import ProductKnowledgeRepository
 from .rag_retriever import InMemoryRAGRetriever, NullRAGRetriever, RAGRetriever, VectorStoreRAGRetriever
@@ -76,8 +76,8 @@ def create_rag_retriever_for_backend(backend: str) -> RAGRetriever | None:
         return None
 
     vector_store_name = (os.getenv("AI_WORKFLOW_VECTOR_STORE") or "pgvector").strip().lower()
-    embedding_provider = (os.getenv("AI_WORKFLOW_EMBEDDING_PROVIDER") or "ollama").strip().lower()
-    embedding_model = (os.getenv("AI_WORKFLOW_EMBEDDING_MODEL") or "bge-m3").strip()
+    embedding_provider = _embedding_provider_name()
+    embedding_model = _embedding_model_name(embedding_provider)
     dimension = _int_env("AI_WORKFLOW_EMBEDDING_DIMENSION", 1024)
 
     if vector_store_name in {"fake", "in_memory", "memory"} or embedding_provider == "fake":
@@ -88,9 +88,36 @@ def create_rag_retriever_for_backend(backend: str) -> RAGRetriever | None:
     if vector_store_name != "pgvector":
         return NullRAGRetriever(status="disabled_invalid_config")
 
-    dsn = (os.getenv("AI_WORKFLOW_PGVECTOR_DSN") or "").strip()
+    dsn = (os.getenv("AI_WORKFLOW_PGVECTOR_DSN") or os.getenv("WEB_API_PGVECTOR_DSN") or "").strip()
     if not dsn:
         return NullRAGRetriever(status="disabled_missing_pgvector_dsn")
+
+    if embedding_provider in {"doubao", "ark", "volcengine"}:
+        if not embedding_model:
+            return NullRAGRetriever(status="disabled_missing_doubao_embedding_model")
+        api_key = (
+            os.getenv("DOUBAO_EMBEDDING_API_KEY")
+            or os.getenv("ARK_EMBEDDING_API_KEY")
+            or os.getenv("ARK_API_KEY")
+            or ""
+        ).strip()
+        if not api_key:
+            return NullRAGRetriever(status="disabled_missing_doubao_embedding_api_key")
+        return VectorStoreRAGRetriever(
+            embedding_client=DoubaoEmbeddingClient(
+                base_url=(
+                    os.getenv("DOUBAO_EMBEDDING_BASE_URL")
+                    or os.getenv("ARK_EMBEDDING_BASE_URL")
+                    or os.getenv("ARK_BASE_URL")
+                    or "https://ark.cn-beijing.volces.com/api/v3"
+                ),
+                api_key=api_key,
+                model=embedding_model,
+                endpoint=os.getenv("DOUBAO_EMBEDDING_ENDPOINT") or os.getenv("ARK_EMBEDDING_ENDPOINT") or "auto",
+                timeout=_float_env("AI_WORKFLOW_EMBEDDING_TIMEOUT_SECONDS", 20.0),
+            ),
+            vector_store=PgVectorStore(dsn),
+        )
 
     if embedding_provider != "ollama":
         return NullRAGRetriever(status="disabled_invalid_embedding_provider")
@@ -109,7 +136,36 @@ def _truthy(value: str | None) -> bool:
 
 
 def _answer_generator_name() -> str:
-    return (os.getenv("AI_WORKFLOW_ANSWER_GENERATOR") or "null").strip().lower()
+    configured = (os.getenv("AI_WORKFLOW_ANSWER_GENERATOR") or "").strip().lower()
+    if configured:
+        return configured
+    if _truthy(os.getenv("AI_WORKFLOW_USE_REAL_ANSWER_GENERATOR")):
+        return "openai_compatible"
+    return "null"
+
+
+def _embedding_provider_name() -> str:
+    configured = (
+        os.getenv("AI_WORKFLOW_EMBEDDING_PROVIDER")
+        or os.getenv("WEB_KNOWLEDGE_EMBEDDING_PROVIDER")
+        or ""
+    ).strip().lower()
+    if configured:
+        return configured
+    if os.getenv("DOUBAO_EMBEDDING_API_KEY") or os.getenv("ARK_EMBEDDING_API_KEY") or os.getenv("ARK_API_KEY"):
+        return "doubao"
+    return "ollama"
+
+
+def _embedding_model_name(provider: str) -> str:
+    if provider in {"doubao", "ark", "volcengine"}:
+        return (
+            os.getenv("AI_WORKFLOW_EMBEDDING_MODEL")
+            or os.getenv("DOUBAO_EMBEDDING_MODEL")
+            or os.getenv("ARK_EMBEDDING_MODEL")
+            or ""
+        ).strip()
+    return (os.getenv("AI_WORKFLOW_EMBEDDING_MODEL") or "bge-m3").strip()
 
 
 def _int_env(name: str, default: int) -> int:
