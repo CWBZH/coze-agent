@@ -228,6 +228,88 @@ pre {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
+.product-knowledge-list {
+  display: grid;
+  gap: 12px;
+}
+
+.product-knowledge-row {
+  display: grid;
+  width: 100%;
+  grid-template-columns: minmax(0, 1fr) minmax(260px, 34%);
+  gap: 16px;
+  align-items: stretch;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  background: #fff;
+  color: #172033;
+  padding: 14px;
+  text-align: left;
+}
+
+.product-knowledge-row:hover,
+.product-knowledge-row.selected {
+  border-color: #93c5fd;
+  background: #f8fbff;
+}
+
+.product-row-main {
+  display: grid;
+  min-width: 0;
+  gap: 8px;
+}
+
+.product-row-title-line {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.product-row-title-line strong {
+  flex: 1 1 420px;
+  min-width: 0;
+  color: #0f172a;
+  font-size: 16px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.product-row-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  color: #64748b;
+  font-size: 13px;
+}
+
+.product-row-meta span {
+  overflow-wrap: anywhere;
+}
+
+.product-row-facts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.product-row-facts span {
+  display: grid;
+  gap: 3px;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #f8fafc;
+  color: #334155;
+  min-width: 0;
+  padding: 8px 10px;
+}
+
+.product-row-facts b {
+  color: #64748b;
+  font-size: 12px;
+}
+
 .warning-banner,
 .alert,
 .state-card {
@@ -827,6 +909,100 @@ pre {
   min-width: 0;
 }
 
+.trace-log-layout {
+  display: grid;
+  grid-template-columns: minmax(520px, 0.95fr) minmax(480px, 1.05fr);
+  gap: 18px;
+  align-items: start;
+}
+
+.trace-log-list-panel,
+.trace-log-detail-panel {
+  min-width: 0;
+}
+
+.trace-toolbar {
+  display: grid;
+  grid-template-columns: minmax(240px, 1fr) auto auto auto;
+  gap: 10px;
+  align-items: center;
+  margin: 16px 0;
+}
+
+.trace-checkbox {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+}
+
+.trace-checkbox input {
+  width: auto;
+}
+
+.trace-log-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  color: #64748b;
+  margin-bottom: 12px;
+}
+
+.trace-log-list {
+  display: grid;
+  gap: 10px;
+}
+
+.trace-log-row {
+  display: grid;
+  width: 100%;
+  gap: 8px;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  background: #fff;
+  color: #172033;
+  padding: 12px;
+  text-align: left;
+}
+
+.trace-log-row:hover,
+.trace-log-row.selected {
+  border-color: #93c5fd;
+  background: #f8fbff;
+}
+
+.trace-row-head,
+.trace-row-meta,
+.trace-row-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.trace-row-head {
+  justify-content: space-between;
+}
+
+.trace-row-head strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.trace-row-meta {
+  color: #64748b;
+  font-size: 13px;
+}
+
+.raw-trace-json {
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  background: #fff;
+  margin-top: 12px;
+  padding: 14px;
+}
+
 .trace-panel-detailed {
   overflow: auto;
   max-height: calc(100vh - 140px);
@@ -929,6 +1105,16 @@ pre {
 }
 
 @media (max-width: 900px) {
+  .product-knowledge-row,
+  .trace-log-layout,
+  .trace-toolbar {
+    grid-template-columns: 1fr;
+  }
+
+  .product-row-facts {
+    grid-template-columns: 1fr;
+  }
+
   .trace-kv-row {
     grid-template-columns: 1fr;
     gap: 4px;

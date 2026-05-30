@@ -13,7 +13,6 @@ import {
   ProductQuery
 } from "../api/products";
 import { retrieveDebug, RagDebugHit } from "../api/rag";
-import { DataTable } from "../components/DataTable";
 import { DrawerPanel } from "../components/DrawerPanel";
 import { MetricCard } from "../components/MetricCard";
 import { StatusBadge } from "../components/StatusBadge";
@@ -110,6 +109,81 @@ function CoveragePanel({ coverage }: { coverage: ProductCoverage | null }) {
         })}
       </div>
     </section>
+  );
+}
+
+function formatDisplayDate(value: string) {
+  if (!value) return "未更新";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleString("zh-CN", { hour12: false });
+}
+
+function ProductKnowledgeList({
+  products,
+  selectedProductKey,
+  onSelect
+}: {
+  products: Product[];
+  selectedProductKey?: string;
+  onSelect: (product: Product) => void;
+}) {
+  if (products.length === 0) {
+    return <div className="state-card">当前筛选条件下没有商品。</div>;
+  }
+
+  return (
+    <div className="product-knowledge-list" role="list">
+      {products.map((product) => {
+        const title = product.goods_name || product.product_title || product.goods_id;
+        const productKey = `${product.shop_id}-${product.goods_id}`;
+        const isSelected = productKey === selectedProductKey;
+        return (
+          <button
+            className={isSelected ? "product-knowledge-row selected" : "product-knowledge-row"}
+            key={productKey}
+            onClick={() => onSelect(product)}
+            type="button"
+          >
+            <div className="product-row-main">
+              <div className="product-row-title-line">
+                <strong>{title}</strong>
+                <StatusBadge tone={product.knowledge_status === "ready" || product.knowledge_status === "synced" ? "success" : "neutral"}>
+                  {product.knowledge_status || "unknown"}
+                </StatusBadge>
+                <StatusBadge tone={product.indexed_status === "indexed" ? "success" : "neutral"}>
+                  {product.indexed_status || "unknown"}
+                </StatusBadge>
+              </div>
+              <div className="product-row-meta">
+                <span>goods_id: {product.goods_id}</span>
+                <span>shop: {product.shop_name || product.shop_id}</span>
+                <span>version: {product.version || "未发布版本"}</span>
+                <span>updated: {formatDisplayDate(product.updated_at)}</span>
+              </div>
+            </div>
+            <div className="product-row-facts">
+              <span>
+                <b>价格</b>
+                {product.price || "未覆盖"}
+              </span>
+              <span>
+                <b>规格</b>
+                {Array.isArray(product.specs) && product.specs.length ? `${product.specs.length} 项` : "未覆盖"}
+              </span>
+              <span>
+                <b>用法</b>
+                {product.usage ? "已补充" : "未覆盖"}
+              </span>
+              <span>
+                <b>注意事项</b>
+                {product.warnings ? "已补充" : "未覆盖"}
+              </span>
+            </div>
+          </button>
+        );
+      })}
+    </div>
   );
 }
 
@@ -315,21 +389,10 @@ export function Products() {
           {listState === "loading" ? <div className="state-card">正在加载商品...</div> : null}
           {listState === "error" ? <div className="state-card error-state">加载商品失败：{error}</div> : null}
           {listState !== "loading" && listState !== "error" ? (
-            <DataTable<Product>
-              rows={filteredProducts}
-              emptyMessage="当前筛选条件下没有商品。"
-              onRowClick={loadProductDetail}
-              columns={[
-                { key: "goods_id", label: "商品ID goods_id" },
-                { key: "goods_name", label: "商品名" },
-                { key: "product_title", label: "商品标题" },
-                { key: "shop_id", label: "店铺ID shop_id" },
-                { key: "shop_name", label: "店铺名称" },
-                { key: "version", label: "版本" },
-                { key: "knowledge_status", label: "知识状态", render: (row) => <StatusBadge tone={row.knowledge_status === "ready" ? "success" : "neutral"}>{row.knowledge_status}</StatusBadge> },
-                { key: "indexed_status", label: "索引状态", render: (row) => <StatusBadge tone={row.indexed_status === "indexed" ? "success" : "neutral"}>{row.indexed_status}</StatusBadge> },
-                { key: "updated_at", label: "更新时间" }
-              ]}
+            <ProductKnowledgeList
+              products={filteredProducts}
+              selectedProductKey={detail ? `${detail.shop_id}-${detail.goods_id}` : undefined}
+              onSelect={loadProductDetail}
             />
           ) : null}
         </section>
