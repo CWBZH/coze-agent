@@ -342,16 +342,103 @@ def _safe_ref(value: Any) -> dict[str, Any]:
     getter = value.get if isinstance(value, Mapping) else lambda key, default=None: getattr(value, key, default)
     title = str(getter("title", "") or getter("goods_name", "") or "")
     source_id = str(getter("source_id", "") or getter("goods_id", "") or "")
+    domain = str(getter("domain", "") or "")
+    source_type = str(getter("source_type", "") or getter("source", "") or "")
+    content = str(getter("content_summary", "") or getter("approved_answer", "") or getter("content", "") or "")
+    if source_type == "product" or domain == "product_catalog":
+        content = _format_product_ref_content(content, getter("metadata", {}) or {})
     return {
         "chunk_id": str(getter("chunk_id", "") or ""),
-        "domain": str(getter("domain", "") or ""),
-        "source_type": str(getter("source_type", "") or getter("source", "") or ""),
+        "domain": domain,
+        "source_type": source_type,
         "source_id_hash": answer_hash(source_id),
         "title_hash": answer_hash(title),
         "version": str(getter("version", "") or ""),
         "content_hash": str(getter("content_hash", "") or ""),
-        "content": str(getter("content_summary", "") or getter("approved_answer", "") or getter("content", "") or "")[:400],
+        "content": content[:1200],
     }
+
+
+def _format_product_ref_content(content: str, metadata: Any) -> str:
+    lines = [line.strip() for line in str(content or "").splitlines() if line.strip()]
+    parsed = _parse_labeled_product_fields(lines)
+    meta_fields = _metadata_product_fields(metadata)
+    for field_name, field in meta_fields.items():
+        if field_name not in parsed and str(field.get("value") or "").strip():
+            parsed[field_name] = field
+    if not parsed:
+        return "\n".join(lines)
+
+    ordered = [
+        "goods_name",
+        "price",
+        "price_note",
+        "specs",
+        "usage",
+        "shelf_life",
+        "ingredients",
+        "warnings",
+        "manual_notes",
+    ]
+    output: list[str] = []
+    for line in lines[:3]:
+        if line.startswith(("Product:", "Goods ID:", "Domain:")):
+            output.append(line)
+    for field_name in ordered:
+        field = parsed.get(field_name)
+        if not field:
+            continue
+        value = str(field.get("value") or "").strip()
+        if not value:
+            continue
+        source = str(field.get("source") or "unknown").strip() or "unknown"
+        output.append(f"{_product_field_label(field_name)} [{source}]: {value}")
+    return "\n".join(output) if output else "\n".join(lines)
+
+
+def _product_field_label(field_name: str) -> str:
+    labels = {
+        "goods_name": "商品名称",
+        "price": "价格",
+        "price_note": "价格说明",
+        "specs": "规格",
+        "usage": "用法",
+        "shelf_life": "保质期",
+        "ingredients": "成分",
+        "warnings": "注意事项",
+        "manual_notes": "人工备注",
+    }
+    return labels.get(field_name, field_name)
+
+
+def _parse_labeled_product_fields(lines: list[str]) -> dict[str, dict[str, str]]:
+    parsed: dict[str, dict[str, str]] = {}
+    pattern = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)\s*\[([^\]]+)\]\s*:\s*(.*)$")
+    for line in lines:
+        match = pattern.match(line)
+        if not match:
+            continue
+        field_name, source, value = match.groups()
+        parsed[field_name] = {"source": source, "value": value}
+    return parsed
+
+
+def _metadata_product_fields(metadata: Any) -> dict[str, dict[str, str]]:
+    if not isinstance(metadata, Mapping):
+        return {}
+    raw_fields = metadata.get("fields")
+    if not isinstance(raw_fields, Mapping):
+        return {}
+    fields: dict[str, dict[str, str]] = {}
+    for field_name, field_value in raw_fields.items():
+        if isinstance(field_value, Mapping):
+            value = field_value.get("value")
+            source = field_value.get("source") or "unknown"
+        else:
+            value = field_value
+            source = "unknown"
+        fields[str(field_name)] = {"source": str(source or "unknown"), "value": str(value or "")}
+    return fields
 
 
 def _format_knowledge_results(items: list[dict[str, Any]]) -> str:
@@ -363,7 +450,7 @@ def _format_knowledge_results(items: list[dict[str, Any]]) -> str:
         if not content:
             continue
         domain = str(item.get("domain") or "")
-        lines.append(f"{index}. domain={domain} 内容：{content[:400]}")
+        lines.append(f"{index}. domain={domain} 内容：{content[:1200]}")
     return "\n".join(lines) if lines else "无"
 
 

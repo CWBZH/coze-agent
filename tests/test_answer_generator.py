@@ -161,6 +161,54 @@ def test_openai_compatible_answer_generator_does_not_retry_non_price_question(mo
     assert len(calls) == 1
 
 
+def test_openai_compatible_answer_generator_keeps_late_product_fields_in_prompt(monkeypatch):
+    monkeypatch.setenv("AI_WORKFLOW_TEST_LLM_KEY", "private-api-key")
+    captured = {}
+
+    def fake_transport(*, url, headers, body, timeout_seconds):
+        del url, headers, timeout_seconds
+        captured["body"] = body
+        return {"choices": [{"message": {"content": "亲亲，保质期是3年，开封后建议12个月内用完哦"}}]}
+
+    long_prefix = "ingredients [manual_override]: " + ("牡丹花提取物、烟酰胺、维生素C、胶原蛋白、甘油。" * 30)
+    product_content = "\n".join(
+        [
+            "Product: YACN牡丹花素颜霜身体素颜伪体香纯欲斩男香持久留香保湿焕亮秋冬",
+            "Goods ID: 773044930700",
+            "Domain: product_catalog",
+            "goods_name [manual_override]: YACN牡丹花素颜霜身体素颜伪体香纯欲斩男香持久留香保湿焕亮秋冬",
+            long_prefix,
+            "shelf_life [manual_override]: 3年（开封后建议在12个月内用完）",
+            "usage [manual_override]: 取适量涂抹后按摩吸收。",
+        ]
+    )
+    generator = OpenAICompatibleAnswerGenerator(
+        base_url="https://llm.example.test/v1",
+        model="test-model",
+        api_key_env="AI_WORKFLOW_TEST_LLM_KEY",
+        transport=fake_transport,
+    )
+
+    draft = generator.generate(
+        AnswerGenerationContext(
+            intent="product_basic",
+            query_summary="保质期多久",
+            product_hits=[
+                {
+                    "domain": "product_catalog",
+                    "source_type": "product",
+                    "content": product_content,
+                }
+            ],
+        )
+    )
+    prompt = captured["body"]["messages"][1]["content"]
+
+    assert draft.text == "亲亲，保质期是3年，开封后建议12个月内用完哦"
+    assert "保质期 [manual_override]: 3年（开封后建议在12个月内用完）" in prompt
+    assert "用法 [manual_override]: 取适量涂抹后按摩吸收。" in prompt
+
+
 def test_openai_compatible_answer_generator_missing_key_is_sanitized(monkeypatch):
     monkeypatch.delenv("AI_WORKFLOW_TEST_LLM_KEY", raising=False)
     generator = OpenAICompatibleAnswerGenerator(

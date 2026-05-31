@@ -62,6 +62,33 @@ def _create_fake_db(path: Path) -> None:
                 knowledge_status TEXT,
                 updated_at TEXT
             );
+            CREATE TABLE product_manual_overrides (
+                id INTEGER PRIMARY KEY,
+                shop_id TEXT,
+                goods_id TEXT,
+                goods_name TEXT,
+                usage_override TEXT,
+                ingredients_override TEXT,
+                warnings_override TEXT,
+                shelf_life_override TEXT,
+                manual_notes TEXT,
+                specs_override TEXT,
+                price_note_override TEXT,
+                status TEXT,
+                updated_at TEXT
+            );
+            CREATE TABLE knowledge_versions (
+                id INTEGER PRIMARY KEY,
+                shop_id TEXT,
+                source_type TEXT,
+                source_id TEXT,
+                domain TEXT,
+                version TEXT,
+                status TEXT,
+                is_active INTEGER,
+                indexed_at TEXT,
+                activated_at TEXT
+            );
             """
         )
         conn.execute("INSERT INTO channels (id, channel_name) VALUES (1, 'pinduoduo')")
@@ -87,6 +114,26 @@ def _create_fake_db(path: Path) -> None:
             VALUES (1, 'goods-real-1', '真实商品A', '9.90', ?, ?, 'active', '2026-05-25 21:00')
             """,
             (json.dumps(["规格A", "规格B"], ensure_ascii=False), json.dumps(raw, ensure_ascii=False)),
+        )
+        conn.execute(
+            """
+            INSERT INTO product_manual_overrides
+            (shop_id, goods_id, goods_name, usage_override, ingredients_override, warnings_override,
+             shelf_life_override, manual_notes, specs_override, price_note_override, status, updated_at)
+            VALUES
+            ('shop-real-1', 'goods-real-1', '真实商品A人工版', '人工用法', '人工成分', '人工注意事项',
+             '人工保质期3年', '人工备注', ?, '人工价格说明', 'draft', '2026-05-25 22:00')
+            """,
+            (json.dumps(["人工规格A", "人工规格B"], ensure_ascii=False),),
+        )
+        conn.execute(
+            """
+            INSERT INTO knowledge_versions
+            (shop_id, source_type, source_id, domain, version, status, is_active, indexed_at, activated_at)
+            VALUES
+            ('shop-real-1', 'product', 'goods-real-1', 'product_catalog', 'product-goods-real-1-20260525220000',
+             'indexed', 1, '2026-05-25 22:01', '2026-05-25 22:02')
+            """
         )
         conn.commit()
     finally:
@@ -137,12 +184,16 @@ def test_products_api_reads_real_product_knowledge(tmp_path):
         assert response.status_code == 200
         product = response.json()["items"][0]
         assert product["goods_id"] == "goods-real-1"
-        assert product["goods_name"] == "真实商品A"
-        assert product["product_title"] == "真实商品A"
+        assert product["goods_name"] == "真实商品A人工版"
+        assert product["product_title"] == "真实商品A人工版"
         assert product["price"] == "9.90"
-        assert product["specs"] == ["规格A", "规格B"]
-        assert product["usage"] == "洁面后取适量涂抹，轻轻推开。"
-        assert product["ingredients"] == "烟酰胺、保湿成分"
+        assert product["specs"] == ["人工规格A", "人工规格B"]
+        assert product["usage"] == "人工用法"
+        assert product["ingredients"] == "人工成分"
+        assert product["shelf_life"] == "人工保质期3年"
+        assert product["warnings"] == "人工注意事项"
+        assert product["version"] == "product-goods-real-1-20260525220000"
+        assert product["indexed_status"] == "indexed"
         assert "masked_goods_id" not in product
     finally:
         _clear_overrides()
@@ -157,7 +208,7 @@ def test_product_detail_returns_raw_detail_json_and_empty_chunks(tmp_path):
         assert response.status_code == 200
         detail = response.json()
         assert detail["raw_detail_json"]["manual_notes"] == "价格以页面为准"
-        assert detail["manual_notes"] == "价格以页面为准"
+        assert detail["manual_notes"] == "人工备注"
         assert detail["chunks"] == []
     finally:
         _clear_overrides()

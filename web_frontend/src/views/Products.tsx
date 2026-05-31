@@ -267,7 +267,7 @@ export function Products() {
     setRagHits([]);
     setRagWarning(null);
     setRagQuery(row.goods_name || row.product_title || row.goods_id);
-    setRagVersion(row.version || "real-product-v1");
+    setRagVersion("");
     getProduct(row.goods_id, row.shop_id, includeArchived)
       .then((data) => {
         setDetail(data);
@@ -286,7 +286,6 @@ export function Products() {
     setChunksError(null);
     getProductChunks(detail.goods_id, {
       shop_id: detail.shop_id,
-      version: detail.version,
       domain: "product_catalog",
       source_type: "product",
       limit: 20
@@ -311,7 +310,7 @@ export function Products() {
       shop_id: detail.shop_id,
       query: ragQuery || detail.goods_name || detail.product_title,
       domain: ragDomain,
-      version: ragVersion || detail.version,
+      version: ragVersion || undefined,
       top_k: ragTopK,
       goods_id: detail.goods_id
     })

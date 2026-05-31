@@ -5,6 +5,7 @@ from pathlib import Path
 from web_api.services.knowledge_center_service import (
     KnowledgeCenterRepository,
     KnowledgeCenterService,
+    build_chunks_from_version_snapshot,
     init_knowledge_center_schema,
 )
 
@@ -161,13 +162,47 @@ def test_product_override_upsert_and_effective_view_rules(tmp_path):
     assert fields["price_note"]["source"] == "manual_override"
 
 
+def test_product_version_chunks_keep_field_metadata():
+    version = {
+        "id": 29,
+        "shop_id": "565617",
+        "source_type": "product",
+        "source_id": "773044930700",
+        "domain": "product_catalog",
+        "version": "product-773044930700-20260531073301",
+        "content_hash": "content-hash",
+        "created_by": "local_admin",
+        "snapshot_json": json.dumps(
+            {
+                "domain": "product_catalog",
+                "goods_id": "773044930700",
+                "goods_name": "YACN牡丹花素颜霜",
+                "fields": {
+                    "shelf_life": {"source": "manual_override", "value": "3年（开封后建议在12个月内用完）"},
+                    "usage": {"source": "manual_override", "value": "取适量涂抹后按摩吸收。"},
+                },
+            },
+            ensure_ascii=False,
+        ),
+    }
+
+    chunks = build_chunks_from_version_snapshot(version, {"index_run_id": "idx-test"})
+
+    assert chunks
+    metadata = chunks[0].metadata
+    assert metadata["goods_id"] == "773044930700"
+    assert metadata["goods_name"] == "YACN牡丹花素颜霜"
+    assert metadata["fields"]["shelf_life"]["source"] == "manual_override"
+    assert metadata["fields"]["shelf_life"]["value"] == "3年（开封后建议在12个月内用完）"
+
+
 def test_publish_sop_creates_immutable_version_and_index_job(tmp_path):
     db_path = tmp_path / "kc.db"
     service = KnowledgeCenterService(db_path)
     service.init_schema()
     sop = service.create_sop("shop-1", "sensitive_user_safety", "Safety SOP", "Version one")
 
-    published = service.publish_sop("shop-1", sop["id"])
+    published = service.publish_sop("shop-1", sop["id"], run_index=False)
     service.update_sop(sop["id"], content="Version two")
     version = service.get_version(published["version"]["id"])
     job = service.get_index_job(published["job"]["id"])

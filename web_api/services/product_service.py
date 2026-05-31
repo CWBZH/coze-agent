@@ -1,4 +1,5 @@
 from fastapi import HTTPException
+from typing import Any
 
 from web_api.schemas.products import ProductCoverage, ProductDetail, ProductSummary
 from web_api.services.sqlite_readonly import ReadOnlySqlite, parse_json_list_or_text, parse_json_object, pick_text
@@ -113,7 +114,9 @@ class ProductService:
                 pk.price,
                 pk.price_min,
                 pk.price_max,
-                pk.specifications
+                pk.specifications,
+                pk.goods_id,
+                s.shop_id AS platform_shop_id
             FROM product_knowledge pk
             LEFT JOIN shops s ON s.id = pk.shop_id
             {where}
@@ -133,19 +136,20 @@ class ProductService:
         }
         for row in result.rows:
             raw = parse_json_object(row.get("raw_detail_json"))
+            override = self._product_override(str(row.get("platform_shop_id") or row.get("shop_id") or ""), str(row.get("goods_id") or ""))
             if row.get("price") or row.get("price_min") or row.get("price_max") or pick_text(raw, "price", "price_range"):
                 counters["has_price"] += 1
             if row.get("specifications") or pick_text(raw, "specs", "specifications", "sku_options", "sku_summary"):
                 counters["has_specs"] += 1
-            if pick_text(raw, "usage", "usage_method", "how_to_use", "use_method"):
+            if _first_text(override.get("usage_override"), pick_text(raw, "usage", "usage_method", "how_to_use", "use_method")):
                 counters["has_usage"] += 1
-            if pick_text(raw, "ingredients", "ingredient", "composition"):
+            if _first_text(override.get("ingredients_override"), pick_text(raw, "ingredients", "ingredient", "composition")):
                 counters["has_ingredients"] += 1
-            if pick_text(raw, "shelf_life", "expiry", "expiration", "保质期"):
+            if _first_text(override.get("shelf_life_override"), pick_text(raw, "shelf_life", "expiry", "expiration", "保质期")):
                 counters["has_shelf_life"] += 1
-            if pick_text(raw, "warnings", "warning", "notice", "cautions", "注意事项"):
+            if _first_text(override.get("warnings_override"), pick_text(raw, "warnings", "warning", "notice", "cautions", "注意事项")):
                 counters["has_warnings"] += 1
-            if pick_text(raw, "manual_notes", "notes", "客服备注"):
+            if _first_text(override.get("manual_notes"), pick_text(raw, "manual_notes", "notes", "客服备注")):
                 counters["has_manual_notes"] += 1
         return ProductCoverage(**counters), result.warning
 
@@ -162,25 +166,32 @@ class ProductService:
 
     def _row_to_summary(self, row: dict, *, version: str | None = None, indexed_status: str | None = None) -> ProductSummary:
         raw = parse_json_object(row.get("raw_detail_json"))
-        specs = parse_json_list_or_text(row.get("specifications") or raw.get("specifications") or raw.get("sku_options"))
+        platform_shop_id = str(row.get("platform_shop_id") or row.get("shop_id") or "")
+        goods_id = str(row.get("goods_id") or "")
+        override = self._product_override(platform_shop_id, goods_id)
+        active_version = self._active_product_version(platform_shop_id, goods_id)
+        specs = parse_json_list_or_text(
+            _first_text(override.get("specs_override"), row.get("specifications"), raw.get("specifications"), raw.get("sku_options"))
+        )
+        effective_goods_name = _first_text(override.get("goods_name"), row.get("goods_name"), raw.get("goods_name"), raw.get("title"))
         return ProductSummary(
-            goods_id=str(row.get("goods_id") or ""),
-            goods_name=str(row.get("goods_name") or raw.get("goods_name") or raw.get("title") or ""),
-            product_title=str(row.get("goods_name") or raw.get("title") or raw.get("product_title") or ""),
-            shop_id=str(row.get("platform_shop_id") or row.get("shop_id") or ""),
+            goods_id=goods_id,
+            goods_name=effective_goods_name,
+            product_title=_first_text(effective_goods_name, raw.get("product_title")),
+            shop_id=platform_shop_id,
             shop_name=str(row.get("shop_name") or ""),
-            version=version or str(row.get("version") or "real-product-v1"),
+            version=version or str(active_version.get("version") or row.get("version") or "real-product-v1"),
             knowledge_status=str(row.get("knowledge_status") or "unknown"),
-            indexed_status=indexed_status or str(row.get("indexed_status") or "unknown"),
+            indexed_status=indexed_status or str(active_version.get("status") or row.get("indexed_status") or "unknown"),
             archived_at=str(row.get("archived_at") or ""),
             archive_reason=str(row.get("archive_reason") or ""),
             updated_at=str(row.get("updated_at") or ""),
             price=_price(row, raw),
             specs=specs,
-            usage=pick_text(raw, "usage", "usage_method", "how_to_use", "use_method"),
-            ingredients=pick_text(raw, "ingredients", "ingredient", "composition"),
-            shelf_life=pick_text(raw, "shelf_life", "expiry", "expiration", "保质期"),
-            warnings=pick_text(raw, "warnings", "warning", "notice", "cautions", "注意事项"),
+            usage=_first_text(override.get("usage_override"), pick_text(raw, "usage", "usage_method", "how_to_use", "use_method")),
+            ingredients=_first_text(override.get("ingredients_override"), pick_text(raw, "ingredients", "ingredient", "composition")),
+            shelf_life=_first_text(override.get("shelf_life_override"), pick_text(raw, "shelf_life", "expiry", "expiration", "保质期")),
+            warnings=_first_text(override.get("warnings_override"), pick_text(raw, "warnings", "warning", "notice", "cautions", "注意事项")),
         )
 
     def _row_to_detail(self, row: dict, *, warning: str | None = None) -> ProductDetail:
@@ -188,11 +199,50 @@ class ProductService:
         raw = parse_json_object(row.get("raw_detail_json"))
         return ProductDetail(
             **summary.model_dump(),
-            manual_notes=pick_text(raw, "manual_notes", "notes", "客服备注"),
+            manual_notes=_first_text(
+                self._product_override(summary.shop_id, summary.goods_id).get("manual_notes"),
+                pick_text(raw, "manual_notes", "notes", "客服备注"),
+            ),
             raw_detail_json=raw,
             chunks=[],
             warning=warning,
         )
+
+    def _product_override(self, shop_id: str, goods_id: str) -> dict[str, Any]:
+        if not shop_id or not goods_id:
+            return {}
+        result = self._db.query(
+            """
+            SELECT *
+            FROM product_manual_overrides
+            WHERE shop_id = ? AND goods_id = ?
+            ORDER BY updated_at DESC, id DESC
+            LIMIT 1
+            """,
+            (shop_id, goods_id),
+            required_tables=("product_manual_overrides",),
+        )
+        return result.rows[0] if result.rows and not result.warning else {}
+
+    def _active_product_version(self, shop_id: str, goods_id: str) -> dict[str, Any]:
+        if not shop_id or not goods_id:
+            return {}
+        result = self._db.query(
+            """
+            SELECT id, version, status, indexed_at, activated_at
+            FROM knowledge_versions
+            WHERE shop_id = ?
+              AND source_type = 'product'
+              AND source_id = ?
+              AND domain = 'product_catalog'
+              AND is_active = 1
+            ORDER BY activated_at DESC, indexed_at DESC, id DESC
+            LIMIT 1
+            """,
+            (shop_id, goods_id),
+            required_tables=("knowledge_versions",),
+        )
+        return result.rows[0] if result.rows and not result.warning else {}
 
 
 def _price(row: dict, raw: dict) -> str:
@@ -201,3 +251,16 @@ def _price(row: dict, raw: dict) -> str:
     if row.get("price_min") is not None or row.get("price_max") is not None:
         return f"{row.get('price_min') or ''}-{row.get('price_max') or ''}".strip("-")
     return pick_text(raw, "price", "price_range", "goods_price")
+
+
+def _first_text(*values: Any) -> str:
+    for value in values:
+        if value is None:
+            continue
+        if isinstance(value, (list, dict)):
+            text = str(value)
+        else:
+            text = str(value)
+        if text.strip():
+            return text.strip()
+    return ""

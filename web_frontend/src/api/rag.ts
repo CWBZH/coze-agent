@@ -25,7 +25,7 @@ export type RagDebugRequest = {
   shop_id: string;
   query: string;
   domain: string;
-  version: string;
+  version?: string;
   top_k: number;
   goods_id?: string;
 };

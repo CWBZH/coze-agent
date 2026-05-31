@@ -1172,6 +1172,8 @@ def build_chunks_from_version_snapshot(version: dict[str, Any], job: dict[str, A
             "created_by": version.get("created_by") or "local_admin",
             "is_test_data": False,
         }
+        if str(version["source_type"]) == "product":
+            metadata.update(_product_snapshot_metadata(snapshot, version))
         chunks.append(
             _KnowledgeChunk(
                 chunk_id=chunk_id,
@@ -1187,6 +1189,25 @@ def build_chunks_from_version_snapshot(version: dict[str, Any], job: dict[str, A
             )
         )
     return chunks
+
+
+def _product_snapshot_metadata(snapshot: dict[str, Any], version: dict[str, Any]) -> dict[str, Any]:
+    fields: dict[str, dict[str, Any]] = {}
+    raw_fields = snapshot.get("fields") or {}
+    if isinstance(raw_fields, dict):
+        for field_name, field_value in raw_fields.items():
+            if isinstance(field_value, dict):
+                value = field_value.get("value")
+                source = field_value.get("source") or "unknown"
+            else:
+                value = field_value
+                source = "unknown"
+            fields[str(field_name)] = {"source": str(source or "unknown"), "value": value if value is not None else ""}
+    return {
+        "goods_id": str(snapshot.get("goods_id") or version.get("source_id") or ""),
+        "goods_name": str(snapshot.get("goods_name") or ""),
+        "fields": fields,
+    }
 
 
 def _snapshot_to_chunk_content(snapshot: dict[str, Any], *, source_type: str) -> str:
