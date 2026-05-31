@@ -174,9 +174,13 @@ def test_trace_nodes_use_final_result_intent_when_trace_payload_omits_classifier
     nodes = {node["key"]: node for node in result["nodes"]}
     assert result["reply_generation"]["intent"] == "logistics_order_status"
     assert result["reply_generation"]["calls_llm"] is True
+    assert result["intent_evidence"]["intent"] == "logistics_order_status"
+    assert result["intent_evidence"]["status"] == "ok"
+    assert result["intent_evidence"]["source_label"] == "InternalEngine 流程/规则识别"
     assert result["send_text"] == "亲亲，默认极兔速递，48小时内广州发货，具体以订单物流页为准"
     assert nodes["intent"]["status"] == "passed"
-    assert nodes["intent"]["summary"] == "logistics_order_status"
+    assert "logistics_order_status" in nodes["intent"]["summary"]
+    assert "未调用独立分类器" in nodes["intent"]["summary"]
     assert nodes["llm"]["status"] == "passed"
     assert nodes["guardrail"]["status"] == "passed"
     assert nodes["pdd_send"]["status"] == "passed"

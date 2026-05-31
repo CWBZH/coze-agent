@@ -48,6 +48,7 @@ export type ConversationMessage = {
   final_status_label: string;
   status_explanation: string;
   recommended_action: string;
+  intent_evidence?: Record<string, unknown>;
   rag_query: string;
   rag_hit_count: number;
   rag_chunks: RagChunk[];

@@ -1,0 +1,1203 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>商品知识页重构原型</title>
+  <style>
+    :root {
+      --nav: #0f172a;
+      --nav-active: #1e293b;
+      --bg: #f3f6fb;
+      --panel: #ffffff;
+      --panel-soft: #f8fafc;
+      --line: #d9e2ef;
+      --line-strong: #b9c7dc;
+      --text: #07142f;
+      --muted: #5d708f;
+      --blue: #2563eb;
+      --blue-soft: #eaf2ff;
+      --green: #16a34a;
+      --green-soft: #e9f8ef;
+      --yellow: #b7791f;
+      --yellow-soft: #fff7dd;
+      --red: #dc2626;
+      --red-soft: #fff0f0;
+      --gray: #64748b;
+      --gray-soft: #eef2f7;
+      --radius: 8px;
+      font-family: "Microsoft YaHei", "PingFang SC", Arial, sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.5;
+    }
+
+    button, input, select, textarea {
+      font: inherit;
+    }
+
+    .app {
+      display: grid;
+      grid-template-columns: 268px minmax(0, 1fr);
+      min-height: 100vh;
+    }
+
+    .sidebar {
+      background: var(--nav);
+      color: #dbeafe;
+      padding: 26px 18px;
+      position: sticky;
+      top: 0;
+      height: 100vh;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 28px;
+    }
+
+    .brand-mark {
+      width: 46px;
+      height: 46px;
+      border-radius: 10px;
+      background: var(--blue);
+      color: #fff;
+      display: grid;
+      place-items: center;
+      font-weight: 900;
+    }
+
+    .brand-title {
+      color: #fff;
+      font-weight: 900;
+      font-size: 18px;
+    }
+
+    .brand-subtitle {
+      color: #9fb3d4;
+      font-size: 13px;
+    }
+
+    .nav-link {
+      display: flex;
+      align-items: center;
+      min-height: 44px;
+      padding: 10px 14px;
+      border-radius: var(--radius);
+      color: #dbeafe;
+      text-decoration: none;
+      font-weight: 700;
+      margin-bottom: 6px;
+    }
+
+    .nav-link.active,
+    .nav-link:hover {
+      background: var(--nav-active);
+      color: #fff;
+    }
+
+    .main {
+      min-width: 0;
+    }
+
+    .topbar {
+      background: #fff;
+      border-bottom: 1px solid var(--line);
+      padding: 18px 28px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 18px;
+      position: sticky;
+      top: 0;
+      z-index: 10;
+    }
+
+    .topbar h1 {
+      margin: 0 0 4px;
+      font-size: 26px;
+      letter-spacing: 0;
+    }
+
+    .topbar p {
+      margin: 0;
+      color: var(--muted);
+    }
+
+    .top-actions {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 5px 10px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 900;
+      white-space: nowrap;
+      line-height: 1.25;
+    }
+
+    .badge.blue { background: var(--blue-soft); color: var(--blue); }
+    .badge.green { background: var(--green-soft); color: var(--green); }
+    .badge.yellow { background: var(--yellow-soft); color: var(--yellow); }
+    .badge.red { background: var(--red-soft); color: var(--red); }
+    .badge.gray { background: var(--gray-soft); color: var(--gray); }
+
+    .content {
+      padding: 24px 28px 40px;
+      max-width: 1680px;
+    }
+
+    .notice {
+      background: #fff7dd;
+      border: 1px solid #f4d98a;
+      color: #8a4f00;
+      border-radius: var(--radius);
+      padding: 12px 14px;
+      margin-bottom: 16px;
+      font-weight: 700;
+    }
+
+    .toolbar {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      padding: 16px;
+      margin-bottom: 16px;
+    }
+
+    .toolbar-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 16px;
+      margin-bottom: 14px;
+    }
+
+    .toolbar h2 {
+      margin: 0 0 4px;
+      font-size: 20px;
+    }
+
+    .toolbar p {
+      margin: 0;
+      color: var(--muted);
+    }
+
+    .filters {
+      display: grid;
+      grid-template-columns: 1.3fr 1fr 1fr 1fr 1fr auto;
+      gap: 10px;
+      align-items: end;
+    }
+
+    .field {
+      display: grid;
+      gap: 6px;
+    }
+
+    .field span {
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 700;
+    }
+
+    input, select, textarea {
+      width: 100%;
+      border: 1px solid var(--line-strong);
+      border-radius: 7px;
+      padding: 10px 11px;
+      background: #fff;
+      color: var(--text);
+      min-height: 42px;
+    }
+
+    textarea {
+      min-height: 112px;
+      resize: vertical;
+    }
+
+    .btn {
+      border: 0;
+      border-radius: 7px;
+      min-height: 42px;
+      padding: 10px 14px;
+      background: var(--blue);
+      color: #fff;
+      font-weight: 900;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+
+    .btn.secondary { background: #334155; }
+    .btn.warning { background: #d97706; }
+    .btn.danger { background: #dc2626; }
+    .btn.ghost {
+      background: #eef2ff;
+      color: var(--blue);
+    }
+
+    .layout {
+      display: grid;
+      grid-template-columns: minmax(460px, 0.95fr) minmax(560px, 1.25fr);
+      gap: 16px;
+      align-items: start;
+    }
+
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      min-width: 0;
+    }
+
+    .panel-head {
+      padding: 16px;
+      border-bottom: 1px solid var(--line);
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 12px;
+    }
+
+    .panel-head h2,
+    .panel-head h3 {
+      margin: 0 0 4px;
+      font-size: 20px;
+    }
+
+    .panel-head p {
+      margin: 0;
+      color: var(--muted);
+    }
+
+    .coverage-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 10px;
+      padding: 16px;
+      border-bottom: 1px solid var(--line);
+      background: #fbfdff;
+    }
+
+    .metric {
+      border: 1px solid var(--line);
+      background: #fff;
+      border-radius: var(--radius);
+      padding: 12px;
+      min-height: 84px;
+    }
+
+    .metric span {
+      display: block;
+      color: var(--muted);
+      font-size: 13px;
+      margin-bottom: 5px;
+      font-weight: 700;
+    }
+
+    .metric strong {
+      font-size: 26px;
+      line-height: 1;
+    }
+
+    .metric small {
+      display: block;
+      color: var(--muted);
+      margin-top: 6px;
+    }
+
+    .list-tools {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--line);
+      background: #fff;
+      gap: 12px;
+    }
+
+    .list-tools strong {
+      white-space: nowrap;
+    }
+
+    .product-list {
+      display: grid;
+      gap: 10px;
+      padding: 14px;
+      max-height: calc(100vh - 320px);
+      min-height: 520px;
+      overflow: auto;
+    }
+
+    .product-card {
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      padding: 14px;
+      background: #fff;
+      cursor: pointer;
+      display: grid;
+      gap: 12px;
+      transition: border-color 0.15s, box-shadow 0.15s;
+    }
+
+    .product-card:hover {
+      border-color: #93c5fd;
+      box-shadow: 0 8px 20px rgba(37, 99, 235, 0.08);
+    }
+
+    .product-card.active {
+      border-color: var(--blue);
+      background: #f8fbff;
+      box-shadow: inset 4px 0 0 var(--blue);
+    }
+
+    .product-main {
+      display: grid;
+      gap: 8px;
+    }
+
+    .product-title {
+      font-size: 16px;
+      font-weight: 900;
+      line-height: 1.45;
+    }
+
+    .product-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px 12px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .product-kpis {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 8px;
+    }
+
+    .mini-kpi {
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: var(--panel-soft);
+      padding: 9px;
+      min-width: 0;
+    }
+
+    .mini-kpi span {
+      display: block;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .mini-kpi strong {
+      display: block;
+      margin-top: 4px;
+      font-size: 14px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .detail {
+      position: sticky;
+      top: 92px;
+      max-height: calc(100vh - 116px);
+      overflow: auto;
+    }
+
+    .detail-title {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 12px;
+    }
+
+    .detail-title h2 {
+      margin: 0 0 8px;
+      font-size: 22px;
+      line-height: 1.35;
+    }
+
+    .detail-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      padding: 14px 16px;
+      border-bottom: 1px solid var(--line);
+      background: #fbfdff;
+    }
+
+    .tabs {
+      display: flex;
+      gap: 8px;
+      padding: 12px 16px 0;
+      border-bottom: 1px solid var(--line);
+      background: #fff;
+    }
+
+    .tab {
+      border: 0;
+      border-radius: 7px 7px 0 0;
+      padding: 10px 14px;
+      font-weight: 900;
+      background: #e8eefc;
+      color: #1e3a8a;
+      cursor: pointer;
+    }
+
+    .tab.active {
+      background: var(--blue);
+      color: #fff;
+    }
+
+    .tab-pane {
+      display: none;
+      padding: 16px;
+    }
+
+    .tab-pane.active {
+      display: block;
+    }
+
+    .field-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
+
+    .info-card {
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      padding: 13px;
+      background: #fff;
+      min-width: 0;
+    }
+
+    .info-card header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 8px;
+    }
+
+    .info-card h4 {
+      margin: 0;
+      font-size: 15px;
+    }
+
+    .info-card p {
+      margin: 0;
+      color: var(--text);
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
+    .chunk-list {
+      display: grid;
+      gap: 12px;
+    }
+
+    .chunk-card {
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: #fff;
+      padding: 14px;
+    }
+
+    .chunk-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 10px;
+    }
+
+    .kv {
+      display: grid;
+      grid-template-columns: 130px 1fr;
+      gap: 8px 12px;
+      margin: 10px 0;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .kv dt {
+      margin: 0;
+      font-weight: 900;
+      color: var(--muted);
+    }
+
+    .kv dd {
+      margin: 0;
+      color: var(--text);
+      min-width: 0;
+      word-break: break-word;
+    }
+
+    .chunk-content,
+    .json-block {
+      background: #0f172a;
+      color: #dbeafe;
+      border-radius: var(--radius);
+      padding: 12px;
+      overflow: auto;
+      white-space: pre-wrap;
+      word-break: break-word;
+      font-family: Consolas, "Courier New", monospace;
+      font-size: 13px;
+      line-height: 1.55;
+      max-height: 360px;
+    }
+
+    .version-list {
+      display: grid;
+      gap: 10px;
+    }
+
+    .version-row {
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      padding: 12px;
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 10px;
+      align-items: center;
+      background: #fff;
+    }
+
+    .editor-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+      margin-top: 14px;
+    }
+
+    .empty {
+      border: 1px dashed var(--line-strong);
+      color: var(--muted);
+      background: #fbfdff;
+      border-radius: var(--radius);
+      padding: 24px;
+      text-align: center;
+      font-weight: 700;
+    }
+
+    .prototype-note {
+      margin-top: 18px;
+      color: var(--muted);
+      font-size: 13px;
+      text-align: center;
+    }
+
+    @media (max-width: 1280px) {
+      .app { grid-template-columns: 1fr; }
+      .sidebar {
+        position: static;
+        height: auto;
+      }
+      .sidebar nav {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(120px, 1fr));
+        gap: 6px;
+      }
+      .layout {
+        grid-template-columns: 1fr;
+      }
+      .detail {
+        position: static;
+        max-height: none;
+      }
+      .product-list {
+        max-height: none;
+        min-height: 0;
+      }
+    }
+
+    @media (max-width: 760px) {
+      .topbar {
+        display: block;
+      }
+      .top-actions {
+        justify-content: flex-start;
+        margin-top: 12px;
+      }
+      .content {
+        padding: 16px;
+      }
+      .filters,
+      .coverage-grid,
+      .product-kpis,
+      .field-grid,
+      .editor-grid {
+        grid-template-columns: 1fr;
+      }
+      .sidebar nav {
+        grid-template-columns: 1fr 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-mark">IE</div>
+        <div>
+          <div class="brand-title">InternalEngine</div>
+          <div class="brand-subtitle">AI 运营控制台</div>
+        </div>
+      </div>
+      <nav>
+        <a class="nav-link" href="#">数据总览</a>
+        <a class="nav-link" href="#">店铺接入</a>
+        <a class="nav-link" href="#">店铺管理</a>
+        <a class="nav-link" href="#">AI 设置</a>
+        <a class="nav-link active" href="#">商品知识</a>
+        <a class="nav-link" href="#">知识中心</a>
+        <a class="nav-link" href="#">人工锁管理</a>
+        <a class="nav-link" href="#">试聊调试</a>
+        <a class="nav-link" href="#">链路观测</a>
+        <a class="nav-link" href="#">系统设置</a>
+      </nav>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <div>
+          <h1>商品知识</h1>
+          <p>管理 PDD 商品同步数据、人工增强字段、发布版本和真实 RAG chunk。</p>
+        </div>
+        <div class="top-actions">
+          <span class="badge green">店铺：佳琪如梦</span>
+          <span class="badge blue">真实索引已配置</span>
+          <span class="badge yellow">PDD 发送开关：关闭</span>
+          <span class="badge gray">只读 PDD 原始字段</span>
+        </div>
+      </header>
+
+      <div class="content">
+        <div class="notice">
+          本页面原型重点：让运营先筛选商品，再点击商品查看字段覆盖、人工增强、当前生效版本和 RAG chunk。保存草稿不会生效，发布并索引成功后才成为 AI 当前知识。
+        </div>
+
+        <section class="toolbar">
+          <div class="toolbar-head">
+            <div>
+              <h2>查询与筛选</h2>
+              <p>筛选条件固定在列表上方，避免在长列表里迷路。状态统一用运营能理解的中文标签展示。</p>
+            </div>
+            <button class="btn secondary" type="button" id="resetFilters">重置筛选</button>
+          </div>
+          <div class="filters">
+            <label class="field">
+              <span>搜索</span>
+              <input id="searchInput" placeholder="商品名 / goods_id / 关键词" value="">
+            </label>
+            <label class="field">
+              <span>店铺</span>
+              <select id="shopFilter">
+                <option value="all">全部店铺</option>
+                <option value="565617" selected>佳琪如梦 565617</option>
+              </select>
+            </label>
+            <label class="field">
+              <span>知识状态</span>
+              <select id="knowledgeFilter">
+                <option value="all">全部状态</option>
+                <option value="synced">已同步</option>
+                <option value="draft">有草稿</option>
+                <option value="published">已发布</option>
+                <option value="archived">已归档</option>
+              </select>
+            </label>
+            <label class="field">
+              <span>索引状态</span>
+              <select id="indexFilter">
+                <option value="all">全部索引</option>
+                <option value="active">已生效</option>
+                <option value="failed">索引失败</option>
+                <option value="missing">未索引</option>
+              </select>
+            </label>
+            <label class="field">
+              <span>字段覆盖</span>
+              <select id="coverageFilter">
+                <option value="all">全部覆盖</option>
+                <option value="needs_attention">待补充</option>
+                <option value="good">覆盖较好</option>
+              </select>
+            </label>
+            <button class="btn" type="button" id="applyFilters">查询</button>
+          </div>
+        </section>
+
+        <section class="layout">
+          <div class="panel">
+            <div class="panel-head">
+              <div>
+                <h2>商品列表</h2>
+                <p>点击商品后，右侧展示详情、人工字段和当前生效 chunk。</p>
+              </div>
+              <span class="badge blue" id="resultCount">6 个商品</span>
+            </div>
+
+            <div class="coverage-grid">
+              <div class="metric">
+                <span>商品总数</span>
+                <strong>40</strong>
+                <small>当前店铺</small>
+              </div>
+              <div class="metric">
+                <span>已生效知识</span>
+                <strong>18</strong>
+                <small>可进入 RAG</small>
+              </div>
+              <div class="metric">
+                <span>索引失败</span>
+                <strong>2</strong>
+                <small>需重试</small>
+              </div>
+              <div class="metric">
+                <span>待补字段</span>
+                <strong>21</strong>
+                <small>用法/注意事项</small>
+              </div>
+            </div>
+
+            <div class="list-tools">
+              <strong id="listSummary">已筛选：佳琪如梦，全部状态</strong>
+              <span class="badge gray">最新同步：2026/5/31 15:29</span>
+            </div>
+
+            <div class="product-list" id="productList"></div>
+          </div>
+
+          <aside class="panel detail" id="detailPanel">
+            <div class="panel-head">
+              <div class="detail-title">
+                <div>
+                  <h2 id="detailTitle">请选择商品</h2>
+                  <p id="detailSub">从左侧列表选择一个商品后查看详情。</p>
+                </div>
+              </div>
+            </div>
+
+            <div class="detail-actions">
+              <button class="btn" type="button">编辑人工字段</button>
+              <button class="btn secondary" type="button">保存草稿</button>
+              <button class="btn" type="button">发布并真实索引</button>
+              <button class="btn warning" type="button">重试索引</button>
+              <button class="btn danger" type="button">归档商品知识</button>
+            </div>
+
+            <div class="tabs" role="tablist">
+              <button class="tab active" type="button" data-tab="fields">字段覆盖</button>
+              <button class="tab" type="button" data-tab="editor">人工增强</button>
+              <button class="tab" type="button" data-tab="chunks">当前 chunk</button>
+              <button class="tab" type="button" data-tab="versions">版本记录</button>
+              <button class="tab" type="button" data-tab="raw">原始 JSON</button>
+            </div>
+
+            <section class="tab-pane active" id="tab-fields">
+              <div class="field-grid" id="fieldGrid"></div>
+            </section>
+
+            <section class="tab-pane" id="tab-editor">
+              <div class="notice">人工增强字段只覆盖 AI 知识，不修改 PDD 商品原始数据。发布并索引成功后才生效。</div>
+              <div class="editor-grid">
+                <label class="field">
+                  <span>商品别名 / 展示名</span>
+                  <input id="editName">
+                </label>
+                <label class="field">
+                  <span>价格说明</span>
+                  <input id="editPriceNote">
+                </label>
+                <label class="field">
+                  <span>规格补充</span>
+                  <textarea id="editSpecs"></textarea>
+                </label>
+                <label class="field">
+                  <span>使用方法</span>
+                  <textarea id="editUsage"></textarea>
+                </label>
+                <label class="field">
+                  <span>成分 / 卖点</span>
+                  <textarea id="editIngredients"></textarea>
+                </label>
+                <label class="field">
+                  <span>注意事项 / 售后口径</span>
+                  <textarea id="editWarnings"></textarea>
+                </label>
+              </div>
+            </section>
+
+            <section class="tab-pane" id="tab-chunks">
+              <div class="chunk-list" id="chunkList"></div>
+            </section>
+
+            <section class="tab-pane" id="tab-versions">
+              <div class="version-list" id="versionList"></div>
+            </section>
+
+            <section class="tab-pane" id="tab-raw">
+              <pre class="json-block" id="rawJson"></pre>
+            </section>
+          </aside>
+        </section>
+
+        <div class="prototype-note">
+          本地原型文件：docs/prototypes/web-admin-redesign/product-knowledge.html。确认布局后再迁移到真实 React 页面。
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <script>
+    const products = [
+      {
+        goodsId: "773044930700",
+        shopId: "565617",
+        shopName: "佳琪如梦",
+        title: "YACN牡丹花素颜霜身体素颜伪体香纯欲斩男香持久留香保湿焕亮秋冬",
+        price: "9.60-19.30",
+        specs: "一瓶 / 两瓶 / Category: 美容护肤/美体/精油 > 乳液/面霜 > 面部素颜霜",
+        usage: "取适量本品，均匀涂抹于颈部、手臂、腿部等需要提亮或保湿的身体部位，轻轻按摩至完全吸收。沐浴后使用效果更佳。",
+        ingredients: "牡丹花提取物、烟酰胺、维生素C、胶原蛋白、甘油等。",
+        shelfLife: "3年，开封后建议 12 个月内用完。",
+        warnings: "仅供外用。避开破损伤口。如有过敏或不适请停用。",
+        manualNotes: "主打自然不假白和伪体香，适合作为身体提亮和保湿身体乳。",
+        knowledgeStatus: "published",
+        indexStatus: "active",
+        coverage: "good",
+        updatedAt: "2026/5/31 15:29:30",
+        activeVersion: "product-773044930700-20260531073301",
+        chunks: [
+          {
+            id: "kc:565617:29:62ab09826df03c886614e46cd63d05c3",
+            domain: "product_catalog",
+            sourceType: "product",
+            score: "当前生效",
+            content: "商品：YACN牡丹花素颜霜身体素颜伪体香纯欲斩男香持久留香保湿焕亮秋冬\n价格：9.60-19.30\n规格：一瓶 / 两瓶\n使用方法：取适量本品，均匀涂抹于颈部、手臂、腿部等需要提亮或保湿的身体部位，轻轻按摩至完全吸收。沐浴后使用效果更佳。\n保质期：3年，开封后建议 12 个月内用完。\n注意事项：仅供外用，避开破损伤口。"
+          }
+        ],
+        versions: [
+          { version: "product-773044930700-20260531073301", status: "active", indexed: "2026/5/31 15:34" },
+          { version: "product-773044930700-20260531072902", status: "retired", indexed: "2026/5/31 15:01" }
+        ]
+      },
+      {
+        goodsId: "940322668043",
+        shopId: "565617",
+        shopName: "佳琪如梦",
+        title: "美白洁面乳烟酰胺提亮美白清洁毛孔去油控油洗面奶",
+        price: "4.80-9.90",
+        specs: "单支 / 两支 / 三支 / 旅行装",
+        usage: "",
+        ingredients: "烟酰胺、氨基酸表活、甘油。",
+        shelfLife: "",
+        warnings: "",
+        manualNotes: "",
+        knowledgeStatus: "synced",
+        indexStatus: "missing",
+        coverage: "needs_attention",
+        updatedAt: "2026/5/31 15:29:25",
+        activeVersion: "无",
+        chunks: [],
+        versions: []
+      },
+      {
+        goodsId: "941074871748",
+        shopId: "565617",
+        shopName: "佳琪如梦",
+        title: "颜里烟酰胺身体素颜霜素颜霜防汗提亮防水全身持久不假白肤色必备",
+        price: "3.95-11.80",
+        specs: "30g / 60g / 120g / 套装",
+        usage: "涂抹身体需要提亮处，少量多次推开。",
+        ingredients: "",
+        shelfLife: "",
+        warnings: "",
+        manualNotes: "卖点需要补充，不要夸大美白功效。",
+        knowledgeStatus: "draft",
+        indexStatus: "missing",
+        coverage: "needs_attention",
+        updatedAt: "2026/5/31 15:29:24",
+        activeVersion: "无",
+        chunks: [],
+        versions: [{ version: "draft-20260531152924", status: "draft", indexed: "未索引" }]
+      },
+      {
+        goodsId: "945800905267",
+        shopId: "565617",
+        shopName: "佳琪如梦",
+        title: "[爆款]颜里轻薄润肤持久全身提亮假白防水防汗懒人学生裸妆神器",
+        price: "3.60-9.70",
+        specs: "4 项规格",
+        usage: "",
+        ingredients: "",
+        shelfLife: "",
+        warnings: "",
+        manualNotes: "",
+        knowledgeStatus: "published",
+        indexStatus: "failed",
+        coverage: "needs_attention",
+        updatedAt: "2026/5/31 15:29:24",
+        activeVersion: "product-945800905267-20260531152924",
+        chunks: [],
+        versions: [{ version: "product-945800905267-20260531152924", status: "index_failed", indexed: "失败：embedding timeout" }]
+      },
+      {
+        goodsId: "952680126851",
+        shopId: "565617",
+        shopName: "佳琪如梦",
+        title: "YACN牡丹花素颜霜身体素颜伪体香纯欲斩男香持久留香保湿焕亮618",
+        price: "9.60-15.32",
+        specs: "一瓶 / 两瓶 / 家庭装 / 体验装",
+        usage: "",
+        ingredients: "牡丹花提取物、烟酰胺。",
+        shelfLife: "",
+        warnings: "",
+        manualNotes: "",
+        knowledgeStatus: "synced",
+        indexStatus: "missing",
+        coverage: "needs_attention",
+        updatedAt: "2026/5/31 15:29:23",
+        activeVersion: "无",
+        chunks: [],
+        versions: []
+      },
+      {
+        goodsId: "955958313422",
+        shopId: "565617",
+        shopName: "佳琪如梦",
+        title: "颜霜白养懒人肤素素保湿推荐身体不假白防水防汗提亮持久学生",
+        price: "6.52-11.80",
+        specs: "4 项规格",
+        usage: "",
+        ingredients: "",
+        shelfLife: "",
+        warnings: "",
+        manualNotes: "",
+        knowledgeStatus: "archived",
+        indexStatus: "missing",
+        coverage: "needs_attention",
+        updatedAt: "2026/5/31 15:29:23",
+        activeVersion: "已归档",
+        chunks: [],
+        versions: [{ version: "product-955958313422-20260531152923", status: "archived", indexed: "已归档" }]
+      }
+    ];
+
+    const stateLabels = {
+      synced: ["已同步", "gray"],
+      draft: ["有草稿", "yellow"],
+      published: ["已发布", "green"],
+      archived: ["已归档", "red"],
+      active: ["已生效", "green"],
+      failed: ["索引失败", "red"],
+      missing: ["未索引", "gray"],
+      good: ["覆盖较好", "green"],
+      needs_attention: ["待补充", "yellow"]
+    };
+
+    let selected = products[0];
+
+    function badge(key) {
+      const item = stateLabels[key] || [key || "unknown", "gray"];
+      return `<span class="badge ${item[1]}">${item[0]}</span>`;
+    }
+
+    function truncate(text, size = 18) {
+      if (!text) return "未覆盖";
+      return text.length > size ? `${text.slice(0, size)}...` : text;
+    }
+
+    function currentFilters() {
+      return {
+        q: document.getElementById("searchInput").value.trim(),
+        shop: document.getElementById("shopFilter").value,
+        knowledge: document.getElementById("knowledgeFilter").value,
+        index: document.getElementById("indexFilter").value,
+        coverage: document.getElementById("coverageFilter").value
+      };
+    }
+
+    function filteredProducts() {
+      const f = currentFilters();
+      return products.filter((product) => {
+        const q = f.q.toLowerCase();
+        const matchQ = !q || product.title.toLowerCase().includes(q) || product.goodsId.includes(q);
+        const matchShop = f.shop === "all" || product.shopId === f.shop;
+        const matchKnowledge = f.knowledge === "all" || product.knowledgeStatus === f.knowledge;
+        const matchIndex = f.index === "all" || product.indexStatus === f.index;
+        const matchCoverage = f.coverage === "all" || product.coverage === f.coverage;
+        return matchQ && matchShop && matchKnowledge && matchIndex && matchCoverage;
+      });
+    }
+
+    function renderList() {
+      const list = filteredProducts();
+      const productList = document.getElementById("productList");
+      document.getElementById("resultCount").textContent = `${list.length} 个商品`;
+      document.getElementById("listSummary").textContent = `已筛选：${document.getElementById("shopFilter").selectedOptions[0].textContent}，${document.getElementById("knowledgeFilter").selectedOptions[0].textContent}`;
+
+      if (!list.length) {
+        productList.innerHTML = `<div class="empty">没有匹配商品。请调整筛选条件，或回到店铺接入页重新同步商品。</div>`;
+        return;
+      }
+
+      productList.innerHTML = list.map((product) => `
+        <article class="product-card ${selected.goodsId === product.goodsId ? "active" : ""}" data-id="${product.goodsId}">
+          <div class="product-main">
+            <div class="product-title">${product.title}</div>
+            <div class="product-meta">
+              <span>goods_id: ${product.goodsId}</span>
+              <span>shop: ${product.shopName}</span>
+              <span>updated: ${product.updatedAt}</span>
+            </div>
+            <div>${badge(product.knowledgeStatus)} ${badge(product.indexStatus)} ${badge(product.coverage)}</div>
+          </div>
+          <div class="product-kpis">
+            <div class="mini-kpi"><span>价格</span><strong>${product.price || "未覆盖"}</strong></div>
+            <div class="mini-kpi"><span>规格</span><strong>${truncate(product.specs, 12)}</strong></div>
+            <div class="mini-kpi"><span>用法</span><strong>${product.usage ? "已覆盖" : "未覆盖"}</strong></div>
+            <div class="mini-kpi"><span>当前 chunk</span><strong>${product.chunks.length}</strong></div>
+          </div>
+        </article>
+      `).join("");
+
+      productList.querySelectorAll(".product-card").forEach((card) => {
+        card.addEventListener("click", () => {
+          selected = products.find((product) => product.goodsId === card.dataset.id) || products[0];
+          renderList();
+          renderDetail();
+        });
+      });
+    }
+
+    function fieldCard(label, value, source) {
+      const covered = value && String(value).trim();
+      return `
+        <article class="info-card">
+          <header>
+            <h4>${label}</h4>
+            ${covered ? badge(source || "good") : badge("needs_attention")}
+          </header>
+          <p>${covered ? value : "未覆盖，建议补充后再发布索引。"}</p>
+        </article>
+      `;
+    }
+
+    function renderDetail() {
+      document.getElementById("detailTitle").textContent = selected.title;
+      document.getElementById("detailSub").textContent = `shop_id ${selected.shopId} · goods_id ${selected.goodsId} · 当前版本：${selected.activeVersion}`;
+
+      document.getElementById("fieldGrid").innerHTML = [
+        fieldCard("商品名 goods_name", selected.title, "good"),
+        fieldCard("价格 price", selected.price, "good"),
+        fieldCard("价格说明 price_note", selected.priceNote || "", "needs_attention"),
+        fieldCard("规格 specs", selected.specs, "good"),
+        fieldCard("使用方法 usage", selected.usage, "needs_attention"),
+        fieldCard("成分 ingredients", selected.ingredients, "needs_attention"),
+        fieldCard("保质期 shelf_life", selected.shelfLife, "needs_attention"),
+        fieldCard("注意事项 warnings", selected.warnings, "needs_attention"),
+        fieldCard("人工备注 manual_notes", selected.manualNotes, "needs_attention")
+      ].join("");
+
+      document.getElementById("editName").value = selected.title;
+      document.getElementById("editPriceNote").value = selected.priceNote || "价格随规格变化，实际以商品页和结算页为准。";
+      document.getElementById("editSpecs").value = selected.specs || "";
+      document.getElementById("editUsage").value = selected.usage || "";
+      document.getElementById("editIngredients").value = selected.ingredients || "";
+      document.getElementById("editWarnings").value = selected.warnings || "";
+
+      document.getElementById("chunkList").innerHTML = selected.chunks.length
+        ? selected.chunks.map((chunk) => `
+          <article class="chunk-card">
+            <div class="chunk-head">
+              <strong>${chunk.id}</strong>
+              ${badge("active")}
+            </div>
+            <dl class="kv">
+              <dt>domain</dt><dd>${chunk.domain}</dd>
+              <dt>source_type</dt><dd>${chunk.sourceType}</dd>
+              <dt>source_id</dt><dd>${selected.goodsId}</dd>
+              <dt>version</dt><dd>${selected.activeVersion}</dd>
+            </dl>
+            <pre class="chunk-content">${chunk.content}</pre>
+          </article>
+        `).join("")
+        : `<div class="empty">当前商品没有生效 chunk。请发布商品知识并执行真实索引，或查看索引失败原因。</div>`;
+
+      document.getElementById("versionList").innerHTML = selected.versions.length
+        ? selected.versions.map((item) => `
+          <article class="version-row">
+            <div>
+              <strong>${item.version}</strong>
+              <div class="product-meta"><span>${item.indexed}</span></div>
+            </div>
+            ${badge(item.status === "active" ? "active" : item.status === "index_failed" ? "failed" : item.status === "draft" ? "draft" : "gray")}
+          </article>
+        `).join("")
+        : `<div class="empty">暂无发布版本。保存草稿后发布并索引，才会产生版本记录。</div>`;
+
+      document.getElementById("rawJson").textContent = JSON.stringify({
+        goods_id: selected.goodsId,
+        shop_id: selected.shopId,
+        goods_name: selected.title,
+        price: selected.price,
+        specs: selected.specs,
+        knowledge_status: selected.knowledgeStatus,
+        index_status: selected.indexStatus,
+        active_version: selected.activeVersion,
+        raw_field_note: "PDD 原始字段只读，人工增强字段单独保存。"
+      }, null, 2);
+    }
+
+    function switchTab(tabName) {
+      document.querySelectorAll(".tab").forEach((tab) => tab.classList.toggle("active", tab.dataset.tab === tabName));
+      document.querySelectorAll(".tab-pane").forEach((pane) => pane.classList.toggle("active", pane.id === `tab-${tabName}`));
+    }
+
+    document.querySelectorAll(".tab").forEach((tab) => {
+      tab.addEventListener("click", () => switchTab(tab.dataset.tab));
+    });
+
+    ["searchInput", "shopFilter", "knowledgeFilter", "indexFilter", "coverageFilter"].forEach((id) => {
+      document.getElementById(id).addEventListener("change", renderList);
+      document.getElementById(id).addEventListener("keyup", renderList);
+    });
+
+    document.getElementById("applyFilters").addEventListener("click", renderList);
+    document.getElementById("resetFilters").addEventListener("click", () => {
+      document.getElementById("searchInput").value = "";
+      document.getElementById("shopFilter").value = "565617";
+      document.getElementById("knowledgeFilter").value = "all";
+      document.getElementById("indexFilter").value = "all";
+      document.getElementById("coverageFilter").value = "all";
+      renderList();
+    });
+
+    renderList();
+    renderDetail();
+  </script>
+</body>
+</html>

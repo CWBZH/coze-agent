@@ -4,7 +4,6 @@ const navItems = [
   ["数据总览", "/dashboard"],
   ["店铺接入", "/shop-onboarding"],
   ["店铺管理", "/shops"],
-  ["AI 设置", "/ai-settings"],
   ["商品知识", "/products"],
   ["知识中心", "/knowledge-center"],
   ["人工锁管理", "/human-locks"],

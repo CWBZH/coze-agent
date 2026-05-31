@@ -1,7 +1,6 @@
 import { createBrowserRouter, Navigate } from "react-router-dom";
 
 import { App } from "./App";
-import { AISettings } from "./views/AISettings";
 import { Dashboard } from "./views/Dashboard";
 import { HumanLocks } from "./views/HumanLocks";
 import { KnowledgeCenter } from "./views/KnowledgeCenter";
@@ -21,7 +20,6 @@ export const router = createBrowserRouter([
       { path: "dashboard", element: <Dashboard /> },
       { path: "shop-onboarding", element: <ShopOnboarding /> },
       { path: "shops", element: <Shops /> },
-      { path: "ai-settings", element: <AISettings /> },
       { path: "products", element: <Products /> },
       { path: "sop", element: <Navigate to="/knowledge-center" replace /> },
       { path: "knowledge-center", element: <KnowledgeCenter /> },

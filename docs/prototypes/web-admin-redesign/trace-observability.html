@@ -1,0 +1,994 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>链路观测页重构原型</title>
+  <style>
+    :root {
+      --nav: #0f172a;
+      --nav-active: #1e293b;
+      --bg: #f3f6fb;
+      --panel: #ffffff;
+      --panel-soft: #f8fafc;
+      --line: #d9e2ef;
+      --line-strong: #b9c7dc;
+      --text: #07142f;
+      --muted: #5d708f;
+      --blue: #2563eb;
+      --blue-soft: #eaf2ff;
+      --green: #16a34a;
+      --green-soft: #e9f8ef;
+      --yellow: #b7791f;
+      --yellow-soft: #fff7dd;
+      --red: #dc2626;
+      --red-soft: #fff0f0;
+      --gray: #64748b;
+      --gray-soft: #eef2f7;
+      --radius: 8px;
+      font-family: "Microsoft YaHei", "PingFang SC", Arial, sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.5;
+    }
+
+    button, input, select {
+      font: inherit;
+    }
+
+    .app {
+      display: grid;
+      grid-template-columns: 268px minmax(0, 1fr);
+      min-height: 100vh;
+    }
+
+    .sidebar {
+      background: var(--nav);
+      color: #dbeafe;
+      padding: 26px 18px;
+      position: sticky;
+      top: 0;
+      height: 100vh;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 28px;
+    }
+
+    .brand-mark {
+      width: 46px;
+      height: 46px;
+      border-radius: 10px;
+      background: var(--blue);
+      color: #fff;
+      display: grid;
+      place-items: center;
+      font-weight: 900;
+    }
+
+    .brand-title {
+      color: #fff;
+      font-weight: 900;
+      font-size: 19px;
+    }
+
+    .brand-subtitle {
+      color: #94a3b8;
+      font-size: 13px;
+    }
+
+    .nav {
+      display: grid;
+      gap: 8px;
+    }
+
+    .nav a {
+      color: #e2e8f0;
+      text-decoration: none;
+      padding: 12px 14px;
+      border-radius: var(--radius);
+      font-weight: 700;
+    }
+
+    .nav a.active {
+      background: var(--nav-active);
+      color: #fff;
+    }
+
+    .main {
+      min-width: 0;
+      padding: 28px 30px 44px;
+    }
+
+    .topbar {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 18px;
+      margin-bottom: 18px;
+    }
+
+    h1, h2, h3, p {
+      margin-top: 0;
+    }
+
+    h1 {
+      margin-bottom: 8px;
+      font-size: 30px;
+      letter-spacing: 0;
+    }
+
+    h2 {
+      margin-bottom: 12px;
+      font-size: 22px;
+    }
+
+    h3 {
+      margin-bottom: 8px;
+      font-size: 18px;
+    }
+
+    .muted {
+      color: var(--muted);
+    }
+
+    .stack {
+      display: grid;
+      gap: 18px;
+    }
+
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      padding: 18px;
+    }
+
+    .panel-tight {
+      padding: 14px;
+    }
+
+    .health-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      justify-content: flex-end;
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      border-radius: 999px;
+      padding: 5px 10px;
+      font-size: 13px;
+      font-weight: 900;
+      white-space: nowrap;
+    }
+
+    .badge.ok { color: #047857; background: var(--green-soft); }
+    .badge.info { color: #1d4ed8; background: var(--blue-soft); }
+    .badge.warn { color: #92400e; background: var(--yellow-soft); }
+    .badge.fail { color: #b91c1c; background: var(--red-soft); }
+    .badge.gray { color: #334155; background: var(--gray-soft); }
+
+    .metrics {
+      display: grid;
+      grid-template-columns: repeat(6, minmax(130px, 1fr));
+      gap: 12px;
+    }
+
+    .metric {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      padding: 14px;
+      min-height: 92px;
+    }
+
+    .metric-label {
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 700;
+    }
+
+    .metric-value {
+      margin-top: 8px;
+      font-size: 28px;
+      font-weight: 900;
+    }
+
+    .metric-note {
+      margin-top: 4px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .filters {
+      display: grid;
+      grid-template-columns: minmax(260px, 1.3fr) repeat(3, minmax(150px, 0.7fr)) auto;
+      gap: 10px;
+      align-items: end;
+    }
+
+    .field label {
+      display: block;
+      margin-bottom: 6px;
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 800;
+    }
+
+    input, select {
+      width: 100%;
+      height: 42px;
+      border: 1px solid var(--line-strong);
+      border-radius: var(--radius);
+      padding: 0 12px;
+      background: #fff;
+      color: var(--text);
+    }
+
+    .btn {
+      border: 0;
+      border-radius: var(--radius);
+      padding: 10px 14px;
+      background: var(--blue);
+      color: #fff;
+      font-weight: 900;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+
+    .btn.secondary {
+      background: #334155;
+    }
+
+    .layout {
+      display: grid;
+      grid-template-columns: 340px minmax(0, 1fr);
+      gap: 18px;
+      align-items: start;
+    }
+
+    .buyer-list {
+      display: grid;
+      gap: 10px;
+    }
+
+    .buyer-card {
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      padding: 12px;
+      background: var(--panel);
+      cursor: pointer;
+    }
+
+    .buyer-card.active {
+      border-color: #93c5fd;
+      background: #f8fbff;
+      box-shadow: inset 3px 0 0 var(--blue);
+    }
+
+    .buyer-card-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      align-items: flex-start;
+    }
+
+    .buyer-title {
+      font-size: 16px;
+      font-weight: 900;
+      word-break: break-word;
+    }
+
+    .buyer-meta {
+      margin-top: 6px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .buyer-last {
+      margin-top: 10px;
+      padding: 10px;
+      border-radius: var(--radius);
+      background: var(--panel-soft);
+      color: #334155;
+      font-size: 13px;
+    }
+
+    .conversation-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 14px;
+      align-items: flex-start;
+      border-bottom: 1px solid var(--line);
+      padding-bottom: 14px;
+      margin-bottom: 14px;
+    }
+
+    .timeline {
+      display: grid;
+      gap: 12px;
+    }
+
+    details.trace-item {
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--panel);
+      overflow: hidden;
+    }
+
+    details.trace-item[open] {
+      border-color: #93c5fd;
+      box-shadow: 0 8px 24px rgba(15, 23, 42, 0.06);
+    }
+
+    .trace-summary {
+      list-style: none;
+      cursor: pointer;
+      padding: 14px;
+    }
+
+    .trace-summary::-webkit-details-marker {
+      display: none;
+    }
+
+    .trace-summary-grid {
+      display: grid;
+      grid-template-columns: 150px minmax(0, 1fr) auto;
+      gap: 14px;
+      align-items: center;
+    }
+
+    .time {
+      font-weight: 900;
+    }
+
+    .trace-copy {
+      min-width: 0;
+    }
+
+    .trace-line {
+      display: flex;
+      gap: 8px;
+      align-items: baseline;
+      min-width: 0;
+    }
+
+    .trace-line + .trace-line {
+      margin-top: 5px;
+    }
+
+    .trace-line b {
+      flex: 0 0 auto;
+    }
+
+    .trace-text {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .trace-badges {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+      gap: 8px;
+    }
+
+    .trace-body {
+      border-top: 1px solid var(--line);
+      padding: 14px;
+      background: #fbfdff;
+    }
+
+    .tabs {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-bottom: 12px;
+    }
+
+    .tab {
+      border: 0;
+      border-radius: var(--radius);
+      padding: 9px 12px;
+      color: #1d4ed8;
+      background: #dfe9ff;
+      font-weight: 900;
+      cursor: pointer;
+    }
+
+    .tab.active {
+      color: #fff;
+      background: var(--blue);
+    }
+
+    .tab-pane {
+      display: none;
+    }
+
+    .tab-pane.active {
+      display: block;
+    }
+
+    .node-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+    }
+
+    .node {
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      padding: 12px;
+      background: #fff;
+    }
+
+    .node-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      margin-bottom: 8px;
+      font-weight: 900;
+    }
+
+    .kv {
+      display: grid;
+      grid-template-columns: 180px minmax(0, 1fr);
+      border-top: 1px solid var(--line);
+    }
+
+    .kv div {
+      padding: 9px 10px;
+      border-bottom: 1px solid var(--line);
+      min-width: 0;
+      word-break: break-word;
+    }
+
+    .kv div:nth-child(odd) {
+      color: var(--muted);
+      font-weight: 900;
+      background: #f8fafc;
+    }
+
+    .message-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 10px;
+    }
+
+    .message-box {
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: #fff;
+      padding: 12px;
+      min-height: 140px;
+    }
+
+    .message-box h4 {
+      margin: 0 0 8px;
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .pre {
+      white-space: pre-wrap;
+      word-break: break-word;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: #0f172a;
+      color: #dbeafe;
+      padding: 12px;
+      font-family: Consolas, "SFMono-Regular", monospace;
+      font-size: 13px;
+      max-height: 360px;
+      overflow: auto;
+    }
+
+    .chunk {
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: #fff;
+      padding: 12px;
+      margin-bottom: 10px;
+    }
+
+    .chunk-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 8px;
+      font-weight: 900;
+    }
+
+    .flow-strip {
+      display: grid;
+      grid-template-columns: repeat(6, minmax(0, 1fr));
+      gap: 10px;
+    }
+
+    .flow-step {
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: #fff;
+      padding: 11px;
+    }
+
+    .flow-step strong {
+      display: block;
+      margin-bottom: 4px;
+    }
+
+    @media (max-width: 1300px) {
+      .metrics { grid-template-columns: repeat(3, minmax(130px, 1fr)); }
+      .layout { grid-template-columns: 1fr; }
+      .buyer-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .filters { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .message-grid { grid-template-columns: 1fr; }
+      .flow-strip { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    }
+
+    @media (max-width: 760px) {
+      .app { grid-template-columns: 1fr; }
+      .sidebar { position: static; height: auto; }
+      .main { padding: 18px 14px; }
+      .topbar, .conversation-head { display: grid; }
+      .metrics, .buyer-list, .node-grid, .filters, .flow-strip { grid-template-columns: 1fr; }
+      .trace-summary-grid { grid-template-columns: 1fr; }
+      .trace-badges { justify-content: flex-start; }
+      .kv { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-mark">IE</div>
+        <div>
+          <div class="brand-title">InternalEngine</div>
+          <div class="brand-subtitle">AI 运营控制台</div>
+        </div>
+      </div>
+      <nav class="nav" aria-label="后台导航">
+        <a href="#">数据总览</a>
+        <a href="#">店铺接入</a>
+        <a href="#">店铺管理</a>
+        <a href="#">AI 设置</a>
+        <a href="#">商品知识</a>
+        <a href="#">知识中心</a>
+        <a href="#">人工锁管理</a>
+        <a href="#" class="active">链路观测</a>
+        <a href="#">系统设置</a>
+      </nav>
+    </aside>
+
+    <main class="main">
+      <div class="topbar">
+        <div>
+          <h1>链路观测</h1>
+          <p class="muted">按买家 user_id 聚合真实入站消息、商品上下文、SOP/商品 RAG、LLM 生成、PDD 发送与 outbox 重试。最新消息始终在最上面。</p>
+        </div>
+        <div class="health-row">
+          <span class="badge ok">Worker 已连接</span>
+          <span class="badge ok">LLM 已启用</span>
+          <span class="badge ok">pgvector 已启用</span>
+          <span class="badge warn">PDD 真实发送开启</span>
+        </div>
+      </div>
+
+      <section class="metrics">
+        <div class="metric">
+          <div class="metric-label">当前在线店铺</div>
+          <div class="metric-value">1</div>
+          <div class="metric-note">565617 WebSocket connected</div>
+        </div>
+        <div class="metric">
+          <div class="metric-label">近 1 小时消息</div>
+          <div class="metric-value">38</div>
+          <div class="metric-note">买家消息 19 / 系统消息 19</div>
+        </div>
+        <div class="metric">
+          <div class="metric-label">AI 成功回复</div>
+          <div class="metric-value">14</div>
+          <div class="metric-note">PDD send ok</div>
+        </div>
+        <div class="metric">
+          <div class="metric-label">RAG 命中率</div>
+          <div class="metric-value">68%</div>
+          <div class="metric-note">正式知识 chunk</div>
+        </div>
+        <div class="metric">
+          <div class="metric-label">转人工</div>
+          <div class="metric-value">2</div>
+          <div class="metric-note">PushPlus 已通知</div>
+        </div>
+        <div class="metric">
+          <div class="metric-label">发送异常</div>
+          <div class="metric-value">1</div>
+          <div class="metric-note">40013 平台策略阻断</div>
+        </div>
+      </section>
+
+      <section class="panel stack" style="margin-top: 18px;">
+        <div class="filters">
+          <div class="field">
+            <label>搜索</label>
+            <input id="searchInput" placeholder="shop_id / user_id / trace_id / 买家消息 / 回复内容" />
+          </div>
+          <div class="field">
+            <label>店铺</label>
+            <select>
+              <option>全部店铺</option>
+              <option>565617 佳琪如梦</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>状态</label>
+            <select id="statusFilter">
+              <option value="all">全部状态</option>
+              <option value="ok">发送成功</option>
+              <option value="warn">等待处理</option>
+              <option value="fail">发送失败</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>RAG</label>
+            <select>
+              <option>全部</option>
+              <option>有正式知识命中</option>
+              <option>无命中</option>
+            </select>
+          </div>
+          <button class="btn" type="button" id="refreshBtn">刷新</button>
+        </div>
+        <div class="flow-strip">
+          <div class="flow-step"><strong>1. 收消息</strong><span class="muted">WebSocket 入队，不弹窗打断。</span></div>
+          <div class="flow-step"><strong>2. 拼上下文</strong><span class="muted">历史对话 + 商品卡片 + 商品/SOP。</span></div>
+          <div class="flow-step"><strong>3. RAG 检索</strong><span class="muted">展示命中 chunk 和字段来源。</span></div>
+          <div class="flow-step"><strong>4. LLM 生成</strong><span class="muted">展示模型、耗时、Prompt。</span></div>
+          <div class="flow-step"><strong>5. 安全校验</strong><span class="muted">违禁、隐私、转人工。</span></div>
+          <div class="flow-step"><strong>6. 发送重试</strong><span class="muted">PDD 结果和 outbox 状态。</span></div>
+        </div>
+      </section>
+
+      <section class="layout" style="margin-top: 18px;">
+        <aside class="buyer-list" id="buyerList">
+          <article class="buyer-card active" data-buyer="buyer-a">
+            <div class="buyer-card-head">
+              <div>
+                <div class="buyer-title">user_id 6554248824766</div>
+                <div class="buyer-meta">shop 565617 / 12 条消息 / 最近 13:02:13</div>
+              </div>
+              <span class="badge ok">正常</span>
+            </div>
+            <div class="buyer-last">最近：什么时候发货 / 已发送 / RAG 1 / LLM 2.1s</div>
+          </article>
+          <article class="buyer-card" data-buyer="buyer-b">
+            <div class="buyer-card-head">
+              <div>
+                <div class="buyer-title">user_id 8985001916165</div>
+                <div class="buyer-meta">shop 565617 / 6 条消息 / 最近 15:43:05</div>
+              </div>
+              <span class="badge fail">需人工</span>
+            </div>
+            <div class="buyer-last">最近：人呢 / 处理完成但未发送 / 转人工锁生效</div>
+          </article>
+          <article class="buyer-card" data-buyer="buyer-c">
+            <div class="buyer-card-head">
+              <div>
+                <div class="buyer-title">user_id 7700331842081</div>
+                <div class="buyer-meta">shop 565617 / 3 条消息 / 最近 21:16:49</div>
+              </div>
+              <span class="badge warn">重试</span>
+            </div>
+            <div class="buyer-last">最近：这个怎么用 / PDD 40013 / outbox 阻断</div>
+          </article>
+        </aside>
+
+        <section class="panel">
+          <div class="conversation-head">
+            <div>
+              <h2 id="conversationTitle">user_id 6554248824766</h2>
+              <p class="muted" id="conversationMeta">shop_id 565617 / session_id 565617_6554248824766 / 最新消息在上</p>
+            </div>
+            <div class="health-row">
+              <span class="badge ok">AI 自动回复中</span>
+              <span class="badge ok">人工锁未生效</span>
+            </div>
+          </div>
+
+          <div class="timeline" id="timeline">
+            <details class="trace-item" open data-status="ok">
+              <summary class="trace-summary">
+                <div class="trace-summary-grid">
+                  <div>
+                    <div class="time">2026/5/31 13:02:13</div>
+                    <div class="muted">text</div>
+                  </div>
+                  <div class="trace-copy">
+                    <div class="trace-line"><b>买家：</b><span class="trace-text">什么时候发货</span></div>
+                    <div class="trace-line"><b>回复：</b><span class="trace-text">亲亲，默认极兔速递，48小时内广州发货，具体以订单物流页为准</span></div>
+                  </div>
+                  <div class="trace-badges">
+                    <span class="badge ok">reply_sent</span>
+                    <span class="badge info">RAG 1</span>
+                    <span class="badge ok">LLM 2170ms</span>
+                  </div>
+                </div>
+              </summary>
+              <div class="trace-body">
+                <div class="tabs">
+                  <button class="tab active" data-tab="nodes">链路节点</button>
+                  <button class="tab" data-tab="context">上下文拼接</button>
+                  <button class="tab" data-tab="rag">RAG 命中</button>
+                  <button class="tab" data-tab="llm">回复生成</button>
+                  <button class="tab" data-tab="send">发送与重试</button>
+                  <button class="tab" data-tab="tech">技术字段</button>
+                </div>
+                <div class="tab-pane active" data-pane="nodes">
+                  <div class="node-grid">
+                    <div class="node"><div class="node-head">1. WebSocket 收到消息 <span class="badge ok">passed</span></div><p class="muted">买家消息进入可靠队列，source_message_id 已记录。</p></div>
+                    <div class="node"><div class="node-head">2. 商品上下文解析 <span class="badge ok">resolved</span></div><p class="muted">从历史商品卡片解析 goods_id、商品名、价格、规格。</p></div>
+                    <div class="node"><div class="node-head">3. RAG 检索 <span class="badge ok">hit</span></div><p class="muted">命中 SOP 物流发货规则，商品知识作为辅助上下文。</p></div>
+                    <div class="node"><div class="node-head">4. LLM 生成 <span class="badge ok">ok</span></div><p class="muted">调用 doubao-seed-2-0-mini，耗时 2170ms。</p></div>
+                    <div class="node"><div class="node-head">5. 安全校验 <span class="badge ok">safe</span></div><p class="muted">未发现承诺赔付、诱导私聊、敏感信息。</p></div>
+                    <div class="node"><div class="node-head">6. PDD 发送 <span class="badge ok">ok</span></div><p class="muted">send_text 返回 ok，outbox 标记 sent。</p></div>
+                  </div>
+                </div>
+                <div class="tab-pane" data-pane="context">
+                  <div class="message-grid">
+                    <div class="message-box">
+                      <h4>买家消息</h4>
+                      <p>什么时候发货</p>
+                    </div>
+                    <div class="message-box">
+                      <h4>商品卡片解析</h4>
+                      <p>商品：YACN牡丹花素颜霜身体素颜伪体香纯欲斩男香持久留香保湿焕亮秋冬</p>
+                      <p>价格：9.60-19.30</p>
+                      <p>规格：一瓶 / 两瓶</p>
+                    </div>
+                    <div class="message-box">
+                      <h4>历史摘要</h4>
+                      <p>买家问过用法、规格、优惠和破损处理；客服曾按商品知识和 SOP 回复。</p>
+                    </div>
+                  </div>
+                  <pre class="pre">前文摘要:
+买家曾咨询该素颜霜用法、规格、优惠、破损处理。
+商品上下文:
+goods_id=773044930700
+goods_name=YACN牡丹花素颜霜身体素颜伪体香纯欲斩男香持久留香保湿焕亮秋冬
+price=9.60-19.30
+specs=一瓶 / 两瓶
+
+当前消息:
+什么时候发货</pre>
+                </div>
+                <div class="tab-pane" data-pane="rag">
+                  <div class="chunk">
+                    <div class="chunk-head">
+                      <span>#1 logistics_policy / 正式 SOP 命中</span>
+                      <span class="badge info">score 0.0217</span>
+                    </div>
+                    <p><b>chunk_id:</b> kc:565617:12:logistics-48h-guangzhou</p>
+                    <p><b>content:</b> 默认极兔速递。正常情况下 48 小时内广州发货，具体物流节点以订单物流页为准。不要承诺具体到达日期。</p>
+                  </div>
+                </div>
+                <div class="tab-pane" data-pane="llm">
+                  <div class="kv">
+                    <div>模型</div><div>doubao-seed-2-0-mini-260215</div>
+                    <div>是否调用 LLM</div><div>是</div>
+                    <div>LLM 耗时</div><div>2170ms</div>
+                    <div>生成回复</div><div>亲亲，默认极兔速递，48小时内广州发货，具体以订单物流页为准</div>
+                  </div>
+                  <pre class="pre">Prompt 摘要:
+你是 PDD 店铺客服。必须基于商品知识、SOP 和历史上下文回答。
+当前意图: logistics_order_status
+命中 SOP: 默认极兔速递，48小时内广州发货，具体以订单物流页为准。
+请生成简短、可发送给买家的中文回复。</pre>
+                </div>
+                <div class="tab-pane" data-pane="send">
+                  <div class="kv">
+                    <div>PDD 实际发送内容</div><div>亲亲，默认极兔速递，48小时内广州发货，具体以订单物流页为准</div>
+                    <div>send_text 结果</div><div>ok</div>
+                    <div>outbox 状态</div><div>sent</div>
+                    <div>retry_count</div><div>0</div>
+                  </div>
+                </div>
+                <div class="tab-pane" data-pane="tech">
+                  <pre class="pre">trace_id=pdd:565617:1780203732137
+engine_mode=real_internal
+calls_llm=true
+connects_pgvector=true
+rag_hit_count=1
+history_message_count=31
+answer_generation_status=ok
+guardrail_status=safe
+pdd_send_status=ok</pre>
+                </div>
+              </div>
+            </details>
+
+            <details class="trace-item" data-status="ok">
+              <summary class="trace-summary">
+                <div class="trace-summary-grid">
+                  <div>
+                    <div class="time">2026/5/31 12:58:40</div>
+                    <div class="muted">text</div>
+                  </div>
+                  <div class="trace-copy">
+                    <div class="trace-line"><b>买家：</b><span class="trace-text">保质期多久</span></div>
+                    <div class="trace-line"><b>回复：</b><span class="trace-text">亲亲，这款商品保质期为3年，开封后建议12个月内用完哦</span></div>
+                  </div>
+                  <div class="trace-badges">
+                    <span class="badge ok">reply_sent</span>
+                    <span class="badge info">RAG 1</span>
+                    <span class="badge ok">商品知识</span>
+                  </div>
+                </div>
+              </summary>
+              <div class="trace-body">
+                <div class="tabs">
+                  <button class="tab active" data-tab="rag">RAG 命中</button>
+                  <button class="tab" data-tab="context">上下文拼接</button>
+                  <button class="tab" data-tab="llm">回复生成</button>
+                  <button class="tab" data-tab="send">发送与重试</button>
+                </div>
+                <div class="tab-pane active" data-pane="rag">
+                  <div class="chunk">
+                    <div class="chunk-head">
+                      <span>#1 product_catalog / 商品知识命中</span>
+                      <span class="badge info">score 0.0163</span>
+                    </div>
+                    <p><b>shelf_life [manual_override]:</b> 3年（开封后建议在12个月内用完）</p>
+                    <p><b>usage [manual_override]:</b> 取适量均匀涂抹于身体部位，轻轻按摩吸收。</p>
+                    <p><b>warnings [manual_override]:</b> 仅供外用，避开破损伤口和眼睛。</p>
+                  </div>
+                </div>
+                <div class="tab-pane" data-pane="context">
+                  <pre class="pre">当前消息: 保质期多久
+商品字段:
+shelf_life=3年（开封后建议在12个月内用完）
+price=9.60-19.30
+specs=一瓶 / 两瓶</pre>
+                </div>
+                <div class="tab-pane" data-pane="llm">
+                  <div class="kv">
+                    <div>是否调用 LLM</div><div>是</div>
+                    <div>生成回复</div><div>亲亲，这款商品保质期为3年，开封后建议12个月内用完哦</div>
+                  </div>
+                </div>
+                <div class="tab-pane" data-pane="send">
+                  <div class="kv"><div>状态</div><div>reply_sent</div><div>retry_count</div><div>0</div></div>
+                </div>
+              </div>
+            </details>
+
+            <details class="trace-item" data-status="fail">
+              <summary class="trace-summary">
+                <div class="trace-summary-grid">
+                  <div>
+                    <div class="time">2026/5/31 12:44:12</div>
+                    <div class="muted">text</div>
+                  </div>
+                  <div class="trace-copy">
+                    <div class="trace-line"><b>买家：</b><span class="trace-text">转人工</span></div>
+                    <div class="trace-line"><b>回复：</b><span class="trace-text">已为你转接人工客服请稍等~</span></div>
+                  </div>
+                  <div class="trace-badges">
+                    <span class="badge fail">PDD 40013</span>
+                    <span class="badge warn">转人工</span>
+                  </div>
+                </div>
+              </summary>
+              <div class="trace-body">
+                <div class="tabs">
+                  <button class="tab active" data-tab="send">发送与重试</button>
+                  <button class="tab" data-tab="nodes">链路节点</button>
+                  <button class="tab" data-tab="tech">技术字段</button>
+                </div>
+                <div class="tab-pane active" data-pane="send">
+                  <div class="kv">
+                    <div>PDD 发送结果</div><div>fail / error_code=40013</div>
+                    <div>处理策略</div><div>同会话转人工话术轮换三条，并按回复 hash 去重，避免重复触发平台拒绝。</div>
+                    <div>PushPlus</div><div>已通知 clawbot：shop_id、user_id、trace_id、买家消息、失败原因。</div>
+                    <div>outbox 状态</div><div>blocked_by_platform_policy</div>
+                  </div>
+                </div>
+                <div class="tab-pane" data-pane="nodes">
+                  <div class="node-grid">
+                    <div class="node"><div class="node-head">人工锁检查 <span class="badge warn">triggered</span></div><p class="muted">用户显式要求转人工。</p></div>
+                    <div class="node"><div class="node-head">发送去重 <span class="badge ok">checked</span></div><p class="muted">本次选择话术 2，避免重复发送同一句。</p></div>
+                    <div class="node"><div class="node-head">PDD 发送 <span class="badge fail">failed</span></div><p class="muted">平台策略拒绝，停止无意义重复重试。</p></div>
+                    <div class="node"><div class="node-head">人工通知 <span class="badge ok">sent</span></div><p class="muted">PushPlus 通知已发送。</p></div>
+                  </div>
+                </div>
+                <div class="tab-pane" data-pane="tech">
+                  <pre class="pre">trace_id=pdd:565617:1780213331439
+reply_action=transfer_human
+pdd_error_code=40013
+retry_count=1
+dedupe_key=565617_8985001916165_transfer_human
+pushplus_channel=clawbot</pre>
+                </div>
+              </div>
+            </details>
+          </div>
+        </section>
+      </section>
+    </main>
+  </div>
+
+  <script>
+    const buyerData = {
+      "buyer-a": {
+        title: "user_id 6554248824766",
+        meta: "shop_id 565617 / session_id 565617_6554248824766 / 最新消息在上",
+        status: ["AI 自动回复中", "人工锁未生效"]
+      },
+      "buyer-b": {
+        title: "user_id 8985001916165",
+        meta: "shop_id 565617 / session_id 565617_8985001916165 / 已进入人工关注",
+        status: ["人工锁生效", "PushPlus 已通知"]
+      },
+      "buyer-c": {
+        title: "user_id 7700331842081",
+        meta: "shop_id 565617 / session_id 565617_7700331842081 / 存在 PDD 发送阻断",
+        status: ["发送异常", "outbox 已阻断"]
+      }
+    };
+
+    document.querySelectorAll(".buyer-card").forEach((card) => {
+      card.addEventListener("click", () => {
+        document.querySelectorAll(".buyer-card").forEach((item) => item.classList.remove("active"));
+        card.classList.add("active");
+        const data = buyerData[card.dataset.buyer];
+        document.getElementById("conversationTitle").textContent = data.title;
+        document.getElementById("conversationMeta").textContent = data.meta;
+      });
+    });
+
+    document.addEventListener("click", (event) => {
+      const tab = event.target.closest(".tab");
+      if (!tab) return;
+      const body = tab.closest(".trace-body");
+      const tabName = tab.dataset.tab;
+      body.querySelectorAll(".tab").forEach((item) => item.classList.toggle("active", item === tab));
+      body.querySelectorAll(".tab-pane").forEach((pane) => {
+        pane.classList.toggle("active", pane.dataset.pane === tabName);
+      });
+    });
+
+    document.getElementById("searchInput").addEventListener("input", applyFilters);
+    document.getElementById("statusFilter").addEventListener("change", applyFilters);
+    document.getElementById("refreshBtn").addEventListener("click", () => {
+      const btn = document.getElementById("refreshBtn");
+      btn.textContent = "已刷新";
+      setTimeout(() => { btn.textContent = "刷新"; }, 900);
+    });
+
+    function applyFilters() {
+      const query = document.getElementById("searchInput").value.trim().toLowerCase();
+      const status = document.getElementById("statusFilter").value;
+      document.querySelectorAll(".trace-item").forEach((item) => {
+        const textMatch = !query || item.textContent.toLowerCase().includes(query);
+        const statusMatch = status === "all" || item.dataset.status === status;
+        item.style.display = textMatch && statusMatch ? "" : "none";
+      });
+    }
+  </script>
+</body>
+</html>

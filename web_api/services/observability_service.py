@@ -203,6 +203,7 @@ class ObservabilityService:
         )
 
         rag_chunks = self._rag_chunks(rag_event, trace_data)
+        intent_evidence = self._intent_evidence(trace_data, final_result)
         generated_reply = str(
             row.get("generated_reply")
             or send_completed.get("reply_text")
@@ -237,8 +238,17 @@ class ObservabilityService:
                 "output_format": answer_input.get("output_format") or "",
                 "prompt_hash": answer_input.get("prompt_hash") or trace_data.get("prompt_hash") or "",
             },
+            "intent_evidence": intent_evidence,
             "reply_generation": {
-                "intent": final_result.get("intent") or trace_data.get("intent") or "",
+                "intent": intent_evidence.get("intent") or "",
+                "intent_status": intent_evidence.get("status") or "",
+                "intent_source": intent_evidence.get("source") or "",
+                "intent_source_label": intent_evidence.get("source_label") or "",
+                "intent_classifier_called": intent_evidence.get("classifier_called"),
+                "llm_intent_called": intent_evidence.get("llm_intent_called"),
+                "classifier_intent": intent_evidence.get("classifier_intent") or "",
+                "normalized_intent": intent_evidence.get("normalized_intent") or "",
+                "classifier_confidence": intent_evidence.get("classifier_confidence"),
                 "domain": trace_data.get("domain") or "",
                 "action": final_result.get("action") or row.get("reply_action") or "",
                 "guardrail_status": final_result.get("guardrail_status") or trace_data.get("guardrail_status") or "",
@@ -278,6 +288,12 @@ class ObservabilityService:
                 "connects_pgvector": bool(trace_data.get("connects_pgvector")),
                 "calls_llm": bool(trace_data.get("calls_llm")),
                 "calls_ollama": bool(trace_data.get("calls_ollama")),
+                "intent": intent_evidence.get("intent") or "",
+                "intent_status": intent_evidence.get("status") or "",
+                "intent_source": intent_evidence.get("source") or "",
+                "intent_classifier_called": intent_evidence.get("classifier_called"),
+                "llm_intent_called": intent_evidence.get("llm_intent_called"),
+                "intent_observation": intent_evidence.get("observation") or "",
                 "sends_pdd": final_status not in {"pdd_sending_disabled", "reply_suppressed"},
                 "no_send": bool(trace_data.get("no_send")) if "no_send" in trace_data else False,
                 "debug_trace_available": bool(events),
@@ -293,6 +309,7 @@ class ObservabilityService:
         rag_chunks: list[dict[str, Any]],
         send_completed: dict[str, Any],
     ) -> list[dict[str, Any]]:
+        intent_evidence = self._intent_evidence(trace_data, {})
         return [
             self._node("websocket_received", "WebSocket 收到消息", "passed" if row.get("buyer_message") else "skipped", "买家消息已进入可靠队列。"),
             self._node("inbound_queue", "消息入队", "passed" if row.get("inbound_id") else "skipped", f"入队状态：{row.get('inbound_status') or '未知'}"),
@@ -307,8 +324,8 @@ class ObservabilityService:
             self._node(
                 "intent",
                 "意图识别",
-                self._stage_status(trace_data.get("intent_classifier_status") or trace_data.get("intent")),
-                self._plain(trace_data.get("intent") or "未返回意图"),
+                "passed" if intent_evidence.get("intent") else self._stage_status(intent_evidence.get("status")),
+                self._intent_summary(intent_evidence),
             ),
             self._node("rag", "RAG 检索", "passed" if rag_chunks else "warning", f"命中 {len(rag_chunks)} 条知识片段。"),
             self._node(
@@ -321,7 +338,7 @@ class ObservabilityService:
                 "llm",
                 "LLM 生成",
                 "passed" if trace_data.get("calls_llm") or trace_data.get("answer_generation_status") == "ok" else "warning",
-                self._plain(trace_data.get("answer_generation_status") or "未确认 LLM 状态"),
+                self._llm_summary(trace_data),
             ),
             self._node(
                 "guardrail",
@@ -359,6 +376,8 @@ class ObservabilityService:
         if intent:
             data["intent"] = intent
             data.setdefault("intent_classifier_status", "ok")
+            if not data.get("intent_source"):
+                data["intent_source"] = "workflow_result"
 
         action = str(data.get("final_action") or final_result.get("action") or "").strip()
         if action:
@@ -378,6 +397,83 @@ class ObservabilityService:
             data["calls_llm"] = True
 
         return data
+
+    @classmethod
+    def _intent_evidence(cls, trace_data: dict[str, Any], final_result: dict[str, Any]) -> dict[str, Any]:
+        intent = str(
+            trace_data.get("intent")
+            or final_result.get("intent")
+            or trace_data.get("normalized_intent")
+            or trace_data.get("classifier_intent")
+            or ""
+        ).strip()
+        status = str(trace_data.get("intent_classifier_status") or ("ok" if intent else "")).strip()
+        source = str(trace_data.get("intent_source") or ("workflow_result" if intent else "")).strip()
+        classifier_called = trace_data.get("intent_classifier_called")
+        llm_intent_called = trace_data.get("llm_intent_called")
+        source_label = cls._intent_source_label(source, classifier_called, llm_intent_called)
+        observation = cls._intent_observation(intent, status, source_label, classifier_called, llm_intent_called)
+        return {
+            "intent": intent,
+            "status": status,
+            "source": source,
+            "source_label": source_label,
+            "classifier_called": classifier_called if isinstance(classifier_called, bool) else None,
+            "llm_intent_called": llm_intent_called if isinstance(llm_intent_called, bool) else None,
+            "classifier_intent": str(trace_data.get("classifier_intent") or trace_data.get("classifier_intent_raw") or ""),
+            "normalized_intent": str(trace_data.get("normalized_intent") or ""),
+            "classifier_domain": str(trace_data.get("classifier_domain") or trace_data.get("selected_domain") or ""),
+            "classifier_confidence": trace_data.get("classifier_confidence"),
+            "observation": observation,
+        }
+
+    @staticmethod
+    def _intent_source_label(source: str, classifier_called: Any, llm_intent_called: Any) -> str:
+        source_text = str(source or "").strip().lower()
+        if source_text == "llm" or llm_intent_called is True:
+            return "LLM 意图分类器"
+        if classifier_called is True:
+            return "InternalEngine 意图分类器"
+        if source_text in {"workflow_result", "internal", "rule", "rules", "keyword"}:
+            return "InternalEngine 流程/规则识别"
+        if source_text:
+            return source
+        return "未记录来源"
+
+    @staticmethod
+    def _intent_observation(
+        intent: str,
+        status: str,
+        source_label: str,
+        classifier_called: Any,
+        llm_intent_called: Any,
+    ) -> str:
+        if not intent:
+            return "未返回意图，通常表示该消息没有进入 InternalEngine 生成阶段或缺少私有 trace。"
+        classifier_note = "独立分类器已调用" if classifier_called is True else "未调用独立分类器"
+        if llm_intent_called is True:
+            classifier_note = "LLM 意图分类器已调用"
+        return f"识别意图：{intent}；状态：{status or 'ok'}；来源：{source_label}；{classifier_note}。"
+
+    @classmethod
+    def _intent_summary(cls, intent_evidence: dict[str, Any]) -> str:
+        return cls._plain(intent_evidence.get("observation") or "未返回意图")
+
+    @classmethod
+    def _llm_summary(cls, trace_data: dict[str, Any]) -> str:
+        status = str(trace_data.get("answer_generation_status") or "").strip()
+        called = bool(trace_data.get("calls_llm") or trace_data.get("answer_generator_called"))
+        model = str(trace_data.get("llm_model") or "").strip()
+        latency = trace_data.get("llm_latency_ms")
+        parts = [
+            f"状态：{status or '未确认'}",
+            f"调用 LLM：{'是' if called else '未确认'}",
+        ]
+        if model:
+            parts.append(f"模型：{model}")
+        if latency not in (None, ""):
+            parts.append(f"耗时：{latency}ms")
+        return "；".join(parts)
 
     @staticmethod
     def _rag_chunks(rag_event: dict[str, Any], trace_data: dict[str, Any]) -> list[dict[str, Any]]:
