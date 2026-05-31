@@ -86,6 +86,7 @@ class AuthSavePayload:
     user_id: str
     cookie_value: str
     token_value: str | None = None
+    password_value: str | None = None
     expires_at: str | None = None
     credential_mode: str = "browser_only"
     auth_state_reason: str | None = None
@@ -146,8 +147,19 @@ class ShopAuthService:
         expires_at = payload.expires_at or (datetime.now(timezone.utc) + timedelta(days=7)).isoformat()
         credential_mode = self._normalize_credential_mode(payload.credential_mode)
         auth_state_reason = payload.auth_state_reason or "auth_saved"
+        password_encrypted = (
+            self.cipher.encrypt(payload.password_value)
+            if credential_mode == "password_available" and payload.password_value
+            else None
+        )
         conn = self._connect()
         try:
+            existing_auth = conn.execute(
+                "SELECT password_encrypted FROM shop_auth WHERE shop_id=? AND platform=?",
+                (payload.shop_id, payload.platform),
+            ).fetchone()
+            if credential_mode == "password_available" and password_encrypted is None and existing_auth is not None:
+                password_encrypted = existing_auth["password_encrypted"]
             shop_pk = self._ensure_channel_and_shop(conn, payload)
             account_user_id = payload.user_id or payload.account_name
             existing_account = conn.execute(
@@ -173,14 +185,15 @@ class ShopAuthService:
                 """
                 INSERT INTO shop_auth
                     (shop_id, platform, account_name, auth_status, cookie_encrypted, token_encrypted,
-                     safe_display, last_login_at, expires_at, credential_mode, auth_state_reason,
+                     password_encrypted, safe_display, last_login_at, expires_at, credential_mode, auth_state_reason,
                      last_auth_event_at, created_at, updated_at)
-                VALUES (?, ?, ?, 'auth_valid', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, 'auth_valid', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(shop_id, platform) DO UPDATE SET
                     account_name=excluded.account_name,
                     auth_status='auth_valid',
                     cookie_encrypted=excluded.cookie_encrypted,
                     token_encrypted=excluded.token_encrypted,
+                    password_encrypted=excluded.password_encrypted,
                     safe_display=excluded.safe_display,
                     last_login_at=excluded.last_login_at,
                     expires_at=excluded.expires_at,
@@ -195,6 +208,7 @@ class ShopAuthService:
                     payload.account_name,
                     cookie_encrypted,
                     token_encrypted,
+                    password_encrypted if credential_mode == "password_available" else None,
                     safe_display,
                     now,
                     expires_at,
@@ -216,7 +230,8 @@ class ShopAuthService:
             row = conn.execute(
                 """
                 SELECT shop_id, platform, account_name, auth_status, safe_display, last_login_at,
-                       expires_at, credential_mode, auth_state_reason, last_auth_event_at
+                       expires_at, credential_mode, auth_state_reason, last_auth_event_at,
+                       CASE WHEN password_encrypted IS NOT NULL AND password_encrypted != '' THEN 1 ELSE 0 END AS password_available
                 FROM shop_auth WHERE shop_id=? AND platform=?
                 """,
                 (shop_id, platform),

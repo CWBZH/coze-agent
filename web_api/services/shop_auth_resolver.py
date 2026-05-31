@@ -17,6 +17,7 @@ class ShopAuthResolution:
     source: str
     user_id: str | None = None
     account_name: str | None = None
+    password: str | None = None
     error_type: str | None = None
     credential_mode: str = "browser_only"
     auth_state_reason: str | None = None
@@ -47,6 +48,7 @@ class ShopAuthResolver:
                 if status == "auth_valid" and encrypted:
                     try:
                         cookies = self._parse_cookies(self.cipher.decrypt(str(encrypted)))
+                        password = self._decrypt_optional(auth["password_encrypted"])
                     except Exception:
                         return ShopAuthResolution(
                             status="auth_invalid",
@@ -65,6 +67,7 @@ class ShopAuthResolver:
                             source="shop_auth",
                             user_id=str(account["user_id"]) if account is not None and account["user_id"] is not None else None,
                             account_name=str(auth["account_name"] or "") or None,
+                            password=password,
                             credential_mode=str(auth["credential_mode"] or "browser_only"),
                             auth_state_reason=str(auth["auth_state_reason"] or "") or None,
                         )
@@ -89,10 +92,12 @@ class ShopAuthResolver:
     def _get_shop_auth(self, conn: sqlite3.Connection, shop_id: str, platform: str) -> sqlite3.Row | None:
         if not self._table_exists(conn, "shop_auth"):
             return None
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(shop_auth)").fetchall()}
+        password_expr = "password_encrypted" if "password_encrypted" in columns else "NULL AS password_encrypted"
         return conn.execute(
-            """
+            f"""
             SELECT shop_id, platform, account_name, auth_status, cookie_encrypted,
-                   credential_mode, auth_state_reason, last_auth_event_at
+                   {password_expr}, credential_mode, auth_state_reason, last_auth_event_at
             FROM shop_auth
             WHERE shop_id=? AND platform=?
             """,
@@ -174,6 +179,12 @@ class ShopAuthResolver:
             if isinstance(data, dict):
                 return {str(k): str(v) for k, v in data.items() if k}
         return {}
+
+    def _decrypt_optional(self, value: Any) -> str | None:
+        if not value:
+            return None
+        password = self.cipher.decrypt(str(value))
+        return password or None
 
 
 def _channel_name_for_platform(platform: str) -> str:

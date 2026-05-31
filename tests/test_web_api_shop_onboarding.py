@@ -38,6 +38,17 @@ def _stored_auth_cookie(db_path: Path) -> str:
         conn.close()
 
 
+def _stored_auth_password(db_path: Path) -> str:
+    conn = sqlite3.connect(db_path)
+    try:
+        row = conn.execute("SELECT password_encrypted FROM shop_auth LIMIT 1").fetchone()
+        assert row is not None
+        assert row[0]
+        return str(row[0])
+    finally:
+        conn.close()
+
+
 def test_create_and_get_onboarding_session(tmp_path, monkeypatch):
     monkeypatch.setenv("SHOP_AUTH_ENCRYPTION_KEY", "unit-test-key")
     db_path = tmp_path / "onboarding.db"
@@ -336,6 +347,13 @@ def test_real_runner_mode_sms_success_saves_encrypted_auth_without_plaintext(tmp
 
         stored_cookie = _stored_auth_cookie(db_path)
         assert "fake-cookie-value" not in stored_cookie
+        stored_password = _stored_auth_password(db_path)
+        assert "DO_NOT_LEAK_PASSWORD" not in stored_password
+        auth_status = client.get("/api/shops/565617/auth-status")
+        assert auth_status.status_code == 200
+        assert auth_status.json()["credential_mode"] == "password_available"
+        assert auth_status.json()["password_available"] is True
+        assert "DO_NOT_LEAK_PASSWORD" not in auth_status.text
     finally:
         _clear_overrides()
 

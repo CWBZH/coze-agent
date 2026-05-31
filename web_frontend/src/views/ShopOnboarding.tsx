@@ -16,6 +16,7 @@ import {
   markNoSendValidationPassed,
   OnboardingChecklist,
   OnboardingSession,
+  submitSmsCode,
   WorkerStatus
 } from "../api/shopOnboarding";
 import {
@@ -39,6 +40,8 @@ type SavedOnboardingState = {
   accountName?: string;
 };
 
+type AuthMode = "real" | "remote_browser";
+
 const terminalStatuses = new Set([
   "succeeded",
   "shop_identity_pending",
@@ -52,6 +55,7 @@ function statusLabel(status: string) {
   const labels: Record<string, string> = {
     created: "已创建",
     opening_login_page: "正在打开登录页",
+    password_required: "需要输入密码",
     waiting_account: "等待账号信息",
     waiting_sms_code: "等待短信验证码",
     waiting_captcha: "等待图形验证码",
@@ -70,7 +74,10 @@ function statusLabel(status: string) {
 function stepLabel(step: string) {
   const labels: Record<string, string> = {
     created: "创建会话",
+    opening_login_page: "打开登录页",
+    password_required: "等待密码",
     waiting_user_verification: "远程浏览器验证",
+    waiting_sms_code: "短信验证码",
     succeeded: "授权成功",
     shop_identity_pending: "店铺身份待绑定",
     failed: "失败",
@@ -189,6 +196,9 @@ function isBusinessShopId(shopId?: string | null) {
 export function ShopOnboarding() {
   const [shopName, setShopName] = useState("");
   const [accountName, setAccountName] = useState("");
+  const [password, setPassword] = useState("");
+  const [authMode, setAuthMode] = useState<AuthMode>("real");
+  const [smsCode, setSmsCode] = useState("");
   const [session, setSession] = useState<OnboardingSession | null>(null);
   const [loading, setLoading] = useState(false);
   const [polling, setPolling] = useState(false);
@@ -330,6 +340,10 @@ export function ShopOnboarding() {
 
   async function handleCreate(event: FormEvent) {
     event.preventDefault();
+    if (authMode === "real" && !password.trim()) {
+      setError("账号密码自动授权需要填写 PDD 登录密码；如需要扫码/滑块/复杂验证，请切换到远程浏览器人工授权。");
+      return;
+    }
     setLoading(true);
     setError(null);
     setSyncJob(null);
@@ -343,10 +357,12 @@ export function ShopOnboarding() {
         platform: "pdd",
         shop_name: shopName,
         account_name: accountName,
-        runner_mode: "remote_browser",
+        password: password || undefined,
+        runner_mode: authMode,
         operator: "local_admin"
       });
       setSession(created);
+      setSmsCode("");
     } catch (err) {
       setError(err instanceof Error ? err.message : "创建登录会话失败");
     } finally {
@@ -380,6 +396,9 @@ export function ShopOnboarding() {
       setSession(null);
       setShopName("");
       setAccountName("");
+      setPassword("");
+      setSmsCode("");
+      setAuthMode("real");
       setSyncJob(null);
       setCoverage(null);
       setChecklist(null);
@@ -404,6 +423,22 @@ export function ShopOnboarding() {
       setSession(await checkRemoteBrowserLogin(session.session_id));
     } catch (err) {
       setError(err instanceof Error ? err.message : "检查远程浏览器登录状态失败");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleSubmitSmsCode(event: FormEvent) {
+    event.preventDefault();
+    if (!session || !smsCode.trim()) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const next = await submitSmsCode(session.session_id, smsCode.trim());
+      setSession(next);
+      setSmsCode("");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "提交短信验证码失败");
     } finally {
       setLoading(false);
     }
@@ -558,13 +593,13 @@ export function ShopOnboarding() {
           <div>
             <h2>店铺接入</h2>
             <p className="muted">
-              用于在 Web 后台完成 PDD 店铺登录授权。当前统一使用远程浏览器登录，用户在临时浏览器窗口里完成账号密码、短信验证码、滑块、扫码或安全验证。
+              用于在 Web 后台完成 PDD 店铺登录授权。优先使用账号密码自动授权；遇到短信、滑块、扫码或复杂验证时，再切换远程浏览器人工授权。
             </p>
           </div>
           <StatusBadge tone="success">不会发送 PDD 消息</StatusBadge>
         </div>
         <div className="warning-banner">
-          系统只保存加密后的授权信息，不保存明文密码，不会启动 worker，也不会启用 AI 自动回复。登录成功后需要继续同步商品、初始化知识并完成 no-send 试聊验收。
+          系统只保存加密后的授权信息和加密密码，不回显明文密码，不会启动 worker，也不会启用 AI 自动回复。登录成功后需要继续同步商品、初始化知识并完成 no-send 试聊验收。
         </div>
       </section>
 
@@ -593,7 +628,37 @@ export function ShopOnboarding() {
               PDD 账号
               <input value={accountName} onChange={(event) => setAccountName(event.target.value)} required placeholder="用于授权记录脱敏展示" />
             </label>
-            <button disabled={loading}>{loading ? "处理中..." : "创建远程浏览器登录会话"}</button>
+            <label>
+              PDD 登录密码
+              <input
+                type="password"
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+                required={authMode === "real"}
+                placeholder={authMode === "real" ? "用于 Playwright 自动登录，服务端加密保存" : "可选：供后续 Playwright 续登使用"}
+                autoComplete="current-password"
+              />
+            </label>
+            <div className="auth-mode-grid">
+              <button
+                type="button"
+                className={authMode === "real" ? "" : "secondary-button"}
+                onClick={() => setAuthMode("real")}
+              >
+                账号密码自动授权
+              </button>
+              <button
+                type="button"
+                className={authMode === "remote_browser" ? "" : "secondary-button"}
+                onClick={() => setAuthMode("remote_browser")}
+              >
+                远程浏览器人工授权
+              </button>
+            </div>
+            <p className="muted">
+              自动授权会用 Playwright 输入账号密码，并在需要短信验证码时停下来等你提交；远程浏览器用于处理扫码、滑块和平台安全验证。两种方式都不会发送 PDD 消息。
+            </p>
+            <button disabled={loading}>{loading ? "处理中..." : authMode === "real" ? "开始账号密码自动授权" : "创建远程浏览器登录会话"}</button>
             <button type="button" className="secondary-button" onClick={handleClearOnboarding} disabled={loading}>
               清空当前接入流程
             </button>
@@ -627,7 +692,7 @@ export function ShopOnboarding() {
               </div>
               <div>
                 <span className="muted">登录方式</span>
-                <strong>远程浏览器登录 remote_browser</strong>
+                <strong>{session.runner_mode === "real" ? "账号密码自动授权 real" : "远程浏览器人工授权 remote_browser"}</strong>
               </div>
               <div>
                 <span className="muted">账号</span>
@@ -674,6 +739,30 @@ export function ShopOnboarding() {
             </>
           )}
 
+          {session?.needs_sms_code && session.runner_mode === "real" && (
+            <form className="identity-bind-form" onSubmit={handleSubmitSmsCode}>
+              <label>
+                PDD 短信验证码
+                <input
+                  value={smsCode}
+                  onChange={(event) => setSmsCode(event.target.value)}
+                  placeholder="请输入收到的短信验证码"
+                  inputMode="numeric"
+                />
+              </label>
+              <button type="submit" disabled={loading || !smsCode.trim()}>
+                提交短信验证码
+              </button>
+              <p className="muted">验证码只用于本次授权流程，不会保存。</p>
+            </form>
+          )}
+
+          {session?.status === "blocked_complex_verification" && (
+            <div className="warning-banner error-state">
+              当前账号密码自动授权遇到滑块、扫码或复杂安全验证。请切换到“远程浏览器人工授权”重新创建登录会话，在 noVNC 窗口中人工完成验证。
+            </div>
+          )}
+
           {session?.runner_mode === "remote_browser" && (
             <div className="remote-browser-panel">
               <div className="panel-header">
@@ -699,7 +788,7 @@ export function ShopOnboarding() {
                 <div className="warning-banner">登录会话已过期，请重新创建登录会话。</div>
               ) : (
                 <div className="warning-banner">
-                  远程浏览器暂不可用：{session.error_summary || "noVNC 依赖或地址未配置"}。请确认服务器已配置 noVNC/websockify，并设置 WEB_NOVNC_BASE_URL。
+                  远程浏览器暂不可用：{session.error_summary || "noVNC 依赖或地址未配置"}。请在服务器检查 customer-agent-novnc.service、nginx 6088、Chrome CDP 9222，并确认 WEB_NOVNC_BASE_URL / WEB_REMOTE_BROWSER_CDP_URL 配置正确。
                 </div>
               )}
               {session.status !== "succeeded" && !shopIdentityPending && session.status !== "expired" && (

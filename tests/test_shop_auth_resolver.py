@@ -109,6 +109,7 @@ def test_shop_auth_resolver_exposes_password_available_credential_mode(tmp_path,
             user_id="seller-user",
             cookie_value=json.dumps({"new": "cookie"}),
             credential_mode="password_available",
+            password_value="DO_NOT_LEAK_PASSWORD",
             auth_state_reason="manual_vnc_password_login",
         )
     )
@@ -120,6 +121,14 @@ def test_shop_auth_resolver_exposes_password_available_credential_mode(tmp_path,
     assert result.status == "ok"
     assert result.credential_mode == "password_available"
     assert result.auth_state_reason == "manual_vnc_password_login"
+    assert result.password == "DO_NOT_LEAK_PASSWORD"
+
+    conn = sqlite3.connect(db_path)
+    try:
+        stored_password = conn.execute("SELECT password_encrypted FROM shop_auth WHERE shop_id='565617'").fetchone()[0]
+        assert "DO_NOT_LEAK_PASSWORD" not in str(stored_password)
+    finally:
+        conn.close()
 
 
 def test_shop_auth_resolver_reports_decrypt_failure_without_fallback(tmp_path, monkeypatch):

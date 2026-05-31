@@ -80,6 +80,7 @@ def test_schema_migrations_upgrade_legacy_sqlite_idempotently(tmp_path):
         assert "created_at" in _columns(conn, "product_knowledge")
         assert "usage" in _columns(conn, "product_knowledge")
         assert "shop_identity_status" in _columns(conn, "shop_login_sessions")
+        assert "password_encrypted" in _columns(conn, "shop_login_sessions")
         assert "worker_control_commands" in {
             row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
         }
@@ -194,6 +195,7 @@ def test_schema_migrations_add_worker_control_and_auth_state_idempotently(tmp_pa
         assert "credential_mode" in shop_auth_columns
         assert "auth_state_reason" in shop_auth_columns
         assert "last_auth_event_at" in shop_auth_columns
+        assert "password_encrypted" in shop_auth_columns
         tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
         assert {"worker_control_commands", "shop_worker_desired_state", "worker_events"}.issubset(tables)
         indexes = {row[1] for row in conn.execute("PRAGMA index_list(worker_control_commands)").fetchall()}

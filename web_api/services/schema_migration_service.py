@@ -203,6 +203,7 @@ class SchemaMigrationService:
                     "auth_status": "TEXT",
                     "cookie_encrypted": "TEXT",
                     "token_encrypted": "TEXT",
+                    "password_encrypted": "TEXT",
                 },
             )
         if self._table_exists(conn, "shop_auth"):
@@ -214,6 +215,7 @@ class SchemaMigrationService:
                     "credential_mode": "TEXT NOT NULL DEFAULT 'browser_only'",
                     "auth_state_reason": "TEXT",
                     "last_auth_event_at": "TEXT",
+                    "password_encrypted": "TEXT",
                 },
             )
         if self._table_exists(conn, "knowledge_index_jobs"):

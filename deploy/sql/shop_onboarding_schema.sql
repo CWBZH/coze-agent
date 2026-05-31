@@ -51,7 +51,8 @@ CREATE TABLE IF NOT EXISTS shop_login_sessions (
     shop_identity_status TEXT NOT NULL DEFAULT 'unknown',
     auth_status TEXT,
     cookie_encrypted TEXT,
-    token_encrypted TEXT
+    token_encrypted TEXT,
+    password_encrypted TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_shop_login_sessions_status ON shop_login_sessions(status);
@@ -66,6 +67,7 @@ CREATE TABLE IF NOT EXISTS shop_auth (
     auth_status TEXT NOT NULL,
     cookie_encrypted TEXT,
     token_encrypted TEXT,
+    password_encrypted TEXT,
     safe_display TEXT,
     last_login_at TEXT,
     expires_at TEXT,

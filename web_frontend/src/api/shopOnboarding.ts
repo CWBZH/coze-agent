@@ -50,6 +50,10 @@ export type AuthStatus = {
   safe_display: string;
   last_login_at?: string | null;
   expires_at?: string | null;
+  credential_mode: "browser_only" | "password_available" | string;
+  auth_state_reason?: string | null;
+  last_auth_event_at?: string | null;
+  password_available: boolean;
   insecure_auth_storage: boolean;
 };
 

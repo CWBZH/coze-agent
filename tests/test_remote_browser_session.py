@@ -84,9 +84,20 @@ def test_remote_browser_mode_creates_tokenized_vnc_session(tmp_path):
 
 
 def test_remote_browser_default_ttl_is_30_minutes():
-    service = RemoteBrowserService(base_url="http://127.0.0.1:6088")
+    service = RemoteBrowserService(base_url="http://127.0.0.1:6088", health_check=False)
 
     assert service.session_ttl_seconds == 1800
+
+
+def test_remote_browser_create_session_fails_when_novnc_unreachable(monkeypatch):
+    service = RemoteBrowserService(base_url="http://127.0.0.1:6088", health_check=True)
+    monkeypatch.setattr(service, "_health_error", lambda: "novnc_unreachable:test")
+
+    session = service.create_session("login-novnc-down", "https://mms.pinduoduo.com/login")
+
+    assert session.status == "failed"
+    assert session.error_summary == "novnc_unreachable:test"
+    assert session.vnc_url is None
 
 
 def test_remote_browser_check_result_supports_pending_shop_identity():
@@ -128,7 +139,7 @@ def test_remote_browser_resolves_shop_identity_with_pdd_readonly_apis(monkeypatc
         return FakeResponse({"success": True, "result": {"mallId": "323473738", "mallName": "美肌萌主驿站"}})
 
     monkeypatch.setattr("web_api.services.remote_browser_service.requests.post", fake_post)
-    service = RemoteBrowserService(base_url="http://127.0.0.1:6088")
+    service = RemoteBrowserService(base_url="http://127.0.0.1:6088", health_check=False)
 
     identity = service._fetch_shop_identity_from_pdd_api("api_uid=fake-api-uid; webp=1")
 
@@ -142,7 +153,7 @@ def test_remote_browser_resolves_shop_identity_with_pdd_readonly_apis(monkeypatc
 
 
 def test_remote_browser_check_login_auto_binds_shop_identity_from_cdp_cookie(monkeypatch):
-    service = RemoteBrowserService(base_url="http://127.0.0.1:6088")
+    service = RemoteBrowserService(base_url="http://127.0.0.1:6088", health_check=False)
     session = service.create_session("login-auto-bind", "https://mms.pinduoduo.com/login")
 
     monkeypatch.setattr(
@@ -212,9 +223,13 @@ def test_remote_browser_check_login_waiting_and_success_saves_auth(tmp_path, mon
 
         conn = sqlite3.connect(tmp_path / "onboarding.db")
         try:
-            stored = conn.execute("SELECT cookie_encrypted FROM shop_auth WHERE shop_id='565617'").fetchone()
+            stored = conn.execute(
+                "SELECT cookie_encrypted, password_encrypted, credential_mode FROM shop_auth WHERE shop_id='565617'"
+            ).fetchone()
             assert stored is not None
             assert "fake-cookie-value" not in str(stored[0])
+            assert "DO_NOT_LEAK_PASSWORD" not in str(stored[1])
+            assert stored[2] == "password_available"
             account = conn.execute("SELECT password, cookies FROM accounts LIMIT 1").fetchone()
             assert account is not None
             assert account[0] == ""

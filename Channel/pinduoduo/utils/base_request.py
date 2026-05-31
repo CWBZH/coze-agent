@@ -176,6 +176,15 @@ class BaseRequest:
         Returns:
             (username, password) 元组，或验证失败时返回 None
         """
+        resolved = self.auth_resolution
+        if resolved is not None and getattr(resolved, "credential_mode", "browser_only") == "password_available":
+            username = getattr(resolved, "account_name", None) or self.account_name
+            password = getattr(resolved, "password", None)
+            if username and password:
+                return username, password
+            self.logger.error(f"账号 {self.account_name} 标记为可密码续登，但缺少加密密码凭据")
+            return None
+
         account_info = db_manager.get_account(self.channel_name, self.shop_id, self.user_id)
         if not account_info:
             self.logger.error(f"无法获取账号信息: shop_id={self.shop_id}, user_id={self.user_id}")

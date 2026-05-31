@@ -63,6 +63,10 @@ class AuthStatusResponse(BaseModel):
     safe_display: str = ""
     last_login_at: str | None = None
     expires_at: str | None = None
+    credential_mode: str = "browser_only"
+    auth_state_reason: str | None = None
+    last_auth_event_at: str | None = None
+    password_available: bool = False
     insecure_auth_storage: bool = False
 
 

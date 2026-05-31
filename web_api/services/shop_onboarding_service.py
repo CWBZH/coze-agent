@@ -69,6 +69,8 @@ class ShopOnboardingService:
             conn.execute("ALTER TABLE shop_login_sessions ADD COLUMN remote_browser_token TEXT")
         if "vnc_url" not in columns:
             conn.execute("ALTER TABLE shop_login_sessions ADD COLUMN vnc_url TEXT")
+        if "password_encrypted" not in columns:
+            conn.execute("ALTER TABLE shop_login_sessions ADD COLUMN password_encrypted TEXT")
 
     def _connect(self) -> sqlite3.Connection:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -94,6 +96,16 @@ class ShopOnboardingService:
         if (runner_mode or "fake").lower() == "real":
             return self.real_runner
         return self.runner
+
+    def _decrypt_session_password(self, session: dict[str, Any]) -> str | None:
+        encrypted = session.get("password_encrypted")
+        if not encrypted:
+            return None
+        try:
+            password = self.auth_service.cipher.decrypt(str(encrypted))
+        except ValueError:
+            return None
+        return password or None
 
     def _apply_state(
         self,
@@ -139,6 +151,15 @@ class ShopOnboardingService:
         state: LoginRunnerState,
         success: LoginRunnerSuccess,
     ) -> None:
+        password = self._decrypt_session_password(session)
+        runner_mode = str(session.get("runner_mode") or "")
+        auth_state_reason = (
+            "playwright_password_login_succeeded"
+            if runner_mode == "real" and password
+            else "remote_browser_password_supplied"
+            if runner_mode == "remote_browser" and password
+            else "browser_auth_succeeded"
+        )
         self.auth_service.save_auth(
             AuthSavePayload(
                 shop_id=success.shop_id,
@@ -148,10 +169,13 @@ class ShopOnboardingService:
                 user_id=success.user_id,
                 cookie_value=success.cookie_value,
                 token_value=success.token_value,
+                password_value=password,
+                credential_mode="password_available" if password else "browser_only",
+                auth_state_reason=auth_state_reason,
             )
         )
         conn.execute(
-            "UPDATE shop_login_sessions SET shop_identity_status='bound', auth_status='valid' WHERE id=?",
+            "UPDATE shop_login_sessions SET shop_identity_status='bound', auth_status='valid', password_encrypted=NULL WHERE id=?",
             (session["session_id"],),
         )
         self._apply_state(conn, session["session_id"], state, shop_id=success.shop_id, completed=True)
@@ -202,16 +226,17 @@ class ShopOnboardingService:
         now = utc_now_iso()
         expires_at = (datetime.now(timezone.utc) + timedelta(minutes=30)).isoformat()
         safe_display = build_safe_account_display(account_name)
+        password_encrypted = self.auth_service.cipher.encrypt(password) if password else None
         conn = self._connect()
         try:
             conn.execute(
                 """
                 INSERT INTO shop_login_sessions
                     (id, platform, shop_name, account_name, safe_display, runner_mode, status, step, created_by,
-                     created_at, updated_at, expires_at)
-                VALUES (?, ?, ?, ?, ?, ?, 'created', 'created', ?, ?, ?, ?)
+                     created_at, updated_at, expires_at, password_encrypted)
+                VALUES (?, ?, ?, ?, ?, ?, 'created', 'created', ?, ?, ?, ?, ?)
                 """,
-                (session_id, "pdd", shop_name, account_name, safe_display, runner_mode, operator, now, now, expires_at),
+                (session_id, "pdd", shop_name, account_name, safe_display, runner_mode, operator, now, now, expires_at, password_encrypted),
             )
             if runner_mode == "remote_browser":
                 remote = self.remote_browser_service.create_session(session_id, "https://mms.pinduoduo.com/login")
@@ -404,6 +429,7 @@ class ShopOnboardingService:
             try:
                 cookie_value = self.auth_service.cipher.decrypt(str(encrypted_cookie))
                 token_value = self.auth_service.cipher.decrypt(str(row["token_encrypted"])) if row["token_encrypted"] else None
+                password_value = self.auth_service.cipher.decrypt(str(row["password_encrypted"])) if row["password_encrypted"] else None
             except ValueError as exc:
                 raise ApiError(
                     error_type="AUTH_DECRYPT_FAILED",
@@ -424,6 +450,9 @@ class ShopOnboardingService:
                     user_id=real_shop_id,
                     cookie_value=cookie_value,
                     token_value=token_value,
+                    password_value=password_value,
+                    credential_mode="password_available" if password_value else "browser_only",
+                    auth_state_reason="remote_browser_password_supplied" if password_value else "browser_auth_succeeded",
                 )
             )
             now = utc_now_iso()
@@ -438,6 +467,7 @@ class ShopOnboardingService:
                     auth_status='valid',
                     cookie_encrypted=NULL,
                     token_encrypted=NULL,
+                    password_encrypted=NULL,
                     error_summary=NULL,
                     completed_at=COALESCE(completed_at, ?),
                     updated_at=?

@@ -53,10 +53,16 @@ class RemoteBrowserService:
         base_url: str | None = None,
         cdp_url: str | None = None,
         session_ttl_seconds: int = 1800,
+        health_check: bool | None = None,
     ) -> None:
         self.base_url = (base_url or os.environ.get("WEB_NOVNC_BASE_URL") or "").rstrip("/")
         self.cdp_url = (cdp_url or os.environ.get("WEB_REMOTE_BROWSER_CDP_URL") or "http://127.0.0.1:9222").rstrip("/")
         self.session_ttl_seconds = session_ttl_seconds
+        self.health_check = (
+            health_check
+            if health_check is not None
+            else os.environ.get("WEB_NOVNC_HEALTHCHECK_ENABLED", "1").lower() not in {"0", "false", "no"}
+        )
         self._sessions: dict[str, RemoteBrowserSession] = {}
 
     def create_session(self, login_session_id: str, login_url: str) -> RemoteBrowserSession:
@@ -74,6 +80,19 @@ class RemoteBrowserService:
             self._sessions[login_session_id] = session
             return session
 
+        health_error = self._health_error()
+        if health_error:
+            session = RemoteBrowserSession(
+                login_session_id=login_session_id,
+                status="failed",
+                access_token=token,
+                error_summary=health_error,
+                created_at=now.isoformat(),
+                expires_at=(now + timedelta(seconds=self.session_ttl_seconds)).isoformat(),
+            )
+            self._sessions[login_session_id] = session
+            return session
+
         vnc_url = f"{self.base_url}/vnc.html?session={login_session_id}&token={token}"
         session = RemoteBrowserSession(
             login_session_id=login_session_id,
@@ -85,6 +104,21 @@ class RemoteBrowserService:
         )
         self._sessions[login_session_id] = session
         return session
+
+    def _health_error(self) -> str | None:
+        if not self.health_check:
+            return None
+        try:
+            with urllib.request.urlopen(f"{self.base_url}/vnc.html", timeout=2) as response:
+                if response.status >= 500:
+                    return f"novnc_unreachable:http_{response.status}"
+        except Exception:
+            return "novnc_unreachable:check_customer_agent_novnc_service_or_nginx_6088"
+        try:
+            self._get_cdp_pages()
+        except Exception:
+            return "chrome_cdp_unreachable:check_WEB_REMOTE_BROWSER_CDP_URL_or_chrome_9222"
+        return None
 
     def get_session(self, login_session_id: str) -> RemoteBrowserSession | None:
         return self._sessions.get(login_session_id)
