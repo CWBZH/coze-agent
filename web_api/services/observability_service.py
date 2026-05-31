@@ -196,7 +196,11 @@ class ObservabilityService:
         answer_output = self._event(events, "answer_generation_output")
         final_result = self._event(events, "final_result")
         send_completed = self._event(events, "send_completed")
-        trace_data = parse_json_object(final_result.get("trace"))
+        trace_data = self._display_trace_data(
+            parse_json_object(final_result.get("trace")),
+            final_result,
+            answer_output,
+        )
 
         rag_chunks = self._rag_chunks(rag_event, trace_data)
         generated_reply = str(
@@ -344,6 +348,38 @@ class ObservabilityService:
         return {"key": key, "label": label, "status": status, "summary": summary}
 
     @staticmethod
+    def _display_trace_data(
+        trace_data: dict[str, Any],
+        final_result: dict[str, Any],
+        answer_output: dict[str, Any],
+    ) -> dict[str, Any]:
+        data = dict(trace_data or {})
+
+        intent = str(data.get("intent") or final_result.get("intent") or "").strip()
+        if intent:
+            data["intent"] = intent
+            data.setdefault("intent_classifier_status", "ok")
+
+        action = str(data.get("final_action") or final_result.get("action") or "").strip()
+        if action:
+            data["final_action"] = action
+
+        guardrail_status = str(data.get("guardrail_status") or final_result.get("guardrail_status") or "").strip()
+        if guardrail_status:
+            data["guardrail_status"] = guardrail_status
+
+        if not data.get("answer_generation_status"):
+            if answer_output.get("answer_text") or final_result.get("reply_text"):
+                data["answer_generation_status"] = "ok"
+            elif answer_output.get("error_type"):
+                data["answer_generation_status"] = "error"
+
+        if "calls_llm" not in data and data.get("answer_generation_status") == "ok":
+            data["calls_llm"] = True
+
+        return data
+
+    @staticmethod
     def _rag_chunks(rag_event: dict[str, Any], trace_data: dict[str, Any]) -> list[dict[str, Any]]:
         hits = rag_event.get("hits")
         if isinstance(hits, list) and hits:
@@ -413,6 +449,7 @@ class ObservabilityService:
             "blocked_by_platform_policy",
             "suppressed_duplicate",
             "suppressed_repeated_40013",
+            "reply_sent",
         }
 
     @staticmethod
