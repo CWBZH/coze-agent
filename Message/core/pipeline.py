@@ -7,7 +7,7 @@ import time
 from datetime import datetime
 from typing import Any, Dict
 
-from core.constants import TRANSFER_HUMAN_REPLY
+from core.constants import TRANSFER_HUMAN_REPLY, TRANSFER_HUMAN_REPLY_POOL, transfer_human_reply_for
 from Message.handlers.fastgpt_handler import SYSTEM_PROMPT_TEMPLATE
 from Message.workflow.router import create_ai_workflow_engine
 from Message.workflow.types import WorkflowAction, WorkflowContext, action_value
@@ -192,6 +192,15 @@ class MessagePipeline:
             self.fastgpt = self.workflow_engine.fastgpt_handler
         self.config = config
         self._product_cache: Dict[str, Dict[str, Any]] = {}
+
+    def _transfer_human_reply(self, session_id: str) -> str:
+        next_index = getattr(self.session_mgr, "next_transfer_reply_index", None)
+        if callable(next_index):
+            try:
+                return transfer_human_reply_for(next_index(session_id, len(TRANSFER_HUMAN_REPLY_POOL)))
+            except Exception as exc:
+                logger.warning(f"转人工话术轮换状态写入失败，使用默认话术: {type(exc).__name__}")
+        return TRANSFER_HUMAN_REPLY
 
     @staticmethod
     def _product_cache_key(shop_id: Any, user_id: Any, buyer_id: Any, session_id: Any) -> str:
@@ -569,7 +578,7 @@ class MessagePipeline:
                     return {"action": "reply", "text": reply, "session_id": session_id, "source": "keyword"}
                 if action == "transfer_human":
                     self.session_mgr.set_status(session_id, "pending_human")
-                    reply = TRANSFER_HUMAN_REPLY
+                    reply = self._transfer_human_reply(session_id)
                     self.session_mgr.add_message(session_id, "assistant", reply)
                     self._alert_transfer_human(
                         str(shop["shop_id"]),
@@ -642,16 +651,17 @@ class MessagePipeline:
                     f"shop_name={shop.get('shop_name')}, buyer_id={buyer_id}"
                 )
                 self.session_mgr.set_status(session_id, "pending_human")
-                self.session_mgr.add_message(session_id, "assistant", TRANSFER_HUMAN_REPLY)
+                reply = self._transfer_human_reply(session_id)
+                self.session_mgr.add_message(session_id, "assistant", reply)
                 self._alert_transfer_human(
                     str(shop["shop_id"]),
                     buyer_id,
                     session_id,
                     "店铺未配置 FastGPT 知识库ID",
                     "high",
-                    metadata=alert_metadata("missing_fastgpt_dataset_id", TRANSFER_HUMAN_REPLY),
+                    metadata=alert_metadata("missing_fastgpt_dataset_id", reply),
                 )
-                reply_length, reply_hash = _fingerprint(TRANSFER_HUMAN_REPLY)
+                reply_length, reply_hash = _fingerprint(reply)
                 duration_ms = int((time.perf_counter() - process_started_at) * 1000)
                 logger.warning(
                     "event=pdd.transfer_human.triggered "
@@ -665,7 +675,7 @@ class MessagePipeline:
                 )
                 return {
                     "action": "transfer_human",
-                    "text": TRANSFER_HUMAN_REPLY,
+                    "text": reply,
                     "session_id": session_id,
                     "reason": "missing_fastgpt_dataset_id",
                 }
@@ -743,7 +753,7 @@ class MessagePipeline:
 
             if workflow_action == WorkflowAction.TRANSFER_HUMAN.value:
                 self.session_mgr.set_status(session_id, "pending_human")
-                reply = TRANSFER_HUMAN_REPLY
+                reply = self._transfer_human_reply(session_id)
                 self.session_mgr.add_message(session_id, "assistant", reply)
                 reason = str(workflow_result.reason or "workflow_transfer_human")
                 self._alert_transfer_human(
@@ -861,7 +871,7 @@ class MessagePipeline:
                 )
                 if (not skip_legacy_transfer_scan) and should_transfer_from_text:
                     self.session_mgr.set_status(session_id, "pending_human")
-                    reply = TRANSFER_HUMAN_REPLY
+                    reply = self._transfer_human_reply(session_id)
                     reply_length, reply_hash = _fingerprint(reply)
                     self._alert_transfer_human(
                         str(shop["shop_id"]),
@@ -1094,10 +1104,12 @@ class MessagePipeline:
                 )
             )
             logger.error(f"消息处理异常: {e}")
+            reply = TRANSFER_HUMAN_REPLY
             if session_id:
                 try:
                     self.session_mgr.set_status(session_id, "pending_human")
-                    self.session_mgr.add_message(session_id, "assistant", TRANSFER_HUMAN_REPLY)
+                    reply = self._transfer_human_reply(session_id)
+                    self.session_mgr.add_message(session_id, "assistant", reply)
                 except Exception as status_error:
                     logger.warning(f"Pipeline 异常转人工状态更新失败: {status_error}")
             self._alert_transfer_human(
@@ -1106,9 +1118,9 @@ class MessagePipeline:
                 str(session_id or ""),
                 f"Pipeline 异常: {e}",
                 "high",
-                metadata=alert_metadata("pipeline_exception", TRANSFER_HUMAN_REPLY),
+                metadata=alert_metadata("pipeline_exception", reply),
             )
-            reply_length, reply_hash = _fingerprint(TRANSFER_HUMAN_REPLY)
+            reply_length, reply_hash = _fingerprint(reply)
             logger.warning(
                 "event=pdd.transfer_human.triggered "
                 + _trace_fields(
@@ -1122,7 +1134,7 @@ class MessagePipeline:
             )
             return {
                 "action": "transfer_human",
-                "text": TRANSFER_HUMAN_REPLY,
+                "text": reply,
                 "error": str(e),
                 "session_id": session_id,
                 "reason": "Pipeline 异常",
@@ -1148,3 +1160,4 @@ class MessagePipeline:
             shop_id=shop_id,
             shop_name=shop_name,
         )
+

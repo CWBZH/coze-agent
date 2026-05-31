@@ -25,6 +25,21 @@ FALLBACK_REPLY_POOL = [
 FALLBACK_REPLY = FALLBACK_REPLY_POOL[0]
 
 TRANSFER_HUMAN_REPLY = "已为你转接人工客服请稍等~"
+TRANSFER_HUMAN_REPLY_POOL = (
+    TRANSFER_HUMAN_REPLY,
+    "亲亲，这个问题已为您转人工客服处理，请稍等一下哦~",
+    "亲，已通知人工客服跟进，请您稍等片刻~",
+)
+
+
+def transfer_human_reply_for(index: int = 0) -> str:
+    """Return one of several transfer replies to avoid repeated identical sends."""
+
+    try:
+        selected = int(index or 0)
+    except (TypeError, ValueError):
+        selected = 0
+    return TRANSFER_HUMAN_REPLY_POOL[selected % len(TRANSFER_HUMAN_REPLY_POOL)]
 
 HUMAN_BUSY_REPLY = "抱歉，当前人工客服繁忙，请您稍后再试。如有紧急问题，请拨打客服热线。"
 

@@ -237,6 +237,30 @@ class AIReplyHandler(BaseHandler):
         return ""
 
     @staticmethod
+    def _pre_send_suppression_status(
+        outbox_store: Any,
+        *,
+        outbox_id: str,
+        session_id: str,
+        reply_hash: str,
+        window_seconds: float = 600.0,
+    ) -> str:
+        stats_fn = getattr(outbox_store, "recent_reply_stats", None)
+        if not callable(stats_fn):
+            return ""
+        stats = stats_fn(
+            session_id=str(session_id or ""),
+            reply_hash=str(reply_hash or ""),
+            exclude_outbox_id=str(outbox_id or ""),
+            window_seconds=window_seconds,
+        )
+        if int(stats.get("sent_count") or 0) > 0:
+            return "suppressed_duplicate"
+        if int(stats.get("failed_40013_count") or 0) > 0:
+            return "suppressed_repeated_40013"
+        return ""
+
+    @staticmethod
     def _contains_emoji(text: str) -> bool:
         return any(ord(char) > 0xFFFF for char in str(text or ""))
 
@@ -850,6 +874,7 @@ class AIReplyHandler(BaseHandler):
         send_request_id = uuid.uuid4().hex[:12]
         send_started_at = time.perf_counter()
         reply_length, reply_hash = self._fingerprint(reply)
+        outbox_reply_hash = hashlib.sha256(str(reply or "").encode("utf-8")).hexdigest()[:16]
         reply_action = str(metadata.get("reply_action") or "reply")
         reply_source = str(metadata.get("reply_source") or metadata.get("source") or "")
         contains_human_service_phrase = self._contains_human_service_phrase(reply)
@@ -993,6 +1018,68 @@ class AIReplyHandler(BaseHandler):
                 return False
 
             # 尝试发送消息
+            suppress_status = ""
+            if outbox_store and outbox_id:
+                suppress_status = self._pre_send_suppression_status(
+                    outbox_store,
+                    outbox_id=outbox_id,
+                    session_id=str(metadata.get("session_id") or trace.get("session_id") or ""),
+                    reply_hash=outbox_reply_hash,
+                )
+            if suppress_status:
+                duration_ms = int((time.perf_counter() - send_started_at) * 1000)
+                if outbox_store and outbox_id:
+                    outbox_store.mark_outbox_suppressed(
+                        outbox_id,
+                        suppress_status,
+                        error_summary_hash=suppress_status,
+                    )
+                self.logger.warning(
+                    "event=pdd.reply.send.suppressed "
+                    + self._trace_fields(
+                        trace,
+                        send_request_id=send_request_id,
+                        action="pre_send_dedupe",
+                        reply_action=reply_action,
+                        reply_source=reply_source,
+                        duration_ms=duration_ms,
+                        pdd_result="not_called",
+                        pdd_send_status=suppress_status,
+                        reply_length=reply_length,
+                        reply_hash=reply_hash,
+                    )
+                )
+                self._write_send_private_trace(
+                    trace,
+                    "send_completed",
+                    send_request_id=send_request_id,
+                    final_status=suppress_status,
+                    duration_ms=duration_ms,
+                    pdd_send_status=suppress_status,
+                    pdd_result="not_called",
+                    reply_action=reply_action,
+                    reply_source=reply_source,
+                    reply_text=reply,
+                    reply_length=reply_length,
+                    reply_hash=reply_hash,
+                    conversation_status_after=str(metadata.get("conversation_status_after") or ""),
+                )
+                self.logger.info(
+                    "event=pdd.message.completed "
+                    + self._trace_fields(
+                        trace,
+                        send_request_id=send_request_id,
+                        final_status=suppress_status,
+                        duration_ms=duration_ms,
+                        pdd_result="not_called",
+                        pdd_send_status=suppress_status,
+                        reply_length=reply_length,
+                        reply_hash=reply_hash,
+                        conversation_status_after=str(metadata.get("conversation_status_after") or ""),
+                    )
+                )
+                return False
+
             from Channel.pinduoduo.utils.API.send_message import SendMessage
             sender = SendMessage(shop_id, user_id)
             import asyncio

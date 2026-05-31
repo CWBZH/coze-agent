@@ -1,11 +1,14 @@
 import asyncio
+import hashlib
 
 import Session.session_manager  # Import order avoids existing core/logger circular import in tests.
 from bridge.context import ChannelType, Context, ContextType
 from Message.core.outbox_worker import OutboxWorker, trigger_reconnect_recovery
 from Message.core.reliable_queue import ReliableQueueStore
 from Message.core.queue import SimpleMessageQueue
+from Message.handlers.ai_handler import AIReplyHandler
 from Message.models.queue_models import QueueConfig
+from core.constants import TRANSFER_HUMAN_REPLY_POOL, transfer_human_reply_for
 
 
 def _context(message: str = "buyer text", *, source_message_id: str = "msg-1") -> Context:
@@ -336,6 +339,86 @@ def test_outbox_worker_retries_transfer_send_failed_and_blocks_repeated_40013(tm
         assert store.get_outbox(outbox.outbox_id)["status"] == "blocked_by_platform_policy"
 
     asyncio.run(scenario())
+
+
+def test_transfer_human_reply_pool_rotates_three_variants():
+    replies = [transfer_human_reply_for(index) for index in range(4)]
+
+    assert replies[:3] == list(TRANSFER_HUMAN_REPLY_POOL)
+    assert len(set(replies[:3])) == 3
+    assert replies[3] == replies[0]
+
+
+def test_pre_send_suppression_uses_outbox_reply_hash(tmp_path):
+    store = ReliableQueueStore(tmp_path / "queue.db")
+    sent = store.create_outbox(
+        trace_id="trace-sent",
+        inbound_record_id="in-sent",
+        shop_id="shop-1",
+        user_id="user-1",
+        buyer_id="buyer-1",
+        session_id="session-1",
+        reply_action="reply",
+        reply_text="same reply",
+        reply_source="internal",
+    )
+    store.mark_outbox_sent(sent.outbox_id)
+    pending = store.create_outbox(
+        trace_id="trace-pending",
+        inbound_record_id="in-pending",
+        shop_id="shop-1",
+        user_id="user-1",
+        buyer_id="buyer-1",
+        session_id="session-1",
+        reply_action="reply",
+        reply_text="same reply",
+        reply_source="internal",
+    )
+
+    reply_hash = hashlib.sha256("same reply".encode("utf-8")).hexdigest()[:16]
+
+    assert AIReplyHandler._pre_send_suppression_status(
+        store,
+        outbox_id=pending.outbox_id,
+        session_id="session-1",
+        reply_hash=reply_hash,
+    ) == "suppressed_duplicate"
+
+
+def test_pre_send_suppression_blocks_repeated_40013(tmp_path):
+    store = ReliableQueueStore(tmp_path / "queue.db")
+    failed = store.create_outbox(
+        trace_id="trace-failed",
+        inbound_record_id="in-failed",
+        shop_id="shop-1",
+        user_id="user-1",
+        buyer_id="buyer-1",
+        session_id="session-1",
+        reply_action="transfer_human",
+        reply_text="transfer text",
+        reply_source="internal",
+    )
+    store.mark_outbox_failed(failed.outbox_id, pdd_error_code="40013")
+    pending = store.create_outbox(
+        trace_id="trace-pending",
+        inbound_record_id="in-pending",
+        shop_id="shop-1",
+        user_id="user-1",
+        buyer_id="buyer-1",
+        session_id="session-1",
+        reply_action="transfer_human",
+        reply_text="transfer text",
+        reply_source="internal",
+    )
+
+    reply_hash = hashlib.sha256("transfer text".encode("utf-8")).hexdigest()[:16]
+
+    assert AIReplyHandler._pre_send_suppression_status(
+        store,
+        outbox_id=pending.outbox_id,
+        session_id="session-1",
+        reply_hash=reply_hash,
+    ) == "suppressed_repeated_40013"
 
 
 def test_outbox_retry_loop_retries_due_records_until_stopped(tmp_path, monkeypatch):

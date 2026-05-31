@@ -152,6 +152,22 @@ class SessionManager:
         state["updated_at"] = now
         self.db.set_config(self._fallback_state_key(session_id), json.dumps(state, ensure_ascii=False))
 
+    def next_transfer_reply_index(self, session_id: str, pool_size: int, now: float = None) -> int:
+        """Persistently rotate transfer-human replies for one buyer session."""
+
+        now = now or time.time()
+        safe_pool_size = max(1, int(pool_size or 1))
+        state = self.get_fallback_state(session_id)
+        try:
+            current = int(state.get("transfer_reply_count") or 0)
+        except (TypeError, ValueError):
+            current = 0
+        state["transfer_reply_count"] = current + 1
+        state["last_transfer_reply_at"] = now
+        state["updated_at"] = now
+        self.db.set_config(self._fallback_state_key(session_id), json.dumps(state, ensure_ascii=False))
+        return current % safe_pool_size
+
     def reset_fallback_state(self, session_id: str) -> None:
         try:
             self.db.delete_config(self._fallback_state_key(session_id))
