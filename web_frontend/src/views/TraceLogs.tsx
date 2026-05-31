@@ -331,12 +331,12 @@ export function TraceLogs() {
     }
   }, []);
 
-  const loadMessages = useCallback(async (conversation: ConversationSummary | null) => {
+  const loadMessages = useCallback(async (conversation: ConversationSummary | null, showLoading = false) => {
     if (!conversation) {
       setMessages([]);
       return;
     }
-    setMessagesLoading(true);
+    if (showLoading) setMessagesLoading(true);
     setError(null);
     try {
       const data = await getConversationMessages(conversation.buyer_id, { shopId: conversation.shop_id, limit: 100 });
@@ -344,7 +344,7 @@ export function TraceLogs() {
     } catch (err) {
       setError(err instanceof Error ? err.message : "买家会话详情加载失败");
     } finally {
-      setMessagesLoading(false);
+      if (showLoading) setMessagesLoading(false);
     }
   }, []);
 
@@ -353,14 +353,14 @@ export function TraceLogs() {
   }, [loadConversations]);
 
   useEffect(() => {
-    void loadMessages(selected);
+    void loadMessages(selected, true);
   }, [loadMessages, selected]);
 
   useEffect(() => {
     if (!autoRefresh) return;
     const timer = window.setInterval(() => {
       void loadConversations(false);
-      void loadMessages(selected);
+      void loadMessages(selected, false);
     }, 5000);
     return () => window.clearInterval(timer);
   }, [autoRefresh, loadConversations, loadMessages, selected]);
@@ -441,7 +441,7 @@ export function TraceLogs() {
           {selected ? <StatusBadge tone={statusTone(selected.last_status)}>{selected.last_status_label || selected.last_status}</StatusBadge> : null}
         </div>
 
-        {messagesLoading ? <div className="state-card">正在加载买家会话链路...</div> : null}
+        {messagesLoading && sortedMessages.length === 0 ? <div className="state-card">正在加载买家会话链路...</div> : null}
         {!messagesLoading && sortedMessages.length === 0 ? <div className="state-card">暂无消息日志。</div> : null}
 
         <div className="observability-message-list compact">
