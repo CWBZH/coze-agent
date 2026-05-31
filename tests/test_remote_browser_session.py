@@ -1,4 +1,6 @@
 import sqlite3
+import sys
+import types
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -22,7 +24,7 @@ class FakeRemoteBrowserService:
             login_session_id=login_session_id,
             status="ready",
             access_token=f"token-{login_session_id}",
-            vnc_url=f"http://127.0.0.1:6080/vnc.html?session={login_session_id}&token=token-{login_session_id}",
+            vnc_url=f"http://127.0.0.1:6080/vnc.html?autoconnect=1&resize=remote&path=websockify&session={login_session_id}&token=token-{login_session_id}",
         )
         self.sessions[login_session_id] = session
         return session
@@ -77,6 +79,8 @@ def test_remote_browser_mode_creates_tokenized_vnc_session(tmp_path):
         assert payload["remote_browser_status"] == "ready"
         assert payload["vnc_url_ready"] is True
         assert "token=" in payload["vnc_url"]
+        assert "path=websockify" in payload["vnc_url"]
+        assert "autoconnect=1" in payload["vnc_url"]
         assert "DO_NOT_LEAK_PASSWORD" not in response.text
         assert "cookie" not in response.text.lower()
     finally:
@@ -98,6 +102,26 @@ def test_remote_browser_create_session_fails_when_novnc_unreachable(monkeypatch)
     assert session.status == "failed"
     assert session.error_summary == "novnc_unreachable:test"
     assert session.vnc_url is None
+
+
+def test_remote_browser_health_checks_websockify_path(monkeypatch):
+    created_urls: list[str] = []
+
+    class FakeWs:
+        def close(self):
+            return None
+
+    def fake_create_connection(url: str, timeout: int = 0):
+        created_urls.append(url)
+        return FakeWs()
+
+    monkeypatch.setattr("web_api.services.remote_browser_service.urllib.request.urlopen", lambda *args, **kwargs: type("R", (), {"status": 200, "__enter__": lambda self: self, "__exit__": lambda *args: None})())
+    monkeypatch.setitem(sys.modules, "websocket", types.SimpleNamespace(create_connection=fake_create_connection))
+    service = RemoteBrowserService(base_url="http://127.0.0.1:6088", health_check=True)
+    monkeypatch.setattr(service, "_get_cdp_pages", lambda: [])
+
+    assert service._health_error() is None
+    assert created_urls == ["ws://127.0.0.1:6088/websockify"]
 
 
 def test_remote_browser_check_result_supports_pending_shop_identity():

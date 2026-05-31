@@ -8,6 +8,7 @@ import urllib.error
 import urllib.request
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from urllib.parse import urlparse
 from typing import Any
 
 import requests
@@ -93,7 +94,10 @@ class RemoteBrowserService:
             self._sessions[login_session_id] = session
             return session
 
-        vnc_url = f"{self.base_url}/vnc.html?session={login_session_id}&token={token}"
+        vnc_url = (
+            f"{self.base_url}/vnc.html"
+            f"?autoconnect=1&resize=remote&path=websockify&session={login_session_id}&token={token}"
+        )
         session = RemoteBrowserSession(
             login_session_id=login_session_id,
             status="ready",
@@ -114,10 +118,31 @@ class RemoteBrowserService:
                     return f"novnc_unreachable:http_{response.status}"
         except Exception:
             return "novnc_unreachable:check_customer_agent_novnc_service_or_nginx_6088"
+        websocket_error = self._websockify_health_error()
+        if websocket_error:
+            return websocket_error
         try:
             self._get_cdp_pages()
         except Exception:
             return "chrome_cdp_unreachable:check_WEB_REMOTE_BROWSER_CDP_URL_or_chrome_9222"
+        return None
+
+    def _websockify_health_error(self) -> str | None:
+        parsed = urlparse(self.base_url)
+        scheme = "wss" if parsed.scheme == "https" else "ws"
+        netloc = parsed.netloc
+        path_prefix = parsed.path.strip("/")
+        ws_path = "/".join(part for part in (path_prefix, "websockify") if part)
+        ws_url = f"{scheme}://{netloc}/{ws_path}"
+        try:
+            import websocket  # type: ignore
+        except Exception:
+            return "novnc_websockify_check_unavailable:missing_websocket_client"
+        try:
+            ws = websocket.create_connection(ws_url, timeout=2)
+            ws.close()
+        except Exception:
+            return "novnc_websockify_unreachable:check_nginx_websocket_proxy_or_websockify_port"
         return None
 
     def get_session(self, login_session_id: str) -> RemoteBrowserSession | None:
