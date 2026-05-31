@@ -1105,7 +1105,7 @@ export function ShopOnboarding() {
                 <p>{productKnowledgeItem?.summary || `已同步商品 ${coverage?.total || 0} 个，需确认当前版本已发布并索引。`}</p>
                 <div className="inline-actions">
                   <a className="button-like" href="/products">查看商品知识</a>
-                  <a className="button-like secondary-link" href="/knowledge-center">打开知识中心</a>
+                  <a className="button-like secondary-link" href="/knowledge-center">打开知识库管理</a>
                 </div>
               </div>
               <div className="state-card readiness-card">

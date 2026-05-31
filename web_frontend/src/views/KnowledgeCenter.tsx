@@ -1,16 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 
-import { getProducts, Product, ProductDetail, getProduct } from "../api/products";
 import { getShops, Shop } from "../api/shops";
 import {
   archiveSop,
-  archiveProduct,
-  clearProductOverride,
   createSop,
-  EffectiveProduct,
-  getEffectiveProduct,
-  getProductOverride,
   getVersion,
   getVersionChunks,
   IndexJobQuery,
@@ -19,13 +13,9 @@ import {
   listIndexJobs,
   listSop,
   listVersions,
-  ProductOverride,
-  publishProduct,
   publishSop,
-  restoreProduct,
   retryIndexJob,
   runIndexJob,
-  saveProductOverride,
   SopCreatePayload,
   SopRecord,
   SopUpdatePayload,
@@ -37,7 +27,7 @@ import { DataTable } from "../components/DataTable";
 import { DrawerPanel } from "../components/DrawerPanel";
 import { StatusBadge } from "../components/StatusBadge";
 
-type TabKey = "sop" | "products" | "versions" | "jobs";
+type TabKey = "sop" | "versions" | "jobs";
 type LoadState = "idle" | "loading" | "loaded" | "error";
 
 const DOMAINS = [
@@ -55,16 +45,6 @@ const emptySopForm: SopCreatePayload & { id?: number; expected_content_hash?: st
   title: "",
   content: ""
 };
-
-const overrideFields: Array<keyof ProductOverride> = [
-  "usage_override",
-  "ingredients_override",
-  "warnings_override",
-  "shelf_life_override",
-  "manual_notes",
-  "specs_override",
-  "price_note_override"
-];
 
 function statusTone(status: string | boolean | number | null | undefined) {
   const value = String(status ?? "");
@@ -469,350 +449,6 @@ function SopTab({
   );
 }
 
-function ProductsTab({
-  shops,
-  onPublished
-}: {
-  shops: Shop[];
-  onPublished: (version: KnowledgeVersion, job: KnowledgeIndexJob) => void;
-}) {
-  const [shopId, setShopId] = useState("");
-  const [query, setQuery] = useState("");
-  const [products, setProducts] = useState<Product[]>([]);
-  const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
-  const [detail, setDetail] = useState<ProductDetail | null>(null);
-  const [override, setOverride] = useState<ProductOverride | null>(null);
-  const [effective, setEffective] = useState<EffectiveProduct | null>(null);
-  const [state, setState] = useState<LoadState>("idle");
-  const [detailState, setDetailState] = useState<LoadState>("idle");
-  const [message, setMessage] = useState("");
-  const [error, setError] = useState("");
-  const [lastJob, setLastJob] = useState<KnowledgeIndexJob | null>(null);
-  const [activeVersion, setActiveVersion] = useState<KnowledgeVersion | null>(null);
-  const [activeJob, setActiveJob] = useState<KnowledgeIndexJob | null>(null);
-  const [activeChunks, setActiveChunks] = useState<VersionChunk[]>([]);
-  const [activeChunkWarning, setActiveChunkWarning] = useState<string | null>(null);
-
-  function loadProducts() {
-    setState("loading");
-    getProducts({ shop_id: shopId || undefined, q: query || undefined, page_size: 100 })
-      .then((data) => {
-        setProducts(data.items);
-        setState("loaded");
-      })
-      .catch((err: Error) => {
-        setError(err.message);
-        setState("error");
-      });
-  }
-
-  useEffect(() => {
-    loadProducts();
-  }, [shopId, query]);
-
-  function loadEffective(goodsId: string, productShopId: string) {
-    return getEffectiveProduct(goodsId, productShopId).then(setEffective);
-  }
-
-  function selectProduct(row: Product) {
-    setSelectedProduct(row);
-    setDetailState("loading");
-    setMessage("");
-    setError("");
-    Promise.all([
-      getProduct(row.goods_id, row.shop_id),
-      getProductOverride(row.goods_id, row.shop_id),
-      getEffectiveProduct(row.goods_id, row.shop_id)
-    ])
-      .then(([productDetail, productOverride, effectiveProduct]) => {
-        setDetail(productDetail);
-        setOverride(productOverride);
-        setEffective(effectiveProduct);
-        setDetailState("loaded");
-        loadProductActiveSummary(row.shop_id, row.goods_id);
-      })
-      .catch((err: Error) => {
-        setError(err.message);
-        setDetailState("error");
-      });
-  }
-
-  function loadProductActiveSummary(productShopId: string, goodsId: string) {
-    listVersions({
-      shop_id: productShopId,
-      source_type: "product",
-      source_id: goodsId,
-      domain: "product_catalog",
-      is_active: true
-    })
-      .then((data) => {
-        const active = data.items[0] ?? null;
-        setActiveVersion(active);
-        setActiveChunks([]);
-        setActiveChunkWarning(null);
-        if (active?.index_job_id) {
-          listIndexJobs({ version_id: active.id }).then((jobs) => setActiveJob(jobs.items[0] ?? null));
-          getVersionChunks(active.id).then((chunks) => {
-            setActiveChunks(chunks.chunks);
-            setActiveChunkWarning(chunks.warning);
-          });
-        } else {
-          setActiveJob(null);
-        }
-      })
-      .catch(() => {
-        setActiveVersion(null);
-        setActiveJob(null);
-        setActiveChunks([]);
-        setActiveChunkWarning("active_version_lookup_failed");
-      });
-  }
-
-  function setOverrideField(field: keyof ProductOverride, value: string) {
-    if (!override) return;
-    setOverride({ ...override, [field]: value });
-  }
-
-  function saveOverride() {
-    if (!selectedProduct || !override) return;
-    saveProductOverride(selectedProduct.goods_id, selectedProduct.shop_id, {
-      goods_name: override.goods_name ?? selectedProduct.goods_name,
-      usage_override: override.usage_override,
-      ingredients_override: override.ingredients_override,
-      warnings_override: override.warnings_override,
-      shelf_life_override: override.shelf_life_override,
-      manual_notes: override.manual_notes,
-      specs_override: override.specs_override,
-      price_note_override: override.price_note_override,
-      expected_content_hash: override.content_hash
-    })
-      .then((saved) => {
-        setOverride(saved);
-        setMessage("人工知识已保存。");
-        return loadEffective(selectedProduct.goods_id, selectedProduct.shop_id);
-      })
-      .catch((err: Error) => setError(err.message));
-  }
-
-  function publishSelectedProduct() {
-    if (!selectedProduct) return;
-    if (selectedProduct.knowledge_status === "archived" || effective?.knowledge_status === "archived") {
-      setError("商品知识已归档，恢复后才能发布索引。");
-      return;
-    }
-    publishProduct(selectedProduct.goods_id, selectedProduct.shop_id)
-      .then((result) => {
-        setEffective(result.effective);
-        setLastJob(result.index_job);
-        setMessage(`商品知识已发布并执行真实索引。当前版本状态：${result.version.status}。`);
-        onPublished(result.version, result.index_job);
-      })
-      .catch((err: Error) => setError(err.message));
-  }
-
-  function clearSelectedOverride() {
-    if (!selectedProduct) return;
-    if (!window.confirm("确认清空该商品的人工增强字段吗？原始商品同步数据不会被删除。")) {
-      return;
-    }
-    clearProductOverride(selectedProduct.goods_id, selectedProduct.shop_id)
-      .then((emptyOverride) => {
-        setOverride(emptyOverride);
-        setMessage("人工增强字段已清空。");
-        return loadEffective(selectedProduct.goods_id, selectedProduct.shop_id);
-      })
-      .catch((err: Error) => setError(err.message));
-  }
-
-  function archiveSelectedProduct() {
-    if (!selectedProduct) return;
-    const reason = window.prompt("请输入归档原因。归档后该商品不会进入商品列表和 RAG 当前知识。", "manual_archive");
-    if (!reason) return;
-    archiveProduct(selectedProduct.goods_id, selectedProduct.shop_id, reason)
-      .then((result) => {
-        setEffective(result.effective);
-        setMessage("商品知识已归档，已从当前商品知识列表和 RAG 生效版本中排除。");
-        setProducts((items) => items.filter((item) => !(item.goods_id === selectedProduct.goods_id && item.shop_id === selectedProduct.shop_id)));
-        setSelectedProduct(null);
-        setDetail(null);
-        setOverride(null);
-      })
-      .catch((err: Error) => setError(err.message));
-  }
-
-  function restoreSelectedProduct() {
-    if (!selectedProduct) return;
-    restoreProduct(selectedProduct.goods_id, selectedProduct.shop_id)
-      .then((result) => {
-        setEffective(result.effective);
-        setMessage("商品知识已恢复。请重新发布并索引后再用于 AI。");
-        loadProducts();
-        return loadEffective(selectedProduct.goods_id, selectedProduct.shop_id);
-      })
-      .catch((err: Error) => setError(err.message));
-  }
-
-  function runLastJob() {
-    if (!lastJob) return;
-    if (!window.confirm("真实索引会调用 embedding 服务并写入 pgvector，但不会发送 PDD 消息。确认继续执行真实索引吗？")) {
-      return;
-    }
-    runIndexJob(lastJob.id, { mode: "real", embedding_provider: "doubao", vector_store: "pgvector" })
-      .then((result) => {
-        setLastJob(result.index_job);
-        setMessage(`真实索引已完成。商品版本状态：${result.version.status}。`);
-        onPublished(result.version, result.index_job);
-        if (selectedProduct) {
-          loadProductActiveSummary(selectedProduct.shop_id, selectedProduct.goods_id);
-        }
-      })
-      .catch((err: Error) => setError(err.message));
-  }
-
-  return (
-    <div className="knowledge-products-layout">
-      <section className="panel">
-        <div className="panel-header">
-          <div>
-            <h2>商品人工知识</h2>
-            <p className="muted">查看原始 product_knowledge，并编辑人工增强字段。原始采集字段保持只读，人工知识通过发布快照进入索引闭环。</p>
-          </div>
-        </div>
-        <div className="filters knowledge-filter-grid">
-          <select value={shopId} onChange={(event) => setShopId(event.target.value)}>
-            <option value="">全部店铺</option>
-            {shops.map((shop) => <option key={shop.shop_id} value={shop.shop_id}>{shop.shop_name || shop.shop_id}</option>)}
-          </select>
-          <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索 goods_id / goods_name / 标题" />
-        </div>
-        {state === "loading" ? <div className="state-card">正在加载商品...</div> : null}
-        {state === "error" ? <div className="state-card error-state">{error}</div> : null}
-        {products.length === 0 && state !== "loading" ? (
-          <div className="state-card">暂无商品。请先在店铺接入页完成商品同步。</div>
-        ) : (
-          <div className="product-knowledge-list">
-            {products.map((product) => (
-              <button
-                className={selectedProduct?.goods_id === product.goods_id && selectedProduct?.shop_id === product.shop_id ? "product-knowledge-row selected" : "product-knowledge-row"}
-                key={`${product.shop_id}:${product.goods_id}`}
-                onClick={() => selectProduct(product)}
-                type="button"
-              >
-                <div className="product-row-main">
-                  <div className="product-row-title-line">
-                    <strong>{product.product_title || product.goods_name || "未命名商品"}</strong>
-                    <StatusBadge tone={statusTone(product.knowledge_status)}>{product.knowledge_status || "unknown"}</StatusBadge>
-                  </div>
-                  <div className="product-row-meta">
-                    <span>goods_id: {product.goods_id}</span>
-                    <span>shop_id: {product.shop_id}</span>
-                    <span>商品名: {product.goods_name || "空"}</span>
-                  </div>
-                  <p className="product-row-note">
-                    原始商品字段由商品同步写入，只读；人工修改会保存为人工增强字段，发布并真实索引成功后才成为 AI 当前使用知识。
-                  </p>
-                </div>
-                <div className="product-row-side">
-                  <div className="product-row-facts">
-                    <span><b>价格</b>{product.price || "空"}</span>
-                    <span><b>同步状态</b>{product.knowledge_status || "unknown"}</span>
-                    <span><b>当前版本</b>{product.version || "未发布"}</span>
-                    <span><b>更新时间</b>{product.updated_at || "未知"}</span>
-                  </div>
-                </div>
-              </button>
-            ))}
-          </div>
-        )}
-      </section>
-
-      <section className="panel">
-        <h3>原始商品知识 + 人工增强</h3>
-        {detailState === "loading" ? <div className="state-card">正在加载商品知识...</div> : null}
-        {detailState === "error" ? <div className="state-card error-state">{error}</div> : null}
-        {message ? <div className="state-card">{message}</div> : null}
-        {detail ? (
-          <div className="detail-stack">
-            <strong>{detail.product_title || detail.goods_name}</strong>
-            <dl className="kv-grid">
-              <div><dt>goods_id</dt><dd>{detail.goods_id}</dd></div>
-              <div><dt>goods_name</dt><dd>{detail.goods_name}</dd></div>
-              <div><dt>价格 price</dt><dd>{detail.price || "空"}</dd></div>
-              <div><dt>规格 specs</dt><dd>{detail.specs.join(" / ") || "空"}</dd></div>
-              <div><dt>用法 usage</dt><dd>{detail.usage || "空"}</dd></div>
-              <div><dt>成分 ingredients</dt><dd>{detail.ingredients || "空"}</dd></div>
-              <div><dt>保质期 shelf_life</dt><dd>{detail.shelf_life || "空"}</dd></div>
-              <div><dt>注意事项 warnings</dt><dd>{detail.warnings || "空"}</dd></div>
-              <div><dt>人工备注 manual_notes</dt><dd>{detail.manual_notes || "空"}</dd></div>
-            </dl>
-            <details>
-              <summary>原始详情 Raw Detail JSON</summary>
-              <pre>{formatJson(detail.raw_detail_json)}</pre>
-            </details>
-          </div>
-        ) : <div className="state-card">请选择商品后编辑人工知识。</div>}
-
-        {override ? (
-          <div className="detail-stack override-editor">
-            <h4>人工增强字段</h4>
-            <label>goods_name<input value={override.goods_name ?? ""} onChange={(event) => setOverrideField("goods_name", event.target.value)} /></label>
-            {overrideFields.map((field) => (
-              <label key={field}>{field}
-                <textarea
-                  rows={3}
-                  value={String(override[field] ?? "")}
-                  onChange={(event) => setOverrideField(field, event.target.value)}
-                />
-              </label>
-            ))}
-            <span className="muted">content_hash: {override.content_hash || "新草稿"}</span>
-            <div className="button-row">
-              <button type="button" onClick={saveOverride}>保存人工知识</button>
-              <button type="button" onClick={publishSelectedProduct} disabled={selectedProduct?.knowledge_status === "archived" || effective?.knowledge_status === "archived"}>发布商品知识并真实索引</button>
-              <button type="button" onClick={runLastJob} disabled={!lastJob || !["pending", "retrying", "failed"].includes(lastJob.status)}>重新执行真实索引</button>
-              <button type="button" className="secondary-button" onClick={clearSelectedOverride}>清空人工增强</button>
-              {selectedProduct?.knowledge_status === "archived" || effective?.knowledge_status === "archived" ? (
-                <button type="button" onClick={restoreSelectedProduct}>恢复商品知识</button>
-              ) : (
-                <button type="button" className="danger-button" onClick={archiveSelectedProduct}>归档商品知识</button>
-              )}
-            </div>
-            <div className="warning-banner">当前生效版本才是 InternalEngine 会检索的知识。草稿修改不会立即生效，必须发布并索引成功。真实索引会调用 embedding 服务并写入 pgvector，但不会发送 PDD 消息。</div>
-            <ActiveVersionSummary
-              version={activeVersion}
-              job={activeJob}
-              chunks={activeChunks}
-              warning={activeChunkWarning}
-              title="当前生效商品版本"
-            />
-          </div>
-        ) : null}
-      </section>
-
-      <DrawerPanel title="生效预览 Effective View">
-        {effective ? (
-          <div className="detail-stack">
-            <strong>{effective.goods_name}</strong>
-            <span>shop_id: {effective.shop_id}</span>
-            <span>goods_id: {effective.goods_id}</span>
-            {Object.entries(effective.fields).map(([key, field]) => (
-              <article className="field-source-card" key={key}>
-                <div className="debug-card-header">
-                  <strong>{key}</strong>
-                  <StatusBadge tone={field.source === "manual_override" ? "info" : field.source === "missing" ? "warning" : "success"}>
-                    {field.source}
-                  </StatusBadge>
-                </div>
-                <FieldValue value={field.value} />
-              </article>
-            ))}
-          </div>
-        ) : <div className="state-card">选择商品后会加载合成后的生效预览。</div>}
-      </DrawerPanel>
-    </div>
-  );
-}
-
 function VersionsTab({
   onSelectVersion
 }: {
@@ -1082,7 +718,6 @@ export function KnowledgeCenter() {
 
   const tabs: Array<{ key: TabKey; label: string }> = useMemo(() => [
     { key: "sop", label: "SOP" },
-    { key: "products", label: "商品人工知识" },
     { key: "versions", label: "版本" },
     { key: "jobs", label: "索引任务" }
   ], []);
@@ -1097,8 +732,8 @@ export function KnowledgeCenter() {
       <section className="panel">
         <div className="panel-header">
           <div>
-            <h2>知识中心</h2>
-            <p className="muted">用于维护 SOP 和商品人工知识，通过“草稿、发布快照、索引任务、索引成功、当前生效”的闭环控制 AI 使用的知识版本。</p>
+            <h2>知识库管理</h2>
+            <p className="muted">用于维护 SOP 草稿、版本快照和索引任务，通过“草稿、发布、索引成功、当前生效”的闭环控制 AI 使用的知识版本。商品字段维护统一在“商品知识”页完成。</p>
           </div>
           <div className="header-badges">
             <StatusBadge tone="info">仅 InternalEngine</StatusBadge>
@@ -1124,7 +759,6 @@ export function KnowledgeCenter() {
       </section>
 
       {activeTab === "sop" ? <SopTab shops={shops} onPublished={setPublished} /> : null}
-      {activeTab === "products" ? <ProductsTab shops={shops} onPublished={setPublished} /> : null}
       {activeTab === "versions" ? <VersionsTab onSelectVersion={setSelectedVersion} /> : null}
       {activeTab === "jobs" ? <IndexJobsTab onSelectVersion={setSelectedVersion} onSelectJob={setSelectedJob} /> : null}
 
