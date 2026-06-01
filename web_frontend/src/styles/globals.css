@@ -2646,6 +2646,197 @@ pre {
   margin: 0;
 }
 
+.auth-checking {
+  display: grid;
+  min-height: 100vh;
+  place-items: center;
+  color: #475569;
+  font-size: 18px;
+}
+
+.header-logout {
+  min-height: 30px;
+  border-radius: 999px;
+  background: #334155;
+  padding: 4px 12px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.login-shell {
+  display: grid;
+  min-height: 100vh;
+  grid-template-columns: minmax(420px, 0.95fr) minmax(460px, 1.05fr);
+  background:
+    radial-gradient(circle at 8% 0%, rgba(31, 94, 255, 0.16), transparent 28%),
+    linear-gradient(135deg, #f7faff 0%, #edf3fb 48%, #f7f9fd 100%);
+}
+
+.login-brand-panel {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: 42px 54px;
+  background: linear-gradient(160deg, rgba(14, 26, 47, 0.98), rgba(19, 38, 74, 0.96));
+  color: #f7fbff;
+}
+
+.login-brand {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.login-brand-mark {
+  display: grid;
+  width: 52px;
+  height: 52px;
+  place-items: center;
+  border-radius: 14px;
+  background: #1f5eff;
+  color: #fff;
+  font-size: 22px;
+  font-weight: 800;
+}
+
+.login-brand h1,
+.login-brand p,
+.login-intro h2,
+.login-intro p {
+  margin: 0;
+}
+
+.login-brand p,
+.login-intro p,
+.login-signal-grid span {
+  color: #c8d7ef;
+}
+
+.login-intro {
+  max-width: 620px;
+}
+
+.login-intro h2 {
+  margin-bottom: 18px;
+  font-size: 44px;
+  line-height: 1.08;
+}
+
+.login-intro p {
+  font-size: 18px;
+  line-height: 1.75;
+}
+
+.login-signal-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  margin-top: 36px;
+}
+
+.login-signal-grid > div {
+  min-height: 110px;
+  border: 1px solid rgba(219, 228, 242, 0.16);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.06);
+  padding: 18px;
+}
+
+.login-signal-grid strong {
+  display: block;
+  margin-bottom: 8px;
+}
+
+.login-form-panel {
+  display: grid;
+  align-content: center;
+  padding: 42px;
+}
+
+.login-card {
+  display: grid;
+  width: min(100%, 620px);
+  gap: 16px;
+  margin: 0 auto;
+  border: 1px solid #dbe4f2;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.94);
+  box-shadow: 0 18px 60px rgba(16, 32, 68, 0.12);
+  padding: 34px;
+}
+
+.login-card header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+  margin-bottom: 8px;
+}
+
+.login-card h2 {
+  margin: 0;
+  font-size: 30px;
+}
+
+.login-card header p {
+  margin: 10px 0 0;
+  color: #557094;
+}
+
+.login-card label {
+  display: grid;
+  gap: 7px;
+}
+
+.login-card label span {
+  color: #31476a;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.login-card input {
+  min-height: 48px;
+}
+
+.login-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: #557094;
+  font-size: 14px;
+}
+
+.checkbox-label {
+  display: inline-flex !important;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  gap: 8px;
+}
+
+.checkbox-label input {
+  width: auto;
+  min-height: 0;
+}
+
+.login-help {
+  margin: 0;
+  font-size: 13px;
+}
+
+.alert-box {
+  border: 1px solid #fde68a;
+  border-radius: 8px;
+  background: #fffbeb;
+  color: #92400e;
+  padding: 11px 12px;
+}
+
+.alert-box.danger {
+  border-color: #fecaca;
+  background: #fef2f2;
+  color: #991b1b;
+}
+
 @media (max-width: 1280px) {
   .onboarding-gate {
     grid-template-columns: 1fr;
@@ -2666,6 +2857,23 @@ pre {
 }
 
 @media (max-width: 980px) {
+  .login-shell {
+    grid-template-columns: 1fr;
+  }
+
+  .login-brand-panel {
+    min-height: 390px;
+    padding: 30px;
+  }
+
+  .login-form-panel {
+    padding: 24px;
+  }
+
+  .login-intro h2 {
+    font-size: 34px;
+  }
+
   .onboarding-hero,
   .onboarding-hero-actions {
     align-items: flex-start;
@@ -2688,6 +2896,18 @@ pre {
 }
 
 @media (max-width: 720px) {
+  .login-signal-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .login-card {
+    padding: 24px;
+  }
+
+  .login-card header {
+    display: block;
+  }
+
   .onboarding-gate-checks,
   .onboarding-stepper {
     grid-template-columns: 1fr;

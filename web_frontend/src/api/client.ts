@@ -36,8 +36,11 @@ async function buildApiError(method: string, path: string, response: Response) {
 }
 
 export async function apiGet<T>(path: string): Promise<T> {
-  const response = await fetch(`${API_BASE_URL}${path}`);
+  const response = await fetch(`${API_BASE_URL}${path}`, {
+    credentials: "include"
+  });
   if (!response.ok) {
+    handleUnauthorized(path, response.status);
     throw await buildApiError("GET", path, response);
   }
   return response.json() as Promise<T>;
@@ -46,10 +49,12 @@ export async function apiGet<T>(path: string): Promise<T> {
 export async function apiPost<T>(path: string, body: unknown): Promise<T> {
   const response = await fetch(`${API_BASE_URL}${path}`, {
     method: "POST",
+    credentials: "include",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body)
   });
   if (!response.ok) {
+    handleUnauthorized(path, response.status);
     throw await buildApiError("POST", path, response);
   }
   return response.json() as Promise<T>;
@@ -58,10 +63,12 @@ export async function apiPost<T>(path: string, body: unknown): Promise<T> {
 export async function apiPut<T>(path: string, body: unknown): Promise<T> {
   const response = await fetch(`${API_BASE_URL}${path}`, {
     method: "PUT",
+    credentials: "include",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body)
   });
   if (!response.ok) {
+    handleUnauthorized(path, response.status);
     throw await buildApiError("PUT", path, response);
   }
   return response.json() as Promise<T>;
@@ -69,10 +76,20 @@ export async function apiPut<T>(path: string, body: unknown): Promise<T> {
 
 export async function apiDelete<T>(path: string): Promise<T> {
   const response = await fetch(`${API_BASE_URL}${path}`, {
-    method: "DELETE"
+    method: "DELETE",
+    credentials: "include"
   });
   if (!response.ok) {
+    handleUnauthorized(path, response.status);
     throw await buildApiError("DELETE", path, response);
   }
   return response.json() as Promise<T>;
+}
+
+function handleUnauthorized(path: string, status: number) {
+  if (status !== 401 || path.startsWith("/api/auth/") || typeof window === "undefined") {
+    return;
+  }
+  const current = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+  window.location.assign(`/login?next=${encodeURIComponent(current)}`);
 }

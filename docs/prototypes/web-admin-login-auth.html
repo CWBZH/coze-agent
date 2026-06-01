@@ -1,0 +1,475 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>InternalEngine 登录鉴权示例</title>
+    <style>
+      :root {
+        --bg: #f3f6fb;
+        --panel: #ffffff;
+        --panel-soft: #f8fbff;
+        --ink: #07142f;
+        --muted: #557094;
+        --line: #dbe4f2;
+        --primary: #1f5eff;
+        --primary-dark: #1647c7;
+        --navy: #0e1a2f;
+        --green: #d9fbe7;
+        --green-ink: #09643a;
+        --yellow: #fff2c9;
+        --yellow-ink: #8a4c00;
+        --red: #ffe2e2;
+        --red-ink: #a71616;
+        --shadow: 0 18px 60px rgba(16, 32, 68, 0.12);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        font-family:
+          Inter, "PingFang SC", "Microsoft YaHei", system-ui, -apple-system,
+          BlinkMacSystemFont, "Segoe UI", sans-serif;
+        color: var(--ink);
+        background:
+          radial-gradient(circle at 8% 0%, rgba(31, 94, 255, 0.16), transparent 28%),
+          linear-gradient(135deg, #f7faff 0%, #edf3fb 48%, #f7f9fd 100%);
+      }
+
+      .shell {
+        min-height: 100vh;
+        display: grid;
+        grid-template-columns: minmax(420px, 0.95fr) minmax(460px, 1.05fr);
+      }
+
+      .brand-side {
+        padding: 42px 54px;
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+        background:
+          linear-gradient(160deg, rgba(14, 26, 47, 0.98), rgba(19, 38, 74, 0.96)),
+          var(--navy);
+        color: #f7fbff;
+      }
+
+      .brand {
+        display: flex;
+        align-items: center;
+        gap: 14px;
+      }
+
+      .brand-mark {
+        width: 52px;
+        height: 52px;
+        display: grid;
+        place-items: center;
+        border-radius: 14px;
+        background: var(--primary);
+        font-size: 22px;
+        font-weight: 800;
+        letter-spacing: 0;
+      }
+
+      .brand h1 {
+        margin: 0;
+        font-size: 26px;
+        line-height: 1.1;
+      }
+
+      .brand p {
+        margin: 4px 0 0;
+        color: #bdd0ee;
+        font-size: 15px;
+      }
+
+      .intro {
+        max-width: 620px;
+      }
+
+      .intro h2 {
+        margin: 0 0 18px;
+        font-size: 44px;
+        line-height: 1.08;
+        letter-spacing: 0;
+      }
+
+      .intro p {
+        margin: 0;
+        color: #c8d7ef;
+        font-size: 18px;
+        line-height: 1.75;
+      }
+
+      .signal-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 14px;
+        margin-top: 36px;
+      }
+
+      .signal {
+        border: 1px solid rgba(219, 228, 242, 0.16);
+        border-radius: 8px;
+        padding: 18px;
+        background: rgba(255, 255, 255, 0.06);
+      }
+
+      .signal strong {
+        display: block;
+        margin-bottom: 8px;
+        font-size: 16px;
+      }
+
+      .signal span {
+        color: #c8d7ef;
+        font-size: 14px;
+        line-height: 1.5;
+      }
+
+      .footer-note {
+        color: #9eb5d8;
+        font-size: 13px;
+      }
+
+      .auth-side {
+        padding: 42px;
+        display: grid;
+        align-content: center;
+      }
+
+      .auth-card {
+        width: min(100%, 620px);
+        margin: 0 auto;
+        padding: 34px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: rgba(255, 255, 255, 0.94);
+        box-shadow: var(--shadow);
+      }
+
+      .auth-card header {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 18px;
+        margin-bottom: 26px;
+      }
+
+      .auth-card h2 {
+        margin: 0;
+        font-size: 30px;
+        letter-spacing: 0;
+      }
+
+      .auth-card header p {
+        margin: 10px 0 0;
+        color: var(--muted);
+        line-height: 1.55;
+      }
+
+      .badge {
+        display: inline-flex;
+        align-items: center;
+        min-height: 30px;
+        padding: 5px 12px;
+        border-radius: 999px;
+        font-weight: 700;
+        font-size: 13px;
+        white-space: nowrap;
+      }
+
+      .badge.green {
+        color: var(--green-ink);
+        background: var(--green);
+      }
+
+      .badge.yellow {
+        color: var(--yellow-ink);
+        background: var(--yellow);
+      }
+
+      .mode-tabs {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 10px;
+        margin-bottom: 22px;
+      }
+
+      .mode-tabs button {
+        min-height: 46px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: var(--panel-soft);
+        color: var(--ink);
+        font: inherit;
+        font-weight: 700;
+        cursor: pointer;
+      }
+
+      .mode-tabs button.active {
+        border-color: var(--primary);
+        background: #eaf1ff;
+        color: var(--primary-dark);
+      }
+
+      .form-grid {
+        display: grid;
+        gap: 16px;
+      }
+
+      .field {
+        display: grid;
+        gap: 7px;
+      }
+
+      .field label {
+        font-size: 14px;
+        font-weight: 700;
+        color: #31476a;
+      }
+
+      .field input {
+        width: 100%;
+        min-height: 48px;
+        border: 1px solid #cdd9ea;
+        border-radius: 8px;
+        padding: 0 14px;
+        color: var(--ink);
+        background: #fff;
+        font: inherit;
+      }
+
+      .field input:focus {
+        outline: 3px solid rgba(31, 94, 255, 0.16);
+        border-color: var(--primary);
+      }
+
+      .row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+        margin: 2px 0 8px;
+        color: var(--muted);
+        font-size: 14px;
+      }
+
+      .row label {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        cursor: pointer;
+      }
+
+      .link {
+        color: var(--primary-dark);
+        text-decoration: none;
+        font-weight: 700;
+      }
+
+      .primary-action {
+        width: 100%;
+        min-height: 50px;
+        border: 0;
+        border-radius: 8px;
+        background: var(--primary);
+        color: #fff;
+        font: inherit;
+        font-weight: 800;
+        cursor: pointer;
+      }
+
+      .primary-action:hover {
+        background: var(--primary-dark);
+      }
+
+      .security-strip {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 10px;
+        margin-top: 24px;
+      }
+
+      .security-item {
+        min-height: 84px;
+        padding: 12px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: var(--panel-soft);
+      }
+
+      .security-item strong {
+        display: block;
+        margin-bottom: 8px;
+        font-size: 13px;
+      }
+
+      .security-item span {
+        color: var(--muted);
+        font-size: 12px;
+        line-height: 1.45;
+      }
+
+      .flow-card {
+        width: min(100%, 620px);
+        margin: 18px auto 0;
+        padding: 18px;
+        border: 1px solid #f0d58b;
+        border-radius: 8px;
+        background: #fff9e8;
+        color: var(--yellow-ink);
+      }
+
+      .flow-card strong {
+        display: block;
+        margin-bottom: 8px;
+      }
+
+      .flow-card ol {
+        margin: 0;
+        padding-left: 20px;
+        line-height: 1.65;
+      }
+
+      @media (max-width: 980px) {
+        .shell {
+          grid-template-columns: 1fr;
+        }
+
+        .brand-side {
+          padding: 30px;
+          min-height: 390px;
+        }
+
+        .auth-side {
+          padding: 24px;
+        }
+
+        .intro h2 {
+          font-size: 34px;
+        }
+      }
+
+      @media (max-width: 620px) {
+        .signal-grid,
+        .security-strip,
+        .mode-tabs {
+          grid-template-columns: 1fr;
+        }
+
+        .auth-card header {
+          display: block;
+        }
+
+        .auth-card {
+          padding: 24px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="shell">
+      <section class="brand-side">
+        <div class="brand">
+          <div class="brand-mark">IE</div>
+          <div>
+            <h1>InternalEngine</h1>
+            <p>AI 客服运营后台</p>
+          </div>
+        </div>
+
+        <div class="intro">
+          <h2>登录后进入真实运营工作台</h2>
+          <p>
+            用一个清晰的鉴权入口保护店铺接入、知识库、链路观测和 Worker 控制。
+            后台默认不发送真实 PDD 消息，生产发送由环境开关和店铺状态共同控制。
+          </p>
+
+          <div class="signal-grid">
+            <div class="signal">
+              <strong>会话鉴权</strong>
+              <span>登录成功后写入 HttpOnly 会话 Cookie，刷新页面仍保持登录。</span>
+            </div>
+            <div class="signal">
+              <strong>运营身份</strong>
+              <span>第一期只区分后台管理员，不做复杂多用户权限。</span>
+            </div>
+            <div class="signal">
+              <strong>安全边界</strong>
+              <span>密码和 token 不回显，接口统一返回中文错误和 trace_id。</span>
+            </div>
+            <div class="signal">
+              <strong>退出闭环</strong>
+              <span>右上角退出后清除会话并回到登录页。</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="footer-note">示例页仅用于确认视觉和流程，不会写入真实项目鉴权逻辑。</div>
+      </section>
+
+      <section class="auth-side">
+        <div class="auth-card">
+          <header>
+            <div>
+              <h2>后台登录</h2>
+              <p>请输入运营后台账号。生产环境建议只允许内网或固定 IP 访问。</p>
+            </div>
+            <span class="badge green">会话保护</span>
+          </header>
+
+          <div class="mode-tabs" aria-label="登录方式">
+            <button class="active" type="button">账号密码</button>
+            <button type="button">一次性口令</button>
+          </div>
+
+          <form class="form-grid">
+            <div class="field">
+              <label for="account">管理员账号</label>
+              <input id="account" autocomplete="username" placeholder="admin@example.com" />
+            </div>
+            <div class="field">
+              <label for="password">登录密码</label>
+              <input id="password" type="password" autocomplete="current-password" placeholder="输入后台登录密码" />
+            </div>
+            <div class="row">
+              <label><input type="checkbox" checked /> 保持本机登录 7 天</label>
+              <a class="link" href="#">忘记密码</a>
+            </div>
+            <button class="primary-action" type="button">登录运营后台</button>
+          </form>
+
+          <div class="security-strip">
+            <div class="security-item">
+              <strong>失败限制</strong>
+              <span>连续失败 5 次后临时锁定，防止撞库。</span>
+            </div>
+            <div class="security-item">
+              <strong>接口保护</strong>
+              <span>所有 `/api/*` 接口统一校验会话。</span>
+            </div>
+            <div class="security-item">
+              <strong>审计记录</strong>
+              <span>记录登录成功、失败、退出和过期事件。</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="flow-card">
+          <strong>建议落地流程</strong>
+          <ol>
+            <li>访问后台任意页面，未登录时自动跳转到 `/login`。</li>
+            <li>登录成功后后端签发 HttpOnly Cookie，前端跳回原访问页面。</li>
+            <li>页面右上角显示当前管理员和退出按钮。</li>
+            <li>会话过期时接口返回 401，前端保留当前 URL 并跳回登录页。</li>
+          </ol>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>

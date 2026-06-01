@@ -1,14 +1,22 @@
 import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
+
+import { getAdminSession, logoutAdmin } from "../api/auth";
 import { getProviderStatus, ProviderStatus } from "../api/providerStatus";
 import { StatusBadge } from "./StatusBadge";
 
 export function Header() {
+  const navigate = useNavigate();
   const [providerStatus, setProviderStatus] = useState<ProviderStatus | null>(null);
+  const [username, setUsername] = useState("");
 
   useEffect(() => {
     getProviderStatus()
       .then(setProviderStatus)
       .catch(() => setProviderStatus(null));
+    getAdminSession()
+      .then((session) => setUsername(session.username || "admin"))
+      .catch(() => setUsername(""));
   }, []);
 
   const pddStatus = providerStatus?.providers?.pdd_sending?.status;
@@ -17,6 +25,11 @@ export function Header() {
   const ragEnabled =
     providerStatus?.providers?.pgvector?.status === "configured" &&
     providerStatus?.providers?.embedding?.status === "configured";
+
+  async function handleLogout() {
+    await logoutAdmin().catch(() => null);
+    navigate("/login", { replace: true });
+  }
 
   return (
     <header className="top-header">
@@ -31,6 +44,10 @@ export function Header() {
         <StatusBadge tone={ragEnabled ? "success" : "warning"}>{`RAG ${ragEnabled ? "可用" : "未配置"}`}</StatusBadge>
         <StatusBadge tone={llmEnabled ? "success" : "warning"}>{`LLM ${llmEnabled ? "可用" : "未配置"}`}</StatusBadge>
         <StatusBadge tone="success">密钥不回显</StatusBadge>
+        {username ? <StatusBadge tone="info">{`管理员 ${username}`}</StatusBadge> : null}
+        <button className="header-logout" type="button" onClick={handleLogout}>
+          退出
+        </button>
       </div>
     </header>
   );
