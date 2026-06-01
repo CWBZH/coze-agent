@@ -184,3 +184,104 @@ def test_trace_nodes_use_final_result_intent_when_trace_payload_omits_classifier
     assert nodes["llm"]["status"] == "passed"
     assert nodes["guardrail"]["status"] == "passed"
     assert nodes["pdd_send"]["status"] == "passed"
+
+
+def test_conversations_group_by_buyer_not_seller_user_id(tmp_path):
+    db_path = tmp_path / "channel_shop.db"
+    _create_observability_db(db_path)
+
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            """
+            INSERT INTO pdd_inbound_message_queue
+            (id, trace_id, shop_id, user_id, buyer_id, session_id, message_type, payload_json, status, retry_count, error_type, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "inbound-buyer-a",
+                "pdd:565617:buyer-a",
+                "565617",
+                "713439",
+                "",
+                "565617_6554248824766",
+                "text",
+                json.dumps({"content": "什么时候发货", "customer_uid": "6554248824766"}, ensure_ascii=False),
+                "done",
+                0,
+                "",
+                100.0,
+                101.0,
+            ),
+        )
+        conn.execute(
+            """
+            INSERT INTO pdd_inbound_message_queue
+            (id, trace_id, shop_id, user_id, buyer_id, session_id, message_type, payload_json, status, retry_count, error_type, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "inbound-buyer-b",
+                "pdd:565617:buyer-b",
+                "565617",
+                "713439",
+                "",
+                "565617_8985001916165",
+                "text",
+                json.dumps({"content": "在吗", "metadata": {"from_uid": "8985001916165"}}, ensure_ascii=False),
+                "done",
+                0,
+                "",
+                200.0,
+                201.0,
+            ),
+        )
+
+    result = ObservabilityService(ReadOnlySqlite(db_path)).list_conversations(shop_id="565617")
+
+    assert result["total"] == 2
+    assert {item["buyer_id"] for item in result["items"]} == {"6554248824766", "8985001916165"}
+    assert {item["seller_user_id"] for item in result["items"]} == {"713439"}
+
+
+def test_outbox_only_conversation_uses_session_id_for_buyer(tmp_path):
+    db_path = tmp_path / "channel_shop.db"
+    _create_observability_db(db_path)
+
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            """
+            INSERT INTO pdd_reply_outbox
+            (id, inbound_record_id, trace_id, shop_id, user_id, buyer_id, session_id, reply_action, reply_text, reply_source, status, retry_count, max_retries, next_retry_at, last_attempt_at, pdd_error_code, reply_hash, reply_length, error_summary_hash, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "outbox-only",
+                "missing-inbound",
+                "pdd:565617:outbox-only",
+                "565617",
+                "713439",
+                "",
+                "565617_6554248824766",
+                "reply",
+                "亲亲，默认48小时内发货",
+                "reply",
+                "sent",
+                0,
+                3,
+                0,
+                300.0,
+                "",
+                "hash",
+                12,
+                "",
+                299.0,
+                300.0,
+            ),
+        )
+
+    messages = ObservabilityService(ReadOnlySqlite(db_path)).list_messages("6554248824766", shop_id="565617")
+
+    assert messages["total"] == 1
+    assert messages["items"][0]["buyer_id"] == "6554248824766"
+    assert messages["items"][0]["seller_user_id"] == "713439"
+    assert messages["items"][0]["send_text"] == "亲亲，默认48小时内发货"

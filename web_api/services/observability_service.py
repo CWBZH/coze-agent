@@ -44,6 +44,7 @@ class ObservabilityService:
                 {
                     "shop_id": selected_shop_id,
                     "buyer_id": buyer_id,
+                    "seller_user_id": str(row.get("seller_user_id") or row.get("user_id") or ""),
                     "session_id": str(row.get("session_id") or ""),
                     "last_message": "",
                     "last_send_text": "",
@@ -65,6 +66,7 @@ class ObservabilityService:
                 item.update(
                     {
                         "session_id": str(row.get("session_id") or item.get("session_id") or ""),
+                        "seller_user_id": str(row.get("seller_user_id") or row.get("user_id") or item.get("seller_user_id") or ""),
                         "last_message": str(row.get("buyer_message") or ""),
                         "last_send_text": str(row.get("send_text") or row.get("generated_reply") or ""),
                         "last_status": status,
@@ -155,14 +157,19 @@ class ObservabilityService:
         send_text = generated_reply if self._was_send_attempted(status) else ""
         created_at = float(inbound.get("created_at") or outbox.get("created_at") or 0)
         updated_at = float(outbox.get("updated_at") or inbound.get("updated_at") or created_at)
+        shop_id = str(inbound.get("shop_id") or outbox.get("shop_id") or payload.get("shop_id") or "")
+        seller_user_id = str(inbound.get("user_id") or outbox.get("user_id") or payload.get("user_id") or "")
+        session_id = str(inbound.get("session_id") or outbox.get("session_id") or payload.get("session_id") or "")
+        buyer_id = self._extract_buyer_id(inbound, payload, outbox, shop_id=shop_id, seller_user_id=seller_user_id, session_id=session_id)
         return {
             "trace_id": trace_id,
             "inbound_id": str(inbound.get("id") or outbox.get("inbound_record_id") or ""),
             "outbox_id": str(outbox.get("id") or ""),
-            "shop_id": str(inbound.get("shop_id") or outbox.get("shop_id") or payload.get("shop_id") or ""),
-            "user_id": str(inbound.get("user_id") or outbox.get("user_id") or payload.get("user_id") or ""),
-            "buyer_id": str(inbound.get("buyer_id") or outbox.get("buyer_id") or payload.get("from_uid") or ""),
-            "session_id": str(inbound.get("session_id") or outbox.get("session_id") or payload.get("session_id") or ""),
+            "shop_id": shop_id,
+            "user_id": seller_user_id,
+            "seller_user_id": seller_user_id,
+            "buyer_id": buyer_id,
+            "session_id": session_id,
             "message_type": str(inbound.get("message_type") or payload.get("message_type") or ""),
             "buyer_message": buyer_message,
             "generated_reply": generated_reply,
@@ -186,6 +193,84 @@ class ObservabilityService:
             "updated_at_iso": self._iso(updated_at),
             "payload": payload,
         }
+
+    @classmethod
+    def _extract_buyer_id(
+        cls,
+        inbound: dict[str, Any],
+        payload: dict[str, Any],
+        outbox: dict[str, Any],
+        *,
+        shop_id: str,
+        seller_user_id: str,
+        session_id: str,
+    ) -> str:
+        """Return the buyer/customer id, never the seller account id when avoidable."""
+
+        direct_sources: list[Any] = [
+            inbound.get("buyer_id"),
+            outbox.get("buyer_id"),
+            payload.get("buyer_id"),
+            payload.get("customer_uid"),
+            payload.get("from_uid"),
+            payload.get("fromUserId"),
+            payload.get("from_user_id"),
+            payload.get("sender_uid"),
+            payload.get("senderUid"),
+        ]
+        for nested_key in ("metadata", "raw_data", "raw", "message", "msg", "data"):
+            nested = payload.get(nested_key)
+            if isinstance(nested, dict):
+                direct_sources.extend(
+                    [
+                        nested.get("buyer_id"),
+                        nested.get("customer_uid"),
+                        nested.get("from_uid"),
+                        nested.get("fromUserId"),
+                        nested.get("from_user_id"),
+                        nested.get("sender_uid"),
+                        nested.get("senderUid"),
+                    ]
+                )
+
+        for value in direct_sources:
+            text = cls._clean_identifier(value)
+            if cls._is_buyer_identifier(text, shop_id=shop_id, seller_user_id=seller_user_id):
+                return text
+
+        from_session = cls._buyer_id_from_session(session_id, shop_id=shop_id, seller_user_id=seller_user_id)
+        if from_session:
+            return from_session
+
+        return ""
+
+    @staticmethod
+    def _clean_identifier(value: Any) -> str:
+        text = str(value or "").strip()
+        if not text or text.lower() in {"none", "null", "unknown", "undefined"}:
+            return ""
+        return text
+
+    @classmethod
+    def _is_buyer_identifier(cls, value: str, *, shop_id: str, seller_user_id: str) -> bool:
+        text = cls._clean_identifier(value)
+        if not text:
+            return False
+        return text not in {str(shop_id or ""), str(seller_user_id or "")}
+
+    @classmethod
+    def _buyer_id_from_session(cls, session_id: str, *, shop_id: str, seller_user_id: str) -> str:
+        text = cls._clean_identifier(session_id)
+        if not text:
+            return ""
+        for separator in ("_", ":", "|"):
+            if separator in text:
+                parts = [part for part in text.split(separator) if part]
+                for part in reversed(parts):
+                    candidate = cls._clean_identifier(part)
+                    if cls._is_buyer_identifier(candidate, shop_id=shop_id, seller_user_id=seller_user_id):
+                        return candidate
+        return ""
 
     def _hydrate_message(self, row: dict[str, Any]) -> dict[str, Any]:
         trace = self._read_private_trace(str(row.get("trace_id") or ""))
