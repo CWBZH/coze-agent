@@ -826,6 +826,16 @@ class ShopOnboardingService:
         payload["worker_status"] = computed_status
         return payload
 
+    def _format_worker_timestamp(self, value: Any) -> str | None:
+        if value is None or value == "":
+            return None
+        if isinstance(value, str):
+            return value
+        try:
+            return datetime.fromtimestamp(float(value), tz=timezone.utc).isoformat()
+        except (TypeError, ValueError, OSError, OverflowError):
+            return str(value)
+
     def _check_auth_valid(self, shop_id: str) -> dict[str, Any]:
         try:
             auth = self.get_auth_status(shop_id)
@@ -1129,7 +1139,7 @@ class ShopOnboardingService:
             "shop_id": shop_id,
             "status": shop_status,
             "process_id": pid,
-            "last_seen_at": updated_at,
+            "last_seen_at": self._format_worker_timestamp(updated_at),
             "websocket_status": websocket_status,
             "summary": summary,
             "ai_enabled": ai_enabled,

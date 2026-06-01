@@ -39,6 +39,20 @@ const DOMAINS = [
   "redline_escalation"
 ];
 
+const DOMAIN_LABELS: Record<string, string> = {
+  product_catalog: "商品目录",
+  logistics_policy: "物流发货",
+  after_sales_evidence: "售后凭证",
+  promotion_policy: "优惠活动",
+  sensitive_user_safety: "敏感人群安全",
+  redline_escalation: "红线转人工"
+};
+
+function domainLabel(domain: string | null | undefined) {
+  if (!domain) return "未选择领域";
+  return DOMAIN_LABELS[domain] ?? domain;
+}
+
 const emptySopForm: SopCreatePayload & { id?: number; expected_content_hash?: string } = {
   shop_id: "",
   domain: "logistics_policy",
@@ -114,7 +128,7 @@ function ChunkPreview({ chunks, warning }: { chunks: VersionChunk[]; warning?: s
           <dl className="kv-grid">
             <div><dt>version_id</dt><dd>{chunk.version_id ?? "unknown"}</dd></div>
             <div><dt>source_id</dt><dd>{chunk.source_id}</dd></div>
-            <div><dt>domain</dt><dd>{chunk.domain}</dd></div>
+            <div><dt>领域</dt><dd>{domainLabel(chunk.domain)}</dd></div>
             <div><dt>index_run_id</dt><dd>{chunk.index_run_id || "无"}</dd></div>
             <div><dt>chunk_hash</dt><dd>{chunk.chunk_hash || chunk.content_hash}</dd></div>
           </dl>
@@ -185,7 +199,7 @@ function ValidationPanel({ version, job }: { version: KnowledgeVersion | null; j
         <dl className="kv-grid">
           <div><dt>shop_id</dt><dd>{version.shop_id}</dd></div>
           <div><dt>来源</dt><dd>{version.source_type}:{version.source_id}</dd></div>
-          <div><dt>domain</dt><dd>{version.domain}</dd></div>
+          <div><dt>领域</dt><dd>{domainLabel(version.domain)}</dd></div>
           <div><dt>version_id</dt><dd>{version.id}</dd></div>
           <div><dt>version</dt><dd>{version.version}</dd></div>
           <div><dt>状态</dt><dd><StatusBadge tone={statusTone(version.status)}>{version.status}</StatusBadge></dd></div>
@@ -389,7 +403,7 @@ function SopTab({
           </select>
           <select value={filters.domain} onChange={(event) => setFilters({ ...filters, domain: event.target.value })}>
             <option value="">全部领域</option>
-            {DOMAINS.map((domain) => <option key={domain} value={domain}>{domain}</option>)}
+            {DOMAINS.map((domain) => <option key={domain} value={domain}>{domainLabel(domain)}</option>)}
           </select>
           <select value={filters.status} onChange={(event) => setFilters({ ...filters, status: event.target.value })}>
             <option value="">全部状态</option>
@@ -406,7 +420,7 @@ function SopTab({
           columns={[
             { key: "id", label: "id" },
             { key: "shop_id", label: "shop_id" },
-            { key: "domain", label: "domain" },
+            { key: "domain", label: "领域", render: (row) => domainLabel(row.domain) },
             { key: "title", label: "标题" },
             { key: "status", label: "状态", render: (row) => <StatusBadge tone={statusTone(row.status)}>{row.status}</StatusBadge> },
             { key: "content_hash", label: "content_hash" },
@@ -423,8 +437,8 @@ function SopTab({
             <option value="">选择店铺</option>
             {shops.map((shop) => <option key={shop.shop_id} value={shop.shop_id}>{shop.shop_name || shop.shop_id}</option>)}
           </select></label>
-          <label>domain<select value={form.domain} onChange={(event) => setForm({ ...form, domain: event.target.value })}>
-            {DOMAINS.map((domain) => <option key={domain} value={domain}>{domain}</option>)}
+          <label>领域<select value={form.domain} onChange={(event) => setForm({ ...form, domain: event.target.value })}>
+            {DOMAINS.map((domain) => <option key={domain} value={domain}>{domainLabel(domain)}</option>)}
           </select></label>
           <label>标题<input value={form.title} onChange={(event) => setForm({ ...form, title: event.target.value })} /></label>
           <label>内容<textarea rows={14} value={form.content} onChange={(event) => setForm({ ...form, content: event.target.value })} /></label>
@@ -512,7 +526,7 @@ function VersionsTab({
           <input placeholder="source_id" value={filters.source_id ?? ""} onChange={(event) => setFilters({ ...filters, source_id: event.target.value })} />
           <select value={filters.domain ?? ""} onChange={(event) => setFilters({ ...filters, domain: event.target.value })}>
             <option value="">全部领域</option>
-            {DOMAINS.map((domain) => <option key={domain} value={domain}>{domain}</option>)}
+            {DOMAINS.map((domain) => <option key={domain} value={domain}>{domainLabel(domain)}</option>)}
           </select>
           <select value={filters.status ?? ""} onChange={(event) => setFilters({ ...filters, status: event.target.value })}>
             <option value="">全部状态</option>
@@ -539,7 +553,7 @@ function VersionsTab({
             { key: "shop_id", label: "shop_id" },
             { key: "source_type", label: "source_type" },
             { key: "source_id", label: "source_id" },
-            { key: "domain", label: "domain" },
+            { key: "domain", label: "领域", render: (row) => domainLabel(row.domain) },
             { key: "version", label: "version" },
             { key: "content_hash", label: "content_hash" },
             { key: "status", label: "状态", render: (row) => <StatusBadge tone={statusTone(row.status)}>{row.status}</StatusBadge> },
@@ -666,7 +680,7 @@ function IndexJobsTab({
             { key: "version_id", label: "version_id" },
             { key: "source_type", label: "source_type" },
             { key: "source_id", label: "source_id" },
-            { key: "domain", label: "domain" },
+            { key: "domain", label: "领域", render: (row) => domainLabel(row.domain) },
             { key: "status", label: "状态", render: (row) => <StatusBadge tone={statusTone(row.status)}>{row.status}</StatusBadge> },
             { key: "chunk_count", label: "片段数" },
             { key: "embedded_count", label: "向量数" },
