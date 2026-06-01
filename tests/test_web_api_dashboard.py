@@ -1,5 +1,7 @@
 import sqlite3
 from pathlib import Path
+import os
+from datetime import datetime, timezone
 
 from fastapi.testclient import TestClient
 
@@ -11,10 +13,11 @@ from web_api.services.sqlite_readonly import ReadOnlySqlite
 
 
 def _create_dashboard_db(path: Path) -> None:
+    now_iso = datetime.now(timezone.utc).isoformat()
     conn = sqlite3.connect(path)
     try:
         conn.executescript(
-            """
+            f"""
             CREATE TABLE channels (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 channel_name TEXT NOT NULL UNIQUE,
@@ -98,7 +101,7 @@ def _create_dashboard_db(path: Path) -> None:
             INSERT INTO shop_auth (shop_id, platform, auth_status, safe_display, updated_at)
                 VALUES ('565617', 'pdd', 'valid', '135***888', '2026-05-29T00:00:00+00:00');
             INSERT INTO accounts (shop_id, status, password, cookies) VALUES (1, 1, 'DO_NOT_RETURN_PASSWORD', 'DO_NOT_RETURN_COOKIE');
-            INSERT INTO conversations (shop_id, session_id, buyer_id, updated_at) VALUES (1, 's1', 'b1', '2026-05-29T08:00:00+00:00');
+            INSERT INTO conversations (shop_id, session_id, buyer_id, updated_at) VALUES (1, 's1', 'b1', '{now_iso}');
             INSERT INTO product_knowledge (shop_id, goods_id, goods_name) VALUES ('565617', '931798442189', '真实商品');
             INSERT INTO shop_ai_settings (shop_id, ai_enabled) VALUES ('565617', 1);
             INSERT INTO knowledge_index_jobs
@@ -116,9 +119,16 @@ def _create_dashboard_db(path: Path) -> None:
 
 
 def _client_for_dashboard(db_path: Path) -> TestClient:
+    os.environ.setdefault("WEB_ADMIN_PASSWORD", "test-admin-password")
     app.dependency_overrides[get_shop_service] = lambda: ShopService(ReadOnlySqlite(db_path))
     app.dependency_overrides[get_dashboard_service] = lambda: DashboardService(ReadOnlySqlite(db_path), db_path=db_path)
-    return TestClient(app)
+    client = TestClient(app)
+    response = client.post(
+        "/api/auth/login",
+        json={"username": "admin", "password": os.environ["WEB_ADMIN_PASSWORD"]},
+    )
+    assert response.status_code == 200
+    return client
 
 
 def test_dashboard_summary_uses_real_runtime_tables_and_excludes_secrets(tmp_path):
