@@ -160,6 +160,47 @@ class InternalWorkflowEngine(AIWorkflowEngine):
         "怎么选",
         "区别",
     )
+    _AFTER_SALES_PRIORITY_KEYWORDS = (
+        "破损",
+        "破了",
+        "破碎",
+        "碎了",
+        "坏了",
+        "漏了",
+        "漏液",
+        "少发",
+        "缺件",
+        "发错",
+        "错发",
+        "包装破",
+        "包装损坏",
+        "质量问题",
+        "不能用",
+        "退款",
+        "退货",
+        "退换货",
+        "换货",
+        "补发",
+        "赔偿",
+        "赔付",
+        "给我退",
+        "赶紧退",
+        "怎么处理",
+        "怎么办",
+    )
+    _AFTER_SALES_FOLLOWUP_TEXTS = (
+        "?",
+        "？",
+        "啊",
+        "呢",
+        "哦",
+        "嗯",
+        "然后呢",
+        "那怎么办",
+        "怎么处理",
+        "给我处理",
+        "赶紧处理",
+    )
 
     _EVIDENCE_REPLY = "亲，已收到您的反馈。请提供问题照片、外包装照片和具体情况说明，客服会为您核实处理。"
     _LOGISTICS_REPLY = "亲，具体物流状态请以订单物流页为准。若需要核实当前订单，我可以为您转人工处理。"
@@ -295,10 +336,7 @@ class InternalWorkflowEngine(AIWorkflowEngine):
         trace["message_has_product_card"] = self._message_has_product_card(context)
         trace["message_type"] = str(context.message_type or "")
 
-        if self._is_product_card_without_question(context, content):
-            return self._finalize(self._product_card_ack_result(trace), context)
-
-        if self._matches(content, self._EVIDENCE_KEYWORDS):
+        if self._looks_like_after_sales_issue(context, content):
             self._set_stage_timing_value(trace, "keyword_classify_ms", self._elapsed_ms(keyword_started_at))
             return self._finalize(
                 self._domain_policy_or_default(
@@ -318,6 +356,9 @@ class InternalWorkflowEngine(AIWorkflowEngine):
                 ),
                 context,
             )
+
+        if self._is_product_card_without_question(context, content):
+            return self._finalize(self._product_card_ack_result(trace), context)
 
         if self._matches(content, self._LOGISTICS_KEYWORDS):
             self._set_stage_timing_value(trace, "keyword_classify_ms", self._elapsed_ms(keyword_started_at))
@@ -674,6 +715,8 @@ class InternalWorkflowEngine(AIWorkflowEngine):
         if not self._message_has_product_card(context):
             return False
         text = str(content or "")
+        if self._looks_like_after_sales_issue(context, text):
+            return False
         question_markers = (
             "?",
             "？",
@@ -687,6 +730,29 @@ class InternalWorkflowEngine(AIWorkflowEngine):
             "什么",
         )
         return not any(marker in text for marker in question_markers)
+
+    def _looks_like_after_sales_issue(self, context: WorkflowContext, content: str) -> bool:
+        text = str(content or "").strip()
+        if self._matches(text, self._EVIDENCE_KEYWORDS) or self._matches(text, self._AFTER_SALES_PRIORITY_KEYWORDS):
+            return True
+        normalized = re.sub(r"\s+", "", text)
+        if not normalized:
+            return False
+        is_short_followup = (
+            normalized in self._AFTER_SALES_FOLLOWUP_TEXTS
+            or (len(normalized) <= 3 and all(ch in "?？！!。.~～" for ch in normalized))
+        )
+        if not is_short_followup:
+            return False
+        return self._recent_history_has_after_sales_issue(context)
+
+    def _recent_history_has_after_sales_issue(self, context: WorkflowContext) -> bool:
+        history = [item for item in list(context.history or []) if isinstance(item, Mapping)]
+        for item in history[-8:]:
+            text = str(item.get("content") or item.get("message") or item.get("text") or "")
+            if self._matches(text, self._EVIDENCE_KEYWORDS) or self._matches(text, self._AFTER_SALES_PRIORITY_KEYWORDS):
+                return True
+        return False
 
     def _search_product_knowledge(self, shop_id: str, query: str) -> list[KnowledgeHit]:
         if not self.knowledge_retriever:

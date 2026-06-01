@@ -1254,6 +1254,71 @@ def test_after_sales_answer_generator_error_uses_evidence_template_without_promi
     asyncio.run(scenario())
 
 
+def test_after_sales_keywords_win_over_product_card_ack():
+    async def scenario():
+        rag = SpyRAGRetriever([_rag_hit("after_sales_evidence", source_type="sop")])
+        generator = SpyAnswerGenerator(text="亲，麻烦提供破损照片、外包装照片和订单信息。")
+        engine = InternalWorkflowEngine(rag_retriever=rag, answer_generator=generator)
+
+        result = await _run(
+            "我这个香水都破了",
+            engine=engine,
+            goods_context={"goods_id": "goods-1", "goods_name": "香水", "status": "resolved"},
+            metadata={"product_context": {"goods_id": "goods-1", "goods_name": "香水", "status": "resolved"}},
+        )
+
+        assert result.intent == "after_sales_evidence_collection"
+        assert result.action == WorkflowAction.REQUEST_EVIDENCE
+        assert rag.calls[0]["domain"] == "after_sales_evidence"
+        assert result.trace["rag_hit_count"] == 1
+
+    asyncio.run(scenario())
+
+
+def test_refund_request_with_product_context_routes_to_after_sales_policy():
+    async def scenario():
+        rag = SpyRAGRetriever([_rag_hit("after_sales_evidence", source_type="sop")])
+        generator = SpyAnswerGenerator(text="亲，退款需要先核实凭证，麻烦提供问题照片和订单信息。")
+        engine = InternalWorkflowEngine(rag_retriever=rag, answer_generator=generator)
+
+        result = await _run(
+            "赶紧给我退款",
+            engine=engine,
+            goods_context={"goods_id": "goods-1", "goods_name": "香水", "status": "resolved"},
+            metadata={"product_context": {"goods_id": "goods-1", "goods_name": "香水", "status": "resolved"}},
+        )
+
+        assert result.intent == "after_sales_evidence_collection"
+        assert rag.calls[0]["domain"] == "after_sales_evidence"
+        assert result.trace["rag_status"] == "hit"
+
+    asyncio.run(scenario())
+
+
+def test_short_followup_keeps_recent_after_sales_context_for_rag():
+    async def scenario():
+        rag = SpyRAGRetriever([_rag_hit("after_sales_evidence", source_type="sop")])
+        generator = SpyAnswerGenerator(text="亲，麻烦补充破损照片和外包装照片。")
+        engine = InternalWorkflowEngine(rag_retriever=rag, answer_generator=generator)
+        context = _context(
+            "？",
+            goods_context={"goods_id": "goods-1", "goods_name": "香水", "status": "resolved"},
+            metadata={"product_context": {"goods_id": "goods-1", "goods_name": "香水", "status": "resolved"}},
+        )
+        context.history = [
+            {"role": "buyer", "content": "我这个香水都破了"},
+            {"role": "assistant", "content": "亲，麻烦提供问题照片。"},
+        ]
+
+        result = await engine.run(context)
+
+        assert result.intent == "after_sales_evidence_collection"
+        assert rag.calls[0]["domain"] == "after_sales_evidence"
+        assert "我这个香水都破了" in rag.calls[0]["query"]
+
+    asyncio.run(scenario())
+
+
 def test_classifier_redline_validation_transfers_to_human():
     async def scenario():
         classifier = SpyIntentClassifier(
