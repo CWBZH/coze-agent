@@ -11,6 +11,7 @@ from Message.handlers.ai_handler import AIReplyHandler
 from Message.workflow.fastgpt_engine import FastGPTWorkflowEngine
 from Message.workflow.types import WorkflowAction, WorkflowResult
 from Session.session_manager import SessionManager
+from Channel.pinduoduo.utils.API.send_message import SendMessage
 from ui.auto_reply.manager import AutoReplyManager
 
 
@@ -562,6 +563,7 @@ def test_video_intercept_notification_metadata_includes_trace_action():
 
 def test_send_reply_failure_notification_metadata_has_final_status(monkeypatch):
     async def scenario():
+        monkeypatch.setenv("PDD_SENDING_ENABLED", "true")
         notifier = FakeNotificationService()
         _install_notification_service(notifier)
         handler = AIReplyHandler()
@@ -621,6 +623,7 @@ def test_send_reply_writes_private_trace_status(monkeypatch, tmp_path):
 
 def test_send_reply_unknown_delivery_notification_metadata_has_final_status(monkeypatch):
     async def scenario():
+        monkeypatch.setenv("PDD_SENDING_ENABLED", "true")
         notifier = FakeNotificationService()
         _install_notification_service(notifier)
         handler = AIReplyHandler()
@@ -799,6 +802,46 @@ def test_pipeline_missing_dataset_notification_metadata_includes_action():
         assert metadata["reply_hash"]
 
     asyncio.run(scenario())
+
+
+def test_send_reply_session_expired_notification_reason(monkeypatch):
+    async def scenario():
+        monkeypatch.setenv("PDD_SENDING_ENABLED", "true")
+        notifier = FakeNotificationService()
+        _install_notification_service(notifier)
+        handler = AIReplyHandler()
+
+        class FakeSender:
+            def __init__(self, shop_id, user_id):
+                pass
+
+            def send_text(self, from_uid, reply):
+                return {"success": False, "error_code": 43001, "error_msg": "会话已过期"}
+
+        monkeypatch.setattr("Channel.pinduoduo.utils.API.send_message.SendMessage", FakeSender)
+        try:
+            result = await handler._send_reply(_base_context(ContextType.TEXT, "buyer text"), "reply text", _base_metadata())
+        finally:
+            _clear_container()
+
+        assert result is False
+        assert len(notifier.alerts) == 1
+        assert notifier.alerts[0]["reason"] == "PDD send failed: session_expired_reauth_required"
+        assert notifier.alerts[0]["metadata"]["final_status"] == "reply_send_failed"
+
+    asyncio.run(scenario())
+
+
+def test_send_text_preserves_session_expired_result():
+    sender = SendMessage.__new__(SendMessage)
+    sender.generate_request_id = lambda: 123
+    sender.post = lambda *args, **kwargs: {"success": False, "error_code": 43001, "error_msg": "会话已过期"}
+    sender.logger = FakeLogger()
+
+    result = SendMessage.send_text(sender, "buyer-1", "reply text")
+
+    assert result == {"success": False, "error_code": 43001, "error_msg": "会话已过期"}
+    assert "error_code=43001" in sender.logger.messages[-1][1]
 
 
 def test_pipeline_internal_workflow_does_not_require_fastgpt_dataset_id():

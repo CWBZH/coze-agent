@@ -59,10 +59,20 @@ class SendMessage(BaseRequest):
                 return result
         else:
             success = result.get("success") if isinstance(result, dict) else None
+            result_data = result.get("result", {}) if isinstance(result, dict) and isinstance(result.get("result"), dict) else {}
+            pdd_result = result_data.get("result", "")
+            error_code = result_data.get("error_code", result.get("error_code", "") if isinstance(result, dict) else "")
             self.logger.error(
-                f"发送文本消息失败: request_id={request_id}, to={recipient_uid}, success={success}"
+                f"发送文本消息失败: request_id={request_id}, to={recipient_uid}, success={success}, "
+                f"pdd_result={pdd_result}, error_code={error_code}"
             )
-            return None
+            if isinstance(result, dict):
+                return result
+            return {
+                "success": False,
+                "error_code": "request_failed",
+                "result": {"result": "fail", "error_code": "request_failed"},
+            }
 
  
         

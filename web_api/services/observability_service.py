@@ -17,6 +17,7 @@ RETRYABLE_FAILURE_STATUSES = {
     "transfer_delivery_unknown",
 }
 FINAL_FAILURE_STATUSES = RETRYABLE_FAILURE_STATUSES | {
+    "auth_required",
     "blocked_by_platform_policy",
     "suppressed_repeated_40013",
     "dead_letter",
@@ -628,6 +629,7 @@ class ObservabilityService:
             "reply_delivery_unknown",
             "transfer_delivery_unknown",
             "blocked_by_platform_policy",
+            "auth_required",
             "suppressed_duplicate",
             "suppressed_repeated_40013",
             "reply_sent",
@@ -662,7 +664,7 @@ class ObservabilityService:
     def _outbox_node_status(status: str) -> str:
         if status in RETRYABLE_FAILURE_STATUSES:
             return "warning"
-        if status in {"blocked_by_platform_policy", "dead_letter"}:
+        if status in {"auth_required", "blocked_by_platform_policy", "dead_letter"}:
             return "failed"
         if status in {"suppressed_duplicate", "sent", "suppressed_repeated_40013"}:
             return "passed"
@@ -680,6 +682,7 @@ class ObservabilityService:
             "transfer_delivery_unknown": "转人工送达未知，等待确认",
             "suppressed_duplicate": "重复内容已压制",
             "suppressed_repeated_40013": "重复 40013 已压制",
+            "auth_required": "授权失效，需重新登录",
             "blocked_by_platform_policy": "PDD 平台策略阻断",
             "pdd_sending_disabled": "PDD 发送开关关闭",
             "dead_letter": "死信，需要人工处理",
@@ -691,6 +694,8 @@ class ObservabilityService:
         return labels.get(str(status or ""), str(status or "未知"))
 
     def _status_explanation(self, status: str, pdd_error_code: str = "") -> str:
+        if pdd_error_code == "43001" or status == "auth_required":
+            return "PDD 会话已过期，自动续登失败。系统已停止自动重试，需要重新完成店铺授权。"
         if pdd_error_code == "40013":
             return "PDD 文本发送接口拒绝本次消息，这不是 WebSocket 断线；系统会按 outbox 策略重试，连续失败后阻断。"
         if status == "suppressed_duplicate":
@@ -706,6 +711,8 @@ class ObservabilityService:
         return self._status_label(status)
 
     def _recommended_action(self, status: str, pdd_error_code: str = "") -> str:
+        if pdd_error_code == "43001" or status == "auth_required":
+            return "请到店铺接入页重新授权登录，授权恢复后再启动 Worker。"
         if pdd_error_code == "40013" or status == "blocked_by_platform_policy":
             return "请人工进入 PDD 后台查看该买家会话是否允许继续发送，必要时手动回复。"
         if status in RETRYABLE_FAILURE_STATUSES:

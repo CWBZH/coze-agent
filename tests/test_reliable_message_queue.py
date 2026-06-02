@@ -341,6 +341,38 @@ def test_outbox_worker_retries_transfer_send_failed_and_blocks_repeated_40013(tm
     asyncio.run(scenario())
 
 
+def test_outbox_worker_suppresses_auth_required_retry(tmp_path, monkeypatch):
+    monkeypatch.setenv("PDD_SENDING_ENABLED", "true")
+
+    async def scenario():
+        store = ReliableQueueStore(tmp_path / "queue.db")
+        outbox = store.create_outbox(
+            trace_id="trace-auth",
+            inbound_record_id="in-auth",
+            shop_id="shop-1",
+            user_id="user-1",
+            buyer_id="buyer-1",
+            session_id="session-1",
+            reply_action="reply",
+            reply_text="safe reply",
+            reply_source="internal",
+        )
+        store.mark_outbox_failed(outbox.outbox_id, pdd_error_code="43001")
+
+        class FailingSender:
+            def __init__(self, shop_id, user_id):
+                raise AssertionError("auth_required outbox rows must not call PDD again")
+
+        worker = OutboxWorker(store=store, sender_factory=FailingSender)
+        summary = await worker.run_due_retries(now=store._now() + 3600)
+
+        assert summary["retried"] == 0
+        assert summary["suppressed"] == 1
+        assert store.get_outbox(outbox.outbox_id)["status"] == "auth_required"
+
+    asyncio.run(scenario())
+
+
 def test_transfer_human_reply_pool_rotates_three_variants():
     replies = [transfer_human_reply_for(index) for index in range(4)]
 

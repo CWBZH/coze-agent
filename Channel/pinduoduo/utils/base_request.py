@@ -205,22 +205,29 @@ class BaseRequest:
         credential_mode = getattr(resolved, "credential_mode", "browser_only") if resolved is not None else "browser_only"
         if credential_mode == "password_available":
             return True
+        self._mark_auth_required("session_expired_browser_only_reauth_required")
+        self.logger.warning(
+            f"session expired for browser-only auth: shop_id={self.shop_id}, user_id={self.user_id}; noVNC reauth is required"
+        )
+        return False
+
+    def _mark_auth_required(self, reason: str) -> None:
+        """Mark Web Admin auth state invalid after PDD session renewal cannot continue."""
+        if not self.shop_id:
+            return
         try:
             from web_api.services.shop_auth_service import ShopAuthService
 
             ShopAuthService().mark_auth_required(
                 str(self.shop_id),
                 platform="pdd",
-                reason="session_expired_browser_only_reauth_required",
+                reason=reason,
             )
         except Exception as exc:
             self.logger.warning(
-                f"mark auth_required failed: shop_id={self.shop_id}, user_id={self.user_id}, error_type={type(exc).__name__}"
+                f"mark auth_required failed: shop_id={self.shop_id}, user_id={self.user_id}, "
+                f"reason={reason}, error_type={type(exc).__name__}"
             )
-        self.logger.warning(
-            f"session expired for browser-only auth: shop_id={self.shop_id}, user_id={self.user_id}; noVNC reauth is required"
-        )
-        return False
 
     def _relogin_and_update_cookies(self) -> bool:
         """
@@ -235,6 +242,7 @@ class BaseRequest:
                 return False
             credentials = self._get_account_credentials()
             if not credentials:
+                self._mark_auth_required("session_expired_missing_credentials")
                 return False
             username, password = credentials
 
@@ -265,6 +273,7 @@ class BaseRequest:
             # 回退到完整重新登录
             if not password:
                 self.logger.error(f"账号 {self.account_name} 缺少密码，无法进行完整重新登录")
+                self._mark_auth_required("session_expired_missing_password")
                 return False
 
             self.logger.info(f"回退到完整重新登录模式（账号 {self.account_name}）...")
@@ -282,17 +291,21 @@ class BaseRequest:
                         return True
                     else:
                         self.logger.error(f"账号 {self.account_name} 完整重新登录失败：未获取到有效会话凭据")
+                        self._mark_auth_required("session_expired_relogin_failed")
                         return False
                 else:
                     self.logger.error(f"账号 {self.account_name} 完整重新登录失败")
+                    self._mark_auth_required("session_expired_relogin_failed")
                     return False
 
             except Exception as login_error:
                 self.logger.error(f"账号 {self.account_name} 完整重新登录异常: {str(login_error)}")
+                self._mark_auth_required("session_expired_relogin_exception")
                 return False
 
         except Exception as e:
             self.logger.error(f"账号 {self.account_name} 重新获取会话凭据过程中发生错误: {str(e)}")
+            self._mark_auth_required("session_expired_relogin_exception")
             return False
     
     def _should_retry(self, response: requests.Response = None, exception: Exception = None) -> bool:

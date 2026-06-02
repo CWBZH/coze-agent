@@ -211,6 +211,8 @@ class AIReplyHandler(BaseHandler):
     def _pdd_result_summary(result: Any) -> str:
         if not isinstance(result, dict):
             return "none" if result is None else type(result).__name__
+        if result.get("error_code") is not None:
+            return f"error_code:{result.get('error_code')}"
         pdd_result = result.get("result")
         if isinstance(pdd_result, dict):
             if pdd_result.get("result") == "ok":
@@ -259,6 +261,12 @@ class AIReplyHandler(BaseHandler):
         if int(stats.get("failed_40013_count") or 0) > 0:
             return "suppressed_repeated_40013"
         return ""
+
+    @staticmethod
+    def _send_failure_reason(pdd_result_summary: str, pdd_error_code: str) -> str:
+        if str(pdd_error_code) == "43001":
+            return "PDD send failed: session_expired_reauth_required"
+        return f"PDD send failed: pdd_result={pdd_result_summary}"
 
     @staticmethod
     def _contains_emoji(text: str) -> bool:
@@ -1124,6 +1132,7 @@ class AIReplyHandler(BaseHandler):
             pdd_ok = isinstance(pdd_result, dict) and pdd_result.get("result") == "ok"
             pdd_result_summary = self._pdd_result_summary(result)
             pdd_error_code = self._pdd_error_code(result)
+            send_failure_reason = self._send_failure_reason(pdd_result_summary, pdd_error_code)
             _, sanitized_error_summary_hash = self._fingerprint(pdd_result_summary)
             duration_ms = int((time.perf_counter() - send_started_at) * 1000)
             if isinstance(result, dict) and result.get("success") and pdd_ok:
@@ -1249,7 +1258,7 @@ class AIReplyHandler(BaseHandler):
                 self._alert_manual_transfer(
                     metadata,
                     f"{metadata.get('shop_id')}_{from_uid}",
-                    f"PDD send failed: pdd_result={pdd_result_summary}",
+                    send_failure_reason,
                     "high",
                     context=context,
                     action=unknown_status,
@@ -1267,7 +1276,7 @@ class AIReplyHandler(BaseHandler):
             self._alert_manual_transfer(
                 metadata,
                 f"{metadata.get('shop_id')}_{from_uid}",
-                f"PDD send failed: pdd_result={pdd_result_summary}",
+                send_failure_reason,
                 "high",
                 context=context,
                 action=failed_status,

@@ -104,6 +104,16 @@ class OutboxWorker:
                         f"outbox_id_hash={self._hash(outbox_id)} pdd_error_code=40013 "
                         f"retry_count={int(row.get('retry_count') or 0)}"
                     )
+                elif error_code == "43001":
+                    self.store.mark_outbox_suppressed(
+                        outbox_id,
+                        "auth_required",
+                        error_summary_hash=self._summary_hash(result),
+                    )
+                    self.logger.warning(
+                        "event=pdd.outbox.retry.auth_required "
+                        f"outbox_id_hash={self._hash(outbox_id)} pdd_error_code=43001"
+                    )
                 else:
                     self.store.mark_outbox_failed(
                         outbox_id,
@@ -171,6 +181,8 @@ class OutboxWorker:
         )
         if stats.get("sent_count", 0) > 0:
             return "suppressed_duplicate"
+        if str(row.get("pdd_error_code") or "") == "43001":
+            return "auth_required"
         if str(row.get("pdd_error_code") or "") == "40013" and stats.get("failed_40013_count", 0) >= 1:
             return "suppressed_repeated_40013"
         return ""
@@ -199,6 +211,8 @@ class OutboxWorker:
             pdd_result = result.get("result")
             if isinstance(pdd_result, dict):
                 value = f"error_code:{pdd_result.get('error_code', '')}:error:{bool(pdd_result.get('error'))}"
+            elif result.get("error_code") is not None:
+                value = f"error_code:{result.get('error_code')}"
             else:
                 value = str(type(pdd_result).__name__)
         else:

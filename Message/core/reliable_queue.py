@@ -213,6 +213,7 @@ class ReliableQueueStore:
             "suppressed_duplicate",
             "suppressed_repeated_40013",
             "blocked_by_platform_policy",
+            "auth_required",
             "pdd_sending_disabled",
             "dead_letter",
         }
