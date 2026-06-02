@@ -4,10 +4,14 @@ import json
 import os
 import re
 import secrets
+import socket
+import subprocess
+import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from urllib.parse import urlparse
 from typing import Any
 
@@ -25,6 +29,21 @@ class RemoteBrowserSession:
     created_at: str | None = None
     expires_at: str | None = None
     closed_at: str | None = None
+    cdp_url: str | None = None
+    novnc_port: int | None = None
+    vnc_port: int | None = None
+    display_num: int | None = None
+    profile_dir: str | None = None
+
+
+@dataclass
+class ManagedRemoteBrowserProcess:
+    process: subprocess.Popen[Any]
+    display_num: int
+    vnc_port: int
+    novnc_port: int
+    cdp_port: int
+    profile_dir: str
 
 
 @dataclass
@@ -59,17 +78,31 @@ class RemoteBrowserService:
         self.base_url = (base_url or os.environ.get("WEB_NOVNC_BASE_URL") or "").rstrip("/")
         self.cdp_url = (cdp_url or os.environ.get("WEB_REMOTE_BROWSER_CDP_URL") or "http://127.0.0.1:9222").rstrip("/")
         self.session_ttl_seconds = session_ttl_seconds
+        self.mode = (os.environ.get("WEB_REMOTE_BROWSER_MODE") or "external").strip().lower()
+        self.repo_root = Path(os.environ.get("WEB_REMOTE_BROWSER_REPO_ROOT") or Path.cwd()).resolve()
+        self.start_script = Path(
+            os.environ.get("WEB_REMOTE_BROWSER_START_SCRIPT") or self.repo_root / "deploy" / "linux" / "start-novnc.sh"
+        )
+        self.managed_public_host = os.environ.get("WEB_REMOTE_BROWSER_PUBLIC_HOST") or ""
+        self.managed_profile_root = Path(
+            os.environ.get("WEB_REMOTE_BROWSER_PROFILE_ROOT") or self.repo_root / "temp" / "remote-browser-sessions"
+        )
+        self.managed_display_start = int(os.environ.get("WEB_REMOTE_BROWSER_DISPLAY_START", "120"))
+        self.managed_vnc_port_start = int(os.environ.get("WEB_REMOTE_BROWSER_VNC_PORT_START", "59020"))
+        self.managed_novnc_port_start = int(os.environ.get("WEB_REMOTE_BROWSER_NOVNC_PORT_START", "6100"))
+        self.managed_cdp_port_start = int(os.environ.get("WEB_REMOTE_BROWSER_CDP_PORT_START", "9300"))
         self.health_check = (
             health_check
             if health_check is not None
             else os.environ.get("WEB_NOVNC_HEALTHCHECK_ENABLED", "1").lower() not in {"0", "false", "no"}
         )
         self._sessions: dict[str, RemoteBrowserSession] = {}
+        self._managed_processes: dict[str, ManagedRemoteBrowserProcess] = {}
 
     def create_session(self, login_session_id: str, login_url: str) -> RemoteBrowserSession:
         now = datetime.now(timezone.utc)
         token = secrets.token_urlsafe(24)
-        if not self.base_url:
+        if not self.base_url and self.mode != "managed":
             session = RemoteBrowserSession(
                 login_session_id=login_session_id,
                 status="failed",
@@ -78,6 +111,11 @@ class RemoteBrowserService:
                 created_at=now.isoformat(),
                 expires_at=(now + timedelta(seconds=self.session_ttl_seconds)).isoformat(),
             )
+            self._sessions[login_session_id] = session
+            return session
+
+        if self.mode == "managed":
+            session = self._create_managed_session(login_session_id, login_url, token, now)
             self._sessions[login_session_id] = session
             return session
 
@@ -108,6 +146,162 @@ class RemoteBrowserService:
         )
         self._sessions[login_session_id] = session
         return session
+
+    def _create_managed_session(
+        self,
+        login_session_id: str,
+        login_url: str,
+        token: str,
+        now: datetime,
+    ) -> RemoteBrowserSession:
+        if not self.start_script.exists():
+            return RemoteBrowserSession(
+                login_session_id=login_session_id,
+                status="failed",
+                access_token=token,
+                error_summary="missing_dependency:remote_browser_start_script",
+                created_at=now.isoformat(),
+                expires_at=(now + timedelta(seconds=self.session_ttl_seconds)).isoformat(),
+            )
+
+        try:
+            managed = self._launch_managed_browser(login_session_id, login_url)
+            public_base_url = self._managed_public_base_url(managed.novnc_port)
+            local_base_url = f"http://127.0.0.1:{managed.novnc_port}"
+            cdp_url = f"http://127.0.0.1:{managed.cdp_port}"
+            health_error = self._managed_health_error(local_base_url, cdp_url)
+            if health_error:
+                self._terminate_managed_process(login_session_id)
+                return RemoteBrowserSession(
+                    login_session_id=login_session_id,
+                    status="failed",
+                    access_token=token,
+                    error_summary=health_error,
+                    created_at=now.isoformat(),
+                    expires_at=(now + timedelta(seconds=self.session_ttl_seconds)).isoformat(),
+                    cdp_url=cdp_url,
+                    novnc_port=managed.novnc_port,
+                    vnc_port=managed.vnc_port,
+                    display_num=managed.display_num,
+                    profile_dir=managed.profile_dir,
+                )
+            vnc_url = (
+                f"{public_base_url}/vnc.html"
+                f"?autoconnect=1&resize=remote&path=websockify&session={login_session_id}&token={token}"
+            )
+            return RemoteBrowserSession(
+                login_session_id=login_session_id,
+                status="ready",
+                access_token=token,
+                vnc_url=vnc_url,
+                created_at=now.isoformat(),
+                expires_at=(now + timedelta(seconds=self.session_ttl_seconds)).isoformat(),
+                cdp_url=cdp_url,
+                novnc_port=managed.novnc_port,
+                vnc_port=managed.vnc_port,
+                display_num=managed.display_num,
+                profile_dir=managed.profile_dir,
+            )
+        except Exception as exc:
+            self._terminate_managed_process(login_session_id)
+            return RemoteBrowserSession(
+                login_session_id=login_session_id,
+                status="failed",
+                access_token=token,
+                error_summary=f"remote_browser_start_failed:{type(exc).__name__}",
+                created_at=now.isoformat(),
+                expires_at=(now + timedelta(seconds=self.session_ttl_seconds)).isoformat(),
+            )
+
+    def _launch_managed_browser(self, login_session_id: str, login_url: str) -> ManagedRemoteBrowserProcess:
+        index = len(self._managed_processes) + len(self._sessions)
+        display_num = self._find_free_display(self.managed_display_start + index)
+        vnc_port = self._find_free_port(self.managed_vnc_port_start + index)
+        novnc_port = self._find_free_port(self.managed_novnc_port_start + index)
+        cdp_port = self._find_free_port(self.managed_cdp_port_start + index)
+        profile_dir = str((self.managed_profile_root / login_session_id).resolve())
+        Path(profile_dir).mkdir(parents=True, exist_ok=True)
+
+        env = os.environ.copy()
+        env.update(
+            {
+                "DISPLAY_NUM": str(display_num),
+                "VNC_PORT": str(vnc_port),
+                "NOVNC_PORT": str(novnc_port),
+                "CHROME_DEBUG_PORT": str(cdp_port),
+                "PROFILE_DIR": profile_dir,
+                "PDD_LOGIN_URL": login_url,
+            }
+        )
+        process = subprocess.Popen(
+            ["bash", str(self.start_script)],
+            cwd=str(self.repo_root),
+            env=env,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+        managed = ManagedRemoteBrowserProcess(
+            process=process,
+            display_num=display_num,
+            vnc_port=vnc_port,
+            novnc_port=novnc_port,
+            cdp_port=cdp_port,
+            profile_dir=profile_dir,
+        )
+        self._managed_processes[login_session_id] = managed
+        return managed
+
+    def _managed_public_base_url(self, novnc_port: int) -> str:
+        configured = os.environ.get("WEB_REMOTE_BROWSER_PUBLIC_BASE_URL_TEMPLATE")
+        if configured:
+            return configured.format(port=novnc_port).rstrip("/")
+        parsed = urlparse(self.base_url)
+        scheme = parsed.scheme or "http"
+        host = self.managed_public_host or parsed.hostname or "127.0.0.1"
+        return f"{scheme}://{host}:{novnc_port}"
+
+    def _managed_health_error(self, public_base_url: str, cdp_url: str) -> str | None:
+        if not self.health_check:
+            return None
+        deadline = time.time() + float(os.environ.get("WEB_REMOTE_BROWSER_START_TIMEOUT_SECONDS", "15"))
+        last_error = "managed_remote_browser_unreachable"
+        while time.time() < deadline:
+            try:
+                with urllib.request.urlopen(f"{public_base_url}/vnc.html", timeout=2) as response:
+                    if response.status >= 500:
+                        last_error = f"novnc_unreachable:http_{response.status}"
+                        time.sleep(0.5)
+                        continue
+                with urllib.request.urlopen(f"{cdp_url}/json/list", timeout=2) as response:
+                    if response.status >= 500:
+                        last_error = f"chrome_cdp_unreachable:http_{response.status}"
+                        time.sleep(0.5)
+                        continue
+                return None
+            except Exception as exc:
+                last_error = f"managed_remote_browser_unreachable:{type(exc).__name__}"
+                time.sleep(0.5)
+        return last_error
+
+    def _find_free_display(self, start: int) -> int:
+        value = max(1, int(start))
+        used_displays = {item.display_num for item in self._managed_processes.values()}
+        while value in used_displays:
+            value += 1
+        return value
+
+    def _find_free_port(self, start: int) -> int:
+        port = max(1024, int(start))
+        while not self._port_available(port):
+            port += 1
+        return port
+
+    @staticmethod
+    def _port_available(port: int) -> bool:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.settimeout(0.2)
+            return sock.connect_ex(("127.0.0.1", port)) != 0
 
     def _health_error(self) -> str | None:
         if not self.health_check:
@@ -159,9 +353,10 @@ class RemoteBrowserService:
             return RemoteBrowserCheckResult(status="failed", error_summary="session_expired")
 
         try:
-            pages = self._get_cdp_pages()
+            cdp_url = session.cdp_url or self.cdp_url
+            pages = self._get_cdp_pages(cdp_url)
             urls = [str(page.get("url") or "") for page in pages]
-            cookie_value = self._read_pdd_cookies_from_cdp(pages)
+            cookie_value = self._read_pdd_cookies_from_cdp(pages, cdp_url=cdp_url)
         except Exception:
             return RemoteBrowserCheckResult(status="still_waiting_user_verification")
 
@@ -192,6 +387,20 @@ class RemoteBrowserService:
             return
         session.status = "closed"
         session.closed_at = datetime.now(timezone.utc).isoformat()
+        self._terminate_managed_process(login_session_id)
+
+    def _terminate_managed_process(self, login_session_id: str) -> None:
+        managed = self._managed_processes.pop(login_session_id, None)
+        if managed is None:
+            return
+        process = managed.process
+        if process.poll() is not None:
+            return
+        process.terminate()
+        try:
+            process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            process.kill()
 
     def _is_expired(self, session: RemoteBrowserSession) -> bool:
         if not session.expires_at:
@@ -202,12 +411,13 @@ class RemoteBrowserService:
             return False
         return expires_at < datetime.now(timezone.utc)
 
-    def _get_cdp_pages(self) -> list[dict[str, Any]]:
-        with urllib.request.urlopen(f"{self.cdp_url}/json/list", timeout=3) as response:
+    def _get_cdp_pages(self, cdp_url: str | None = None) -> list[dict[str, Any]]:
+        base = (cdp_url or self.cdp_url).rstrip("/")
+        with urllib.request.urlopen(f"{base}/json/list", timeout=3) as response:
             payload = json.loads(response.read().decode("utf-8"))
         return payload if isinstance(payload, list) else []
 
-    def _read_pdd_cookies_from_cdp(self, pages: list[dict[str, Any]]) -> str:
+    def _read_pdd_cookies_from_cdp(self, pages: list[dict[str, Any]], *, cdp_url: str | None = None) -> str:
         page = next((item for item in pages if item.get("type") == "page" and item.get("webSocketDebuggerUrl")), None)
         if not page:
             return ""
@@ -216,7 +426,7 @@ class RemoteBrowserService:
         except Exception:
             return ""
 
-        ws = websocket.create_connection(str(page["webSocketDebuggerUrl"]), timeout=3, origin=self.cdp_url)
+        ws = websocket.create_connection(str(page["webSocketDebuggerUrl"]), timeout=3, origin=(cdp_url or self.cdp_url))
         try:
             ws.send(json.dumps({"id": 1, "method": "Network.getAllCookies"}))
             result: dict[str, Any] = {}

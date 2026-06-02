@@ -1,4 +1,5 @@
 import sqlite3
+import subprocess
 import sys
 import types
 from pathlib import Path
@@ -42,6 +43,9 @@ class FakeRemoteBrowserService:
 
 
 def _client_for_remote(db_path: Path, remote_service: FakeRemoteBrowserService) -> TestClient:
+    import os
+
+    os.environ.setdefault("WEB_ADMIN_PASSWORD", "test-admin-password")
     service = ShopOnboardingService(
         db_path=db_path,
         runner=FakePddLoginRunner(),
@@ -49,7 +53,13 @@ def _client_for_remote(db_path: Path, remote_service: FakeRemoteBrowserService) 
     )
     service.init_schema()
     app.dependency_overrides[get_shop_onboarding_service] = lambda: service
-    return TestClient(app)
+    client = TestClient(app)
+    response = client.post(
+        "/api/auth/login",
+        json={"username": "admin", "password": os.environ["WEB_ADMIN_PASSWORD"]},
+    )
+    assert response.status_code == 200
+    return client
 
 
 def _clear_overrides() -> None:
@@ -118,7 +128,7 @@ def test_remote_browser_health_checks_websockify_path(monkeypatch):
     monkeypatch.setattr("web_api.services.remote_browser_service.urllib.request.urlopen", lambda *args, **kwargs: type("R", (), {"status": 200, "__enter__": lambda self: self, "__exit__": lambda *args: None})())
     monkeypatch.setitem(sys.modules, "websocket", types.SimpleNamespace(create_connection=fake_create_connection))
     service = RemoteBrowserService(base_url="http://127.0.0.1:6088", health_check=True)
-    monkeypatch.setattr(service, "_get_cdp_pages", lambda: [])
+    monkeypatch.setattr(service, "_get_cdp_pages", lambda cdp_url=None: [])
 
     assert service._health_error() is None
     assert created_urls == ["ws://127.0.0.1:6088/websockify"]
@@ -183,9 +193,9 @@ def test_remote_browser_check_login_auto_binds_shop_identity_from_cdp_cookie(mon
     monkeypatch.setattr(
         service,
         "_get_cdp_pages",
-        lambda: [{"type": "page", "url": "https://mms.pinduoduo.com/home", "webSocketDebuggerUrl": "ws://local"}],
+        lambda cdp_url=None: [{"type": "page", "url": "https://mms.pinduoduo.com/home", "webSocketDebuggerUrl": "ws://local"}],
     )
-    monkeypatch.setattr(service, "_read_pdd_cookies_from_cdp", lambda pages: "api_uid=fake-api-uid; webp=1")
+    monkeypatch.setattr(service, "_read_pdd_cookies_from_cdp", lambda pages, cdp_url=None: "api_uid=fake-api-uid; webp=1")
     monkeypatch.setattr(
         service,
         "_fetch_shop_identity_from_pdd_api",
@@ -286,3 +296,52 @@ def test_remote_browser_cancel_closes_session(tmp_path):
         assert session["session_id"] in remote.closed
     finally:
         _clear_overrides()
+
+
+def test_managed_remote_browser_allocates_isolated_instances(tmp_path, monkeypatch):
+    monkeypatch.setenv("WEB_REMOTE_BROWSER_MODE", "managed")
+    monkeypatch.setenv("WEB_REMOTE_BROWSER_PROFILE_ROOT", str(tmp_path / "profiles"))
+
+    class FakeProcess:
+        def __init__(self) -> None:
+            self.terminated = False
+
+        def poll(self):
+            return None if not self.terminated else 0
+
+        def terminate(self):
+            self.terminated = True
+
+        def wait(self, timeout=None):
+            return 0
+
+    fake_processes: list[FakeProcess] = []
+
+    def fake_popen(*args, **kwargs):
+        process = FakeProcess()
+        fake_processes.append(process)
+        return process
+
+    monkeypatch.setattr(subprocess, "Popen", fake_popen)
+    monkeypatch.setattr(RemoteBrowserService, "_managed_health_error", lambda self, public_base_url, cdp_url: None)
+
+    service = RemoteBrowserService(base_url="http://public.example:6088", health_check=True)
+    service.start_script = tmp_path / "start-novnc.sh"
+    service.start_script.write_text("#!/usr/bin/env bash\n", encoding="utf-8")
+
+    first = service.create_session("login-shop-a", "https://mms.pinduoduo.com/login")
+    second = service.create_session("login-shop-b", "https://mms.pinduoduo.com/login")
+
+    assert first.status == "ready"
+    assert second.status == "ready"
+    assert first.vnc_url != second.vnc_url
+    assert first.cdp_url != second.cdp_url
+    assert first.profile_dir != second.profile_dir
+    assert first.novnc_port != second.novnc_port
+    assert "public.example" in str(first.vnc_url)
+    assert "public.example" in str(second.vnc_url)
+
+    service.close_session("login-shop-a")
+
+    assert fake_processes[0].terminated is True
+    assert fake_processes[1].terminated is False
